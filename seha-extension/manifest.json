@@ -33,6 +33,7 @@
     {
       "matches": [
         "https://anasabdullahme-sudo.github.io/*",
+        "https://*.netlify.app/*",
         "https://anas-bit7.github.io/*",
         "https://*.web.app/*",
         "https://*.firebaseapp.com/*",
