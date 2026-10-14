@@ -404,8 +404,7 @@ async function liveBackend(role) {
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
     const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
     const cfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: props }), temperature: 0 };
-    try { model = AI.getGenerativeModel(ai, { model: AI_MODEL, generationConfig: { ...cfg, thinkingConfig: { thinkingLevel: AI.ThinkingLevel.LOW } } }); }
-    catch { model = AI.getGenerativeModel(ai, { model: AI_MODEL, generationConfig: cfg }); }
+    model = AI.getGenerativeModel(ai, { model: AI_MODEL, generationConfig: cfg });
     return model;
   }
 

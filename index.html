@@ -330,7 +330,7 @@ async function onPhoto(file) {
   $("#shotImg").src = state.preview || "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0b2b47"/><text x="200" y="110" fill="#7FD0F0" font-size="22" text-anchor="middle" font-family="sans-serif">PDF</text></svg>');
   await apiReady;
   const useAI = api.aiEnabled !== false;
-  renderForm(); setLoading(useAI); $("#note").classList.remove("on");
+  renderForm(); setLoading(useAI); $("#note").classList.remove("on"); $("#aiErr")?.remove();
   setStatus(useAI ? "نقرأ بياناتك من الصورة…" : "عبّ بياناتك كما هي في التقرير", useAI ? "" : "ok");
   if (!document.querySelector("#sReview.on")) go("sReview");
 
@@ -362,6 +362,9 @@ async function onPhoto(file) {
     console.warn("AI", e);
     if (state.blob !== myBlob) return;
     setStatus("ما قدرنا نقرأ الصورة تلقائياً — عبّ البيانات يدوياً", "warn");
+    const why = String(e?.code || "") + " " + String(e?.message || e || "").slice(0, 220);
+    let d = $("#aiErr"); if (!d) { d = document.createElement("div"); d.id = "aiErr"; d.style.cssText = "direction:ltr;text-align:left;font-size:11px;color:#8a9bb0;padding:4px 18px 0;word-break:break-all"; $("#status").after(d); }
+    d.textContent = why.trim();
   } finally {
     if (state.blob === myBlob) setLoading(false);
   }
