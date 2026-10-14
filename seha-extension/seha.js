@@ -324,6 +324,7 @@
       for (let i = 0; i < 12 && !item; i++) { await wait(250); item = pickAccountItem(acc); }
     }
     if (!item) { toastLocal(`ما لقيت حساب «${accLabel(acc)}» في قائمتك — بدّله يدوياً`); return; }
+    if (req?.account !== acc) return;                                            // انقفل الطلب أثناء البحث
     toastLocal(`أبدّل الحساب إلى: ${accLabel(acc)}`);
     try { item.box.scrollIntoView({ block: "nearest" }); } catch {}   // القائمة فيها تمرير
     await wait(150);
@@ -456,11 +457,14 @@
       const here = q => q.account && cur && cur.includes(norm(q.account.key));
       pend.sort((a, b) => here(b) - here(a));
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
-      b.innerHTML = `<div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
+      b.innerHTML = `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
+        ${pend.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(pend[0].patientName || "")}</button>` : ""}
+        <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
         <div class="ql">${pend.map(q => `<button class="qi ${here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
           || `<div class="empty">${queueAt ? "ما فيه طلبات تنتظر ✓" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
         ${hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
+      const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(pend[0]);
       root.querySelectorAll(".qi").forEach(el => el.onclick = () => { const q = queue.find(x => x.id === el.dataset.id); if (q) useReq(q); });
       bindPaste(); return;
     }
@@ -581,7 +585,8 @@
       const st = await chrome.storage.local.get(["sabaNavFor", "sabaAddFor"]);
       const wait = ms => new Promise(r => setTimeout(r, ms));
       const find = async (txt, tries) => { for (let i = 0; i < tries; i++) { const el = textEls(txt).find(visible); if (el) return el; await wait(250); } return null; };
-      const clickAdd = async add => { await chrome.storage.local.set({ sabaAddFor: req.ref }); realClick(add); toastLocal("فتحت نموذج إضافة الإجازة"); };
+      const r0 = req;
+      const clickAdd = async add => { if (req !== r0) return; await chrome.storage.local.set({ sabaAddFor: req.ref }); realClick(add); toastLocal("فتحت نموذج إضافة الإجازة"); };
       // 1) صفحة البحث مفتوحة وفيها زر الإضافة → نضغطه (مرة لكل طلب، أو دايماً لو ضغط الموظف «افتح النموذج»)
       let add = textEls("إضافة إجازة مرضية").find(visible);
       if (add) { if (force || st.sabaAddFor !== req.ref) await clickAdd(add); return; }
@@ -595,6 +600,7 @@
         if (!link) { realClick(svc); hover(svc); link = await find("الإجازات المرضية", 8); }
         if (!link) link = textEls("الإجازات المرضية")[0] || null;                   // موجودة بس مخفية → نضغطها مباشرة
       }
+      if (req !== r0) return;                                                     // انقفل الطلب أثناء التنقل
       if (!link) { if (navTries >= 6 || force) toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة"); return; }
       await chrome.storage.local.set({ sabaNavFor: req.ref });
       hover(link); realClick(link);
