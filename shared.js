@@ -18,7 +18,9 @@ export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب
 export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
 export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
 export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة
-export const AI_MODEL = "gemini-3.5-flash";  // نسخة مستقرة حتى مايو 2027 على الأقل
+export const AI_MODEL = "gemini-3.5-flash";
+// لو الموديل مزحوم (500/503/429) ينتقل تلقائياً للي بعده
+export const AI_FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"];  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
 
@@ -391,9 +393,11 @@ async function liveBackend(role) {
   const col = FS.collection(db, "requests");
   const toObj = d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now(), doneAt: x.doneAt?.toMillis?.() ?? null, heldAt: x.heldAt?.toMillis?.() ?? null, openedAt: x.openedAt?.toMillis?.() ?? null }; };
 
-  let model = null;
-  async function getModel() {
-    if (model) return model;
+  const models = {};
+  let AIref = null, aiInst = null, aiCfg = null;
+  async function getModel(name = AI_MODEL) {
+    if (models[name]) return models[name];
+    if (aiInst) return (models[name] = AIref.getGenerativeModel(aiInst, { model: name, generationConfig: aiCfg }));
     const AI = await import(u("ai"));
     const S = AI.Schema;
     const props = {};
@@ -404,8 +408,8 @@ async function liveBackend(role) {
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
     const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
     const cfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: props }), temperature: 0 };
-    model = AI.getGenerativeModel(ai, { model: AI_MODEL, generationConfig: cfg });
-    return model;
+    AIref = AI; aiInst = ai; aiCfg = cfg;
+    return (models[name] = AI.getGenerativeModel(ai, { model: name, generationConfig: cfg }));
   }
 
   const api = {
@@ -414,11 +418,26 @@ async function liveBackend(role) {
     async ensureAnon() { if (!auth.currentUser) await AU.signInAnonymously(auth); return auth.currentUser.uid; },
     aiEnabled: AI_ENABLED, // بدون مفتاح reCAPTCHA يشتغل لين يصير App Check إلزامي (2 نوفمبر 2026)
     async warmup() { try { await api.ensureAnon(); if (api.aiEnabled) await getModel(); } catch (e) { console.warn(e); } },
+    extractTimeout: 60000,
     async extract(blob, type) {
-      const m = await getModel();
       const b64 = await blobToBase64(blob);
-      const res = await m.generateContent([aiPrompt(type), { inlineData: { data: b64, mimeType: blob.type || "image/jpeg" } }]);
-      return JSON.parse(res.response.text());
+      const parts = [aiPrompt(type), { inlineData: { data: b64, mimeType: blob.type || "image/jpeg" } }];
+      const busy = e => /\b(500|502|503|504|429)\b|high demand|overloaded|unavailable|resource.?exhausted|quota/i.test(String(e?.message || e));
+      let lastErr;
+      for (const name of [AI_MODEL, ...AI_FALLBACK_MODELS]) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const m = await getModel(name);
+            const res = await m.generateContent(parts);
+            return JSON.parse(res.response.text());
+          } catch (e) {
+            lastErr = e; console.warn("AI", name, e);
+            if (!busy(e)) { if (/not.?found|404|not supported/i.test(String(e?.message))) break; throw e; }
+            if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
+          }
+        }
+      }
+      throw lastErr;
     },
     async uploadImage(blob, onProgress) {
       const uid = await api.ensureAnon();
