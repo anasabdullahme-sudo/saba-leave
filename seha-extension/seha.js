@@ -283,7 +283,7 @@
     return [...document.querySelectorAll("body *")]
       .filter(el => el.childElementCount === 0 && !el.closest("#saba-seha-host"))
       .map(el => ({ el, r: el.getBoundingClientRect(), t: el.textContent.trim() }))
-      .filter(x => x.r.top >= 0 && x.r.top < 110 && x.t.length < 120 && /مجمع|شركة|عيادات/.test(x.t))
+      .filter(x => x.r.top >= 0 && x.r.top < 110 && x.t.length < 120 && /مجمع|شركة|عيادات/.test(x.t) && !/منشأة|منشاه/.test(x.t) && !/منشأة/.test(x.el.parentElement?.textContent || ""))
       .map(x => x.t).join(" | ");
   }
   function accountState(req) {
@@ -292,7 +292,38 @@
     if (onPicker) return { state: "picker" };
     const cur = currentAccountText();
     if (!cur) return { state: "unknown" };
-    return { state: cur.includes(acc.key) ? "ok" : "wrong", cur };
+    return { state: norm(cur).includes(norm(acc.key)) ? "ok" : "wrong", cur };
+  }
+  // ---------- تبديل الحساب تلقائياً من قائمة المنشآت (أعلى الصفحة) ----------
+  const accLabel = acc => `${acc.key} — ${acc.role}`;
+  function accountItems() {
+    return deepAll("*").filter(el => visible(el) && /^منشا(ه|ة)/.test(norm(ownText(el))))
+      .map(el => { const box = el.closest("a, li, button, [role=menuitem], .dropdown-item") || el.parentElement?.parentElement || el; return { el, box, t: norm(box.textContent) }; });
+  }
+  function pickAccountItem(acc) {
+    const key = norm(acc.key), want = norm(acc.role);
+    const items = accountItems().filter(x => x.t.includes(key));
+    return items.find(x => x.t.includes(want)) || items.find(x => /اجازات المرضيه/.test(x.t) && /مدخل/.test(x.t)) || items.find(x => /اجازات المرضيه/.test(x.t)) || null;
+  }
+  let swRef = "", swTries = 0, swNext = 0;
+  async function switchAccount(force) {
+    const acc = req?.account; if (!TOP || !acc) return;
+    if (swRef !== req.ref) { swRef = req.ref; swTries = 0; swNext = 0; }
+    if (!force && (swTries >= 3 || Date.now() < swNext)) return;
+    swTries++; swNext = Date.now() + 5000;
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    let item = pickAccountItem(acc);
+    if (!item) {   // نفتح قائمة الحسابات (اسم المنشأة فوق)
+      const head = [...document.querySelectorAll("body *")].filter(el => el.childElementCount === 0 && !el.closest("#saba-seha-host") && visible(el))
+        .find(el => { const r = el.getBoundingClientRect(); const t = el.textContent.trim(); return r.top >= 0 && r.top < 110 && /مجمع|شركة|عيادات/.test(t) && !/منشأة/.test(t); });
+      if (!head) return;
+      realClick(head);
+      for (let i = 0; i < 12 && !item; i++) { await wait(250); item = pickAccountItem(acc); }
+    }
+    if (!item) { toastLocal(`ما لقيت حساب «${accLabel(acc)}» في قائمتك — بدّله يدوياً`); return; }
+    toastLocal(`أبدّل الحساب إلى: ${accLabel(acc)}`);
+    realClick(item.el);
+    navUntil = Date.now() + 120000;
   }
   function highlightPicker(req) {
     const acc = req?.account; if (!acc) return;
@@ -401,8 +432,8 @@
     }
     const acc = accountState(req);
     const accTxt = !req.account ? "فرع بدون حساب صحة محدد — تأكد من الحساب يدوياً"
-      : acc.state === "ok" ? `✓ أنت في الحساب الصحيح: ${esc(req.account.group)}`
-      : acc.state === "wrong" ? `⚠ أنت في حساب ثاني! الطلب لحساب: ${esc(req.account.group)} ← ${esc(req.account.role)}`
+      : acc.state === "ok" ? `✓ أنت في الحساب الصحيح: ${esc(req.account.key)}`
+      : acc.state === "wrong" ? `⚠ أنت في حساب ثاني — الطلب لـ <b>${esc(accLabel(req.account))}</b> <button class="btn sec" id="swAcc" style="height:30px;line-height:30px;font-size:12px;margin-top:6px;display:block">بدّل الحساب</button>`
       : acc.state === "picker" ? `اختر الحساب المحدد: <b>${esc(req.account.group)}</b> ← ${esc(req.account.role)}`
       : `الحساب المطلوب: <b>${esc(req.account.group)}</b> ← ${esc(req.account.role)}`;
     const keys = ["idNumber", "dob", "patientName", "patientNameEn", "phone",
@@ -452,6 +483,7 @@
     });
     bindPaste();
     if (acc.state === "picker") highlightPicker(req);
+    const sw = $("#swAcc"); if (sw) sw.onclick = () => switchAccount(true);
   }
   function updateDots() {
     root.querySelectorAll("[data-s]").forEach(d => { d.className = "s " + (lastReport[d.dataset.s] || ""); });
@@ -497,6 +529,7 @@
     const t = norm(deepText());
     if (isFormPage(t)) return;                                                   // النموذج مفتوح
     if (/حسابات صحه طبي|تسجيل الدخول/.test(t) && !/مرحبا بك/.test(t)) return;   // لسى ما دخل / يختار الحساب
+    if (accountState(req).state === "wrong") { if (auto || force) await switchAccount(force); return; }   // الحساب غلط → نبدّله أول
     if (navRef !== req.ref) { navRef = req.ref; navTries = 0; navNext = 0; }
     if (!force && Date.now() < navNext) return;
     navBusy = true;
