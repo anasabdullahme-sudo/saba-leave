@@ -8,21 +8,26 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/staff/$(request.auth.uid));
     }
     function str(v, mn, mx) { return v is string && v.size() >= mn && v.size() <= mx; }
+    // خانة اختيارية: لو موجودة لازم تكون نص بطول محدود (يمنع حشو المستند بنصوص ضخمة تثقّل لوحة الموظفين)
+    function optStr(d, k, mx) { return !(k in d) || (d[k] is string && d[k].size() <= mx); }
+    function autoId(id) { return id.matches('^[A-Za-z0-9]{20}$'); }   // يمنع معرّفات فيها رموز HTML
     function isAdmin() {
       return isStaff() && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'admin';
     }
 
     // صور التقارير (الخطة المجانية): بيانات وصفية صغيرة + الصورة نفسها في مستند منفصل
     match /images/{id} {
-      allow create: if request.auth != null
+      allow create: if request.auth != null && autoId(id)
         && request.resource.data.keys().hasOnly(['uid','createdAt','size'])
+        && request.resource.data['size'] is int
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.createdAt == request.time;
       allow read, delete: if isAdmin();
     }
     match /imageData/{id} {
-      allow create: if request.auth != null
+      allow create: if request.auth != null && autoId(id)
         && request.resource.data.keys().hasOnly(['uid','data','createdAt'])
+        && request.resource.data.data.matches('^data:(image/jpeg|application/pdf);base64,.*')
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.data is string
@@ -41,7 +46,7 @@ service cloud.firestore {
       allow read: if isStaff();
 
       // المريض (دخول مجهول) يقدر ينشئ طلب جديد فقط — ما يقدر يقرأ أو يعدّل
-      allow create: if request.auth != null
+      allow create: if request.auth != null && autoId(id)
         && request.resource.data.keys().hasOnly([
              'ref','type','patientName','patientNameEn','idNumber','dob','phone',
              'leaveStart','leaveEnd','leaveDays','visitDate',
@@ -58,8 +63,21 @@ service cloud.firestore {
         && str(request.resource.data.doctorName, 2, 120)
         && request.resource.data.idNumber.matches('^[12][0-9]{9}$')
         && request.resource.data.phone.matches('^05[0-9]{8}$')
+        && request.resource.data.ref is string && request.resource.data.ref.size() <= 20
+        && optStr(request.resource.data, 'patientNameEn', 120) && optStr(request.resource.data, 'dob', 10)
+        && optStr(request.resource.data, 'leaveStart', 10) && optStr(request.resource.data, 'leaveEnd', 10)
+        && optStr(request.resource.data, 'leaveDays', 40) && optStr(request.resource.data, 'visitDate', 10)
+        && optStr(request.resource.data, 'companionName', 120) && optStr(request.resource.data, 'companionId', 10)
+        && optStr(request.resource.data, 'companionDob', 10) && optStr(request.resource.data, 'relationship', 60)
+        && optStr(request.resource.data, 'doctorId', 40) && optStr(request.resource.data, 'aiQuality', 20)
+        && optStr(request.resource.data, 'fileNo', 30) && optStr(request.resource.data, 'nationality', 60)
+        && optStr(request.resource.data, 'gender', 20) && optStr(request.resource.data, 'reason', 300)
+        && optStr(request.resource.data, 'stampDoctor', 120) && optStr(request.resource.data, 'docKind', 30)
+        && (!('aiFilled' in request.resource.data) || request.resource.data.aiFilled is bool)
+        // الصورة لازم تكون صورة نفس المريض (ما يقدر يربط طلبه بصورة شخص ثاني)
         && (request.resource.data.imagePath.matches('^uploads/' + request.auth.uid + '/[0-9]+\\.(jpg|pdf)$')
-            || request.resource.data.imagePath.matches('^fs:[A-Za-z0-9]{20}$'));
+            || (request.resource.data.imagePath.matches('^fs:[A-Za-z0-9]{20}$')
+                && get(/databases/$(database)/documents/images/$(request.resource.data.imagePath.replace('^fs:', ''))).data.uid == request.auth.uid));
 
       // الموظف: يغيّر الحالة + يصحّح البيانات + ينقل الفرع
       allow update: if isStaff()
@@ -71,6 +89,8 @@ service cloud.firestore {
              'companionName','companionId','relationship','doctorName',
              'fileNo','nationality','gender','reason','stampDoctor'])
         && request.resource.data.status in ['pending','held','done']
+        // المرفوع ما يتعلّق: من "تم الرفع" يا يبقى مرفوع (تعديل) يا يرجع "انتظار" (تراجع)
+        && (resource.data.status != 'done' || request.resource.data.status in ['done','pending'])
         // ما ينرفع الطلب مرتين: إذا كان "تم الرفع" ما يقبل "تم الرفع" ثاني (التراجع مسموح)
         && !(resource.data.status == 'done' && request.resource.data.status == 'done'
              && request.resource.data.diff(resource.data).affectedKeys().hasAny(['doneAt','doneBy']))

@@ -459,9 +459,9 @@ function rowHTML(x, mode) {
   const unknownDoc = !x.doctorId;
   const byStamp = x.stampDoctor && x.doctorId && matchDoctor(x.doctorName).doctor?.id !== x.doctorId ? doctorById(x.doctorId) : null;
   const actions = done ? `<div class="age">${esc(x.doneBy || "")}</div>`
-    : held ? `<div class="quick-row"><button class="quick ghost" data-unhold="${x.id}">إرجاع</button><button class="quick" data-quick="${x.id}">${CHECK}تم الرفع</button></div>`
-    : `<div class="quick-row"><button class="quick ghost" data-hold="${x.id}">تعليق</button><button class="quick" data-quick="${x.id}">${CHECK}تم الرفع</button></div>`;
-  return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${x.id}" role="button" tabindex="0">
+    : held ? `<div class="quick-row"><button class="quick ghost" data-unhold="${esc(x.id)}">إرجاع</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`
+    : `<div class="quick-row"><button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
+  return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
       <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(x.doctorName)}</span><span>${esc(dates(x))}</span></div>
@@ -577,8 +577,11 @@ $("#holdConfirm").onclick = async () => {
     await api.markHeld(id, holdReason, note, by);
     toast(`تم تعليق ${x.patientName}: ${holdName(x.holdReason)}`, "تراجع", () => unholdRequest(id, true));
   } catch (e) {
-    console.error(e); toast("ما تم الحفظ — تأكد من الاتصال");
-    Object.assign(x, { status: "pending" }); S.held = S.held.filter(r => r.id !== id); S.pending.push(x); renderCounts(); renderPending(); renderHeld();
+    console.error(e);
+    S.held = S.held.filter(r => r.id !== id);
+    if (e?.code === "already_done") { toast(`ما تعلّق — هذا الطلب رفعه ${e.by || "موظف ثاني"} قبلك`); loadDone(true); renderCounts(); renderHeld(); return; }
+    toast("ما تم الحفظ — تأكد من الاتصال");
+    Object.assign(x, { status: "pending" }); S.pending.push(x); renderCounts(); renderPending(); renderHeld();
   }
 };
 async function unholdRequest(id, quiet) {

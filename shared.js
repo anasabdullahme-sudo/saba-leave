@@ -503,9 +503,22 @@ async function liveBackend(role) {
       tx.update(ref, { status: "done", doneAt: FS.serverTimestamp(), doneBy: by });
     }),
     claim: (id, by) => FS.updateDoc(FS.doc(col, id), { openedBy: by, openedAt: FS.serverTimestamp() }),
-    undoDone: id => FS.updateDoc(FS.doc(col, id), { status: "pending", doneAt: null, doneBy: null }),
-    markHeld: (id, reason, note, by) => FS.updateDoc(FS.doc(col, id), { status: "held", holdReason: reason, holdNote: note || "", heldAt: FS.serverTimestamp(), heldBy: by }),
-    unhold: id => FS.updateDoc(FS.doc(col, id), { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }),
+    undoDone: id => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(col, id), cur = await tx.get(ref);
+      if (cur.data()?.status !== "done") return;
+      tx.update(ref, { status: "pending", doneAt: null, doneBy: null });
+    }),
+    // تعليق/إرجاع داخل معاملة: لو موظف ثاني رفعه بنفس اللحظة ما نرجّعه للانتظار (يمنع الرفع مرتين)
+    markHeld: (id, reason, note, by) => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(col, id), cur = await tx.get(ref);
+      if (cur.data()?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.data().doneBy });
+      tx.update(ref, { status: "held", holdReason: reason, holdNote: note || "", heldAt: FS.serverTimestamp(), heldBy: by });
+    }),
+    unhold: id => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(col, id), cur = await tx.get(ref);
+      if (cur.data()?.status !== "held") return;
+      tx.update(ref, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null });
+    }),
     update: (id, patch) => FS.updateDoc(FS.doc(col, id), patch),
     async imageUrl(path) {
       if (String(path).startsWith("fs:")) {
@@ -598,7 +611,7 @@ function demoBackend() {
     async markDone(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) { x.status = "done"; x.doneAt = Date.now(); x.doneBy = by; } save(l); },
     async claim(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.openedBy = by; x.openedAt = Date.now(); } save(l); },
     async undoDone(id) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.status = "pending"; x.doneAt = null; x.doneBy = null; } save(l); },
-    async markHeld(id, reason, note, by) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }); save(l); },
+    async markHeld(id, reason, note, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) Object.assign(x, { status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }); save(l); },
     async unhold(id) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); save(l); },
     async update(id, patch) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, patch); save(l); },
     imageUrl: async path => path,

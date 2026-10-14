@@ -325,6 +325,8 @@ async function onPhoto(file) {
   if (file.size > 25 * 1024 * 1024) return toast("الصورة كبيرة جداً، صوّرها مرة ثانية");
   const isPdf = file.type === "application/pdf";
   const blob = isPdf ? file : await compressImage(file);
+  // صيغة ما يفتحها المتصفح (مثل HEIC أو ملف مو صورة) → نوقف هنا بدل ما يفشل الإرسال آخر شي
+  if (!isPdf && (blob === file || blob.type !== "image/jpeg")) return toast("ما قدرنا نفتح هالصورة. صوّر التقرير بالكاميرا مباشرة، أو اختر صورة JPG", 4500);
   state.blob = blob; state.imagePath = null; state.ai = {};
   state.preview = isPdf ? "" : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(""); fr.readAsDataURL(blob); });
   $("#shotImg").src = state.preview || "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0b2b47"/><text x="200" y="110" fill="#7FD0F0" font-size="22" text-anchor="middle" font-family="sans-serif">PDF</text></svg>');
@@ -424,6 +426,7 @@ function fillFromAI(r) {
 
 $("#form").addEventListener("submit", async e => {
   e.preventDefault();
+  if (state.sending) return;                     // يمنع الإرسال المكرر (ضغطتين أو Enter)
   const fd = Object.fromEntries(new FormData($("#form")));
   const bad = [];
   for (const [k, v] of Object.entries(fd)) {
@@ -437,7 +440,8 @@ $("#form").addEventListener("submit", async e => {
   }
   if (bad.length) { bad[0].focus(); bad[0].scrollIntoView({ block: "center", behavior: "smooth" }); return toast("في خانات تحتاج تصحيح"); }
 
-  const btn = $("#btnSend"); btn.disabled = true; btn.textContent = "جاري الإرسال…";
+  const btn = $("#btnSend"); btn.disabled = true; btn.textContent = "جاري الإرسال…"; state.sending = true;
+  let slow;
   try {
     if (!state.imagePath) {
       btn.textContent = "نكمّل رفع الصورة…";
@@ -447,25 +451,27 @@ $("#form").addEventListener("submit", async e => {
     const ai = state.ai, m = matchDoctor(fd.doctorName), ms = matchDoctor(ai.stamp_doctor_name || "");
     const doc = ms.doctor || doctorById(ai.stamp_doctor_id) || m.doctor || doctorById(ai.doctor_id) || null;
     const ref = makeRef();
-    const clean = s => (s || "").trim();
+    const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
+    slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);
     await api.createRequest({
       ref, type: state.type,
       patientName: clean(fd.patientName), patientNameEn: clean(ai.patient_name_en), idNumber: latinDigits(fd.idNumber),
       dob: fd.dob, phone: normPhone(fd.phone),
-      leaveStart: fd.leaveStart || "", leaveEnd: fd.leaveEnd || "", leaveDays: clean(ai.leave_days),
+      leaveStart: fd.leaveStart || "", leaveEnd: fd.leaveEnd || "", leaveDays: clean(ai.leave_days, 40),
       visitDate: fd.visitDate || "",
-      companionName: clean(fd.companionName), companionId: latinDigits(fd.companionId || ""), companionDob: fd.companionDob || "", relationship: clean(fd.relationship),
+      companionName: clean(fd.companionName), companionId: latinDigits(fd.companionId || ""), companionDob: fd.companionDob || "", relationship: clean(fd.relationship, 60),
       doctorName: clean(fd.doctorName), doctorId: doc?.id || "", branch: doc?.branch || m.branch,
-      imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: ai.quality || "",
-      fileNo: clean(ai.patient_file_no), nationality: clean(ai.nationality), gender: clean(ai.gender), reason: clean(ai.reason).slice(0, 300),
-      stampDoctor: clean(ai.stamp_doctor_name), docKind: ai.document_kind || "",
+      imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: clean(ai.quality, 20),
+      fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
+      stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
     });
+    clearTimeout(slow);
     $("#refTxt").textContent = ref;
     reset("sDone");
   } catch (err) {
     console.error(err);
     toast(err?.code === "pdf_too_big" ? "ملف PDF كبير — صوّر التقرير بالكاميرا بدلاً منه" : "ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
-  } finally { btn.disabled = false; btn.textContent = "إرسال الطلب"; }
+  } finally { state.sending = false; clearTimeout(slow); btn.disabled = false; btn.textContent = "إرسال الطلب"; }
 });
 
 $("#btnCopyRef").onclick = async () => {
