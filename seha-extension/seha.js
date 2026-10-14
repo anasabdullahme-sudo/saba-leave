@@ -322,6 +322,8 @@
     }
     if (!item) { toastLocal(`ما لقيت حساب «${accLabel(acc)}» في قائمتك — بدّله يدوياً`); return; }
     toastLocal(`أبدّل الحساب إلى: ${accLabel(acc)}`);
+    try { item.box.scrollIntoView({ block: "nearest" }); } catch {}   // القائمة فيها تمرير
+    await wait(150);
     realClick(item.el);
     navUntil = Date.now() + 120000;
   }
