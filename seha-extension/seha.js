@@ -18,7 +18,7 @@
   // ---------- أدوات ----------
   const norm = s => String(s || "")
     .replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
-    .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\s*\/\s*/g, "/").replace(/\s+/g, " ").trim();
+    .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[*:：]/g, " ").replace(/\s*\/\s*/g, "/").replace(/\s+/g, " ").trim();
   const fmtDate = dmy => {
     const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy || ""); if (!m) return dmy || "";
     return DATE_FMT.replace("DD", m[1]).replace("MM", m[2]).replace("YYYY", m[3]);
@@ -76,14 +76,39 @@
   };
 
   // ---------- إيجاد الخانة من عنوانها ----------
+  // أي عنصر فيه نص مباشر (مو بس label) — صحة تحط النجمة والأيقونات داخل العنوان
+  const ownText = el => { let t = ""; for (const n of el.childNodes) if (n.nodeType === 3) t += n.textContent; return t.trim(); };
+  const SKIP_TAG = /^(SCRIPT|STYLE|NOSCRIPT|OPTION|SELECT|TEXTAREA|BUTTON|svg|path)$/i;
   function labelCandidates() {
-    return [...document.querySelectorAll("label, legend, span, div, p, td, th, h5, h6, small, strong, b")]
-      .filter(el => el.childElementCount <= 1 && visible(el) && !el.closest("#saba-seha-host"))
-      .map(el => ({ el, t: norm(el.textContent) }))
-      .filter(x => x.t && x.t.length <= 60);
+    const out = [];
+    for (const el of document.body.querySelectorAll("*")) {
+      if (SKIP_TAG.test(el.tagName) || el.closest("#saba-seha-host")) continue;
+      const own = ownText(el); if (!own) continue;
+      if (!visible(el)) continue;
+      let t = norm(el.textContent); if (t.length > 60) t = norm(own);
+      if (t && t.length <= 60) out.push({ el, t });
+    }
+    return out;
+  }
+  // الخانة اللي تحت العنوان مباشرة على الشاشة (أدق طريقة لتصميم صحة: العنوان فوق والخانة تحته)
+  function controlBelow(labelEl) {
+    const L = labelEl.getBoundingClientRect(); if (!L.width) return null;
+    let best = null, bestD = 1e9;
+    for (const c of document.querySelectorAll(CONTROL)) {
+      if (c.closest("#saba-seha-host") || !visible(c)) continue;
+      const R = c.getBoundingClientRect();
+      const dy = R.top - L.bottom;
+      if (dy < -6 || dy > 70) continue;
+      const overlap = Math.min(L.right, R.right) - Math.max(L.left, R.left);
+      if (overlap < Math.min(L.width, R.width) * 0.3) continue;
+      const d = dy + Math.abs(R.right - L.right) * 0.05;   // RTL: العنوان على يمين الخانة
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
   }
   function controlFor(labelEl) {
     if (labelEl.htmlFor) { const c = document.getElementById(labelEl.htmlFor); if (c && c.matches(CONTROL)) return c; }
+    const geo = controlBelow(labelEl); if (geo) return geo;
     let node = labelEl;
     for (let i = 0; i < 4 && node; i++) {
       node = node.parentElement; if (!node) break;
@@ -109,16 +134,34 @@
   }
   function clickRadioByText(text) {
     const want = norm(text);
-    const cands = [...document.querySelectorAll("label, span, div")]
-      .filter(el => visible(el) && !el.closest("#saba-seha-host") && norm(el.textContent) === want);
+    const RADIO = "input[type=radio], [role=radio], mat-radio-button, .mat-radio-button, .mat-mdc-radio-button, p-radiobutton";
+    const cands = [...document.body.querySelectorAll("*")]
+      .filter(el => ownText(el) && visible(el) && !el.closest("#saba-seha-host"))
+      .filter(el => { const t = norm(el.textContent); return t === want || (t.includes(want) && t.length <= want.length + 4); });
     for (const el of cands) {
-      const r = el.querySelector("input[type=radio]") || (el.htmlFor && document.getElementById(el.htmlFor))
-        || (el.previousElementSibling?.matches?.("input[type=radio]") && el.previousElementSibling)
-        || (el.nextElementSibling?.matches?.("input[type=radio]") && el.nextElementSibling)
-        || el.parentElement?.querySelector(":scope > input[type=radio]");
-      if (r) { if (!r.checked) { r.click(); if (!r.checked) el.click(); } return true; }
+      let r = el.querySelector("input[type=radio]") || (el.htmlFor && document.getElementById(el.htmlFor))
+        || (el.previousElementSibling?.matches?.(RADIO) && el.previousElementSibling)
+        || (el.nextElementSibling?.matches?.(RADIO) && el.nextElementSibling)
+        || el.closest(RADIO);
+      for (let n = el.parentElement, i = 0; !r && n && i < 3; n = n.parentElement, i++) {
+        const rs = n.querySelectorAll(RADIO); if (rs.length === 1) r = rs[0]; else if (rs.length > 1) break;
+      }
+      if (!r) continue;
+      const inp = r.matches("input") ? r : r.querySelector("input[type=radio]");
+      if (inp?.checked || r.getAttribute("aria-checked") === "true" || /checked/.test(String(r.className))) return true;
+      (inp || r).click();
+      if (inp && !inp.checked) el.click();
+      return true;
     }
     return false;
+  }
+  // احتياط: خانة عليها placeholder / aria-label يطابق
+  function controlByHint(re, not) {
+    return [...document.querySelectorAll(CONTROL)].find(c => {
+      if (c.closest("#saba-seha-host") || !visible(c)) return false;
+      const h = norm([c.placeholder, c.getAttribute("aria-label"), c.title].filter(Boolean).join(" "));
+      return h && re.test(h) && !(not && not.test(h));
+    }) || null;
   }
 
   // ---------- التعبئة ----------
@@ -128,8 +171,7 @@
     for (const rule of RULES) {
       if (!!rule.hijri !== hijriPass || rule.skipIf?.(req)) continue;
       const lab = labs.find(x => rule.re.test(x.t) && !(rule.not && rule.not.test(x.t)));
-      if (!lab) continue;
-      const c = controlFor(lab.el);
+      const c = (lab && controlFor(lab.el)) || controlByHint(rule.re, rule.not);
       if (!c || c.disabled) continue;
       const val = rule.val ? rule.val(req, c) : String(req[rule.key] || "");
       if (!val) continue;
@@ -328,15 +370,29 @@
       </div>
       <div class="acc ${acc.state}">${accTxt}</div>
       <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button><button class="btn sec" id="pasteBtn" title="لصق طلب ثاني">طلب آخر</button></div>
+      <button class="btn sec" id="diag" style="flex:none;height:30px;line-height:30px;font-size:12px">نسخ تقرير فني (لو ما تعبّت الخانات)</button>
       <label class="tg"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية لما تظهر خانات جديدة</label>
       <div class="note">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div>
       <div><div class="lbl">رقم الإجازة في صحة (PSL…)</div><input class="psl" id="psl" placeholder="PSL…" value="${esc(newestPsl)}"></div>
       <button class="btn ok2" id="done">تم الرفع — حدّث لوحة سابا</button>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
-    $("#fill").onclick = () => { const r = fill(req, { explicit: true }); render(); toastLocal(Object.keys(r).length ? `تعبّت ${Object.values(r).filter(v => v === "ok").length} خانة` : "ما لقيت خانات في هالصفحة"); };
+    $("#fill").onclick = () => { const r = fill(req, { explicit: true }); render(); const n = Object.values(r).filter(v => v === "ok").length; toastLocal(n ? `تعبّت ${n} خانة` : "ما لقيت خانات — اضغط «نسخ تقرير فني» وأرسله"); };
     $("#auto").onchange = e => { auto = e.target.checked; chrome.storage.local.set({ sabaAuto: auto }); };
     $("#goForm").onclick = () => openAddForm(true);
+    $("#diag").onclick = async () => {
+      const labs = labelCandidates().filter(x => x.t.length < 45).slice(0, 80);
+      const out = labs.map(x => {
+        const c = controlFor(x.el), g = controlBelow(x.el);
+        const d = el => el ? `${el.tagName.toLowerCase()}[${["type","id","name","formcontrolname","placeholder","readonly","disabled"].map(a => el.getAttribute(a) != null ? a + "=" + el.getAttribute(a) : "").filter(Boolean).join(" ")}] .${String(el.className).slice(0, 60)}` : "-";
+        return `${x.el.tagName.toLowerCase()} «${x.t}» → ${d(c)}${g && g !== c ? " | geo:" + d(g) : ""}`;
+      });
+      const ctrls = [...document.querySelectorAll(CONTROL)].filter(c => !c.closest("#saba-seha-host")).slice(0, 60)
+        .map(c => { const r = c.getBoundingClientRect(); return `${c.tagName.toLowerCase()} ${c.type || ""} id=${c.id} name=${c.name} fcn=${c.getAttribute("formcontrolname")} ph=${c.placeholder || ""} vis=${visible(c)} ro=${c.readOnly} @${Math.round(r.left)},${Math.round(r.top)}`; });
+      const txt = "SABA-DIAG v" + chrome.runtime.getManifest().version + " " + location.href + "\n--labels--\n" + out.join("\n") + "\n--controls--\n" + ctrls.join("\n");
+      try { await navigator.clipboard.writeText(txt); } catch { const t = document.createElement("textarea"); t.value = txt; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
+      toastLocal("انسخ التقرير — الصقه لـ Claude");
+    };
     $("#pasteBtn").onclick = () => { $("#pasteWrap").hidden = false; $("#paste").focus(); };
     $("#done").onclick = () => {
       const psl = $("#psl").value.trim();
