@@ -17,7 +17,7 @@ export const firebaseConfig = {
 export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب للذكاء الاصطناعي)
 export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
 export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
-export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة (تشتغل أول ما ينحط RECAPTCHA_SITE_KEY)
+export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة
 export const AI_MODEL = "gemini-3.5-flash";  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
@@ -413,7 +413,7 @@ async function liveBackend(role) {
     demo: false,
     /* --- المريض --- */
     async ensureAnon() { if (!auth.currentUser) await AU.signInAnonymously(auth); return auth.currentUser.uid; },
-    aiEnabled: AI_ENABLED && !!RECAPTCHA_SITE_KEY,
+    aiEnabled: AI_ENABLED, // بدون مفتاح reCAPTCHA يشتغل لين يصير App Check إلزامي (2 نوفمبر 2026)
     async warmup() { try { await api.ensureAnon(); if (api.aiEnabled) await getModel(); } catch (e) { console.warn(e); } },
     async extract(blob, type) {
       const m = await getModel();
