@@ -41,7 +41,8 @@
     walk(document); shadowHosts = hosts;
     return out.filter(el => !el.closest("#saba-seha-host"));
   }
-  const deepText = () => deepAll("*").map(ownText).filter(Boolean).join(" ");
+  // النص الظاهر فقط (بدون سكربتات أو عناصر مخفية)
+  const deepText = () => deepAll("*").filter(el => !/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/i.test(el.tagName) && ownText(el) && visible(el)).map(ownText).join(" ");
   const ownText = el => { let t = ""; for (const n of el.childNodes) if (n.nodeType === 3) t += n.textContent; return t.trim(); };
   const CONTROL = "input:not([type=radio]):not([type=checkbox]):not([type=hidden]):not([type=button]):not([type=submit]), select, textarea";
 
@@ -201,8 +202,11 @@
       if (!hijriPass) report[rule.key] = norm(c.value) === norm(val) ? "ok" : "check";
     }
   }
+  // صفحة البحث (فيها زر «إضافة إجازة مرضية») مو النموذج — ما نعبّي فيها شي
+  const isSearchPage = t => /بحث عن اجازه مرضيه|نتائج البحث/.test(t);
+  const isFormPage = t => !isSearchPage(t) && (/نوع الاجازه/.test(t) || /معلومات مقدم طلب|التوصيات/.test(t));
   function fill(req, { explicit = false } = {}) {
-    if (!req) return {};
+    if (!req || !isFormPage(norm(deepText()))) return {};
     const report = {};
     // 1) نوع الإجازة
     const typeText = TYPE_LABEL[req.type];
@@ -417,6 +421,7 @@
       <button class="btn ok2" id="done">تم الرفع — حدّث لوحة سابا</button>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     $("#fill").onclick = async () => {
+      if (isSearchPage(norm(deepText()))) { openAddForm(true); return; }
       const r = fill(req, { explicit: true });
       const fr = await askFrames("sabaFillCmd", "sabaRep_");
       fr.forEach(x => Object.assign(r, x.r)); lastReport = { ...lastReport, ...r };
@@ -483,27 +488,30 @@
   };
   const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el.closest("li") || el;
   const realClick = el => { el = clickable(el); ["mousedown", "mouseup", "click"].forEach(t => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }))); };
-  const onAddForm = () => norm(deepText()).includes("اضافه اجازه مرضيه") && deepAll("input[type=radio]").length > 0;
   let navBusy = false;
   async function openAddForm(force) {
-    if (!TOP || navBusy || !req || onAddForm()) return;
-    const navFor = (await chrome.storage.local.get("sabaNavFor")).sabaNavFor;
-    if (!force && navFor === req.ref) return;                 // مرة وحدة لكل طلب
-    if (/حسابات صحة طبي|تسجيل الدخول/.test(document.body.innerText) && !/مرحبا بك/.test(document.body.innerText)) return; // لسى ما دخل
+    if (!TOP || navBusy || !req) return;
+    const t = norm(deepText());
+    if (isFormPage(t)) return;                                                   // النموذج مفتوح
+    if (/حسابات صحه طبي|تسجيل الدخول/.test(t) && !/مرحبا بك/.test(t)) return;   // لسى ما دخل
     navBusy = true;
     try {
-      await chrome.storage.local.set({ sabaNavFor: req.ref });
+      const st = await chrome.storage.local.get(["sabaNavFor", "sabaAddFor"]);
       const wait = ms => new Promise(r => setTimeout(r, ms));
-      const find = async (t, tries = 12) => { for (let i = 0; i < tries; i++) { const el = textEls(t).find(visible) || textEls(t)[0]; if (el) return el; await wait(250); } return null; };
-      // 1) زر الإضافة موجود؟ (صفحة الإجازات مفتوحة)
+      const find = async (txt, tries) => { for (let i = 0; i < tries; i++) { const el = textEls(txt).find(visible); if (el) return el; await wait(250); } return null; };
+      const clickAdd = async add => { await chrome.storage.local.set({ sabaAddFor: req.ref }); realClick(add); toastLocal("فتحت نموذج إضافة الإجازة"); };
+      // 1) صفحة البحث مفتوحة وفيها زر الإضافة → نضغطه (مرة لكل طلب، أو دايماً لو ضغط الموظف «افتح النموذج»)
       let add = textEls("إضافة إجازة مرضية").find(visible);
-      if (!add) {
-        let link = textEls("الإجازات المرضية").find(visible);
-        if (!link) { const svc = await find("الخدمات", 4); if (svc) { realClick(svc); await wait(400); } link = await find("الإجازات المرضية", 8); }
-        if (link) { realClick(link); add = await find("إضافة إجازة مرضية", 20); }
-      }
-      if (add) { realClick(add); toastLocal("فتحت نموذج إضافة الإجازة"); }
-      else toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة");
+      if (add) { if (force || st.sabaAddFor !== req.ref) await clickAdd(add); return; }
+      // 2) نروح من القائمة: الخدمات ← الإجازات المرضية (مرة لكل طلب)
+      if (!force && st.sabaNavFor === req.ref) return;
+      await chrome.storage.local.set({ sabaNavFor: req.ref });
+      let link = textEls("الإجازات المرضية").find(visible);
+      if (!link) { const svc = await find("الخدمات", 4); if (svc) { realClick(svc); await wait(400); } link = await find("الإجازات المرضية", 8); }
+      if (!link) { toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة"); return; }
+      realClick(link);
+      add = await find("إضافة إجازة مرضية", 60);                                  // نستنى صفحة البحث لين 15 ثانية
+      if (add && (force || st.sabaAddFor !== req.ref)) await clickAdd(add);
     } finally { navBusy = false; }
   }
 
