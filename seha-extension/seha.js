@@ -75,6 +75,9 @@
         return has966 || el.maxLength === 9 ? p : "0" + p; } },
     { key: "leaveStart",  re: /تاريخ الدخول ميلادي/, val: r => fmtDate(startOf(r)) },
     { key: "leaveStart",  re: /تاريخ الدخول هجري/, val: r => fmtDate(toHijriDmy(startOf(r))), hijri: true },
+    // تاريخ الخروج = نفس تاريخ الدخول دايماً
+    { key: "exitDate",    re: /تاريخ الخروج ميلادي/, val: r => fmtDate(startOf(r)) },
+    { key: "exitDate",    re: /تاريخ الخروج هجري/, val: r => fmtDate(toHijriDmy(startOf(r))), hijri: true },
     { key: "visitDate",   re: /^تاريخ المراجعه ميلادي|تاريخ (الزياره|الحضور)/, val: G("visitDate"), skipIf: onlyAtt },
     { key: "visitDate",   re: /^تاريخ المراجعه هجري/, val: H("visitDate"), hijri: true, skipIf: onlyAtt },
     // الخطوة 2 — التوصيات
@@ -90,7 +93,7 @@
   ];
   const FIELD_LABELS = {
     idNumber: "رقم الهوية", fileNo: "رقم الملف", dob: "تاريخ الميلاد", patientName: "اسم المريض", patientNameEn: "الاسم بالإنجليزي", phone: "الجوال",
-    leaveStart: "بداية الإجازة", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
+    leaveStart: "بداية الإجازة", exitDate: "تاريخ الخروج", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
     companionName: "اسم المرافق", companionId: "هوية المرافق", companionDob: "ميلاد المرافق", relationship: "صلة القرابة",
     doctorName: "الطبيب", doctorAr: "الطبيب المرخّص", stampDoctor: "ختم الطبيب", reason: "السبب", nationality: "الجنسية", gender: "الجنس", ref: "رقم طلب سابا",
   };
@@ -486,14 +489,16 @@
       .filter(el => !el.closest("#saba-seha-host") && el.childElementCount <= 2 && norm(el.textContent) === norm(t));
     return all.filter(el => !all.some(o => o !== el && el.contains(o)));   // الأعمق فقط
   };
-  const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el.closest("li") || el;
+  const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el;
   const realClick = el => { el = clickable(el); ["mousedown", "mouseup", "click"].forEach(t => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }))); };
-  let navBusy = false;
+  let navBusy = false, navRef = "", navTries = 0, navNext = 0, navUntil = Date.now() + 120000;
   async function openAddForm(force) {
     if (!TOP || navBusy || !req) return;
     const t = norm(deepText());
     if (isFormPage(t)) return;                                                   // النموذج مفتوح
-    if (/حسابات صحه طبي|تسجيل الدخول/.test(t) && !/مرحبا بك/.test(t)) return;   // لسى ما دخل
+    if (/حسابات صحه طبي|تسجيل الدخول/.test(t) && !/مرحبا بك/.test(t)) return;   // لسى ما دخل / يختار الحساب
+    if (navRef !== req.ref) { navRef = req.ref; navTries = 0; navNext = 0; }
+    if (!force && Date.now() < navNext) return;
     navBusy = true;
     try {
       const st = await chrome.storage.local.get(["sabaNavFor", "sabaAddFor"]);
@@ -503,17 +508,24 @@
       // 1) صفحة البحث مفتوحة وفيها زر الإضافة → نضغطه (مرة لكل طلب، أو دايماً لو ضغط الموظف «افتح النموذج»)
       let add = textEls("إضافة إجازة مرضية").find(visible);
       if (add) { if (force || st.sabaAddFor !== req.ref) await clickAdd(add); return; }
-      // 2) نروح من القائمة: الخدمات ← الإجازات المرضية (مرة لكل طلب)
+      // 2) من الصفحة الرئيسية: الخدمات ← الإجازات المرضية (نعيد المحاولة لين تحمّل القائمة)
       if (!force && st.sabaNavFor === req.ref) return;
-      await chrome.storage.local.set({ sabaNavFor: req.ref });
+      if (!force && navTries >= 6) return;
+      navTries++; navNext = Date.now() + 2500;
       let link = textEls("الإجازات المرضية").find(visible);
-      if (!link) { const svc = await find("الخدمات", 4); if (svc) { realClick(svc); await wait(400); } link = await find("الإجازات المرضية", 8); }
-      if (!link) { toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة"); return; }
+      if (!link) {
+        const svc = await find("الخدمات", 12); if (!svc) return;
+        realClick(svc); link = await find("الإجازات المرضية", 12);
+      }
+      if (!link) { if (navTries >= 6 || force) toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة"); return; }
+      await chrome.storage.local.set({ sabaNavFor: req.ref });
       realClick(link);
       add = await find("إضافة إجازة مرضية", 60);                                  // نستنى صفحة البحث لين 15 ثانية
       if (add && (force || st.sabaAddFor !== req.ref)) await clickAdd(add);
     } finally { navBusy = false; }
   }
+  // الصفحة الرئيسية أحياناً تحمّل بدون تغييرات نلقطها — نحاول كل ثانيتين لمدة دقيقتين بعد وصول الطلب
+  setInterval(() => { if (TOP && req && auto && Date.now() < navUntil && !document.hidden) openAddForm(); }, 2000);
 
   // ---------- تشغيل ----------
   chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaMin"], d => {
@@ -528,7 +540,7 @@
     if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
-    if (ch.sabaReq) { req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; if (minimized) { minimized = false; $("#p").classList.remove("min"); } render(); if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
+    if (ch.sabaReq) { navUntil = Date.now() + 120000; req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; if (minimized) { minimized = false; $("#p").classList.remove("min"); } render(); if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
     if (!TOP && ch.sabaReq) return;
   });
 
