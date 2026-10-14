@@ -327,7 +327,7 @@
         <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>نوع صحة: ${esc(TYPE_LABEL[req.type] || "")}</span></div>
       </div>
       <div class="acc ${acc.state}">${accTxt}</div>
-      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="pasteBtn" title="لصق طلب ثاني">طلب آخر</button></div>
+      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button><button class="btn sec" id="pasteBtn" title="لصق طلب ثاني">طلب آخر</button></div>
       <label class="tg"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية لما تظهر خانات جديدة</label>
       <div class="note">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div>
@@ -336,6 +336,7 @@
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     $("#fill").onclick = () => { const r = fill(req, { explicit: true }); render(); toastLocal(Object.keys(r).length ? `تعبّت ${Object.values(r).filter(v => v === "ok").length} خانة` : "ما لقيت خانات في هالصفحة"); };
     $("#auto").onchange = e => { auto = e.target.checked; chrome.storage.local.set({ sabaAuto: auto }); };
+    $("#goForm").onclick = () => openAddForm(true);
     $("#pasteBtn").onclick = () => { $("#pasteWrap").hidden = false; $("#paste").focus(); };
     $("#done").onclick = () => {
       const psl = $("#psl").value.trim();
@@ -359,7 +360,7 @@
       const m = /SABA_SEHA:(\{[\s\S]*\})/.exec(t || "");
       e.preventDefault();
       if (!m) return toastLocal("هذا مو طلب من لوحة سابا");
-      try { chrome.storage.local.set({ sabaReq: JSON.parse(m[1]) }); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
+      try { chrome.storage.local.set({ sabaReq: JSON.parse(m[1]), sabaNavFor: "" }); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
     });
   }
   let tt;
@@ -369,17 +370,58 @@
   }
   $("#hd").onclick = () => { minimized = !minimized; $("#p").classList.toggle("min", minimized); $("#min").textContent = minimized ? "+" : "–"; chrome.storage.local.set({ sabaMin: minimized }); };
 
+  // ---------- استلام الطلب عن طريق اسم النافذة (احتياط لو الجسر ما اشتغل) ----------
+  try {
+    if (String(window.name).startsWith("SABA_SEHA:")) {
+      const payload = JSON.parse(window.name.slice(10)); window.name = "";
+      chrome.storage.local.set({ sabaReq: payload, sabaNavFor: "" });
+    }
+  } catch (e) { console.warn("saba name", e); }
+
+  // ---------- فتح نموذج «إضافة إجازة مرضية» تلقائياً ----------
+  // (فتح النموذج ما يخصم نقاط — الخصم يكون عند «تحقق/حفظ» واللي ما نضغطها أبداً)
+  const textEls = t => {
+    const all = [...document.querySelectorAll("a, button, span, li, div, p")]
+      .filter(el => !el.closest("#saba-seha-host") && el.childElementCount <= 2 && norm(el.textContent) === norm(t));
+    return all.filter(el => !all.some(o => o !== el && el.contains(o)));   // الأعمق فقط
+  };
+  const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el.closest("li") || el;
+  const realClick = el => { el = clickable(el); ["mousedown", "mouseup", "click"].forEach(t => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }))); };
+  const onAddForm = () => norm(document.body.innerText).includes("اضافه اجازه مرضيه") && !!document.querySelector("input[type=radio]");
+  let navBusy = false;
+  async function openAddForm(force) {
+    if (navBusy || !req || onAddForm()) return;
+    const navFor = (await chrome.storage.local.get("sabaNavFor")).sabaNavFor;
+    if (!force && navFor === req.ref) return;                 // مرة وحدة لكل طلب
+    if (/حسابات صحة طبي|تسجيل الدخول/.test(document.body.innerText) && !/مرحبا بك/.test(document.body.innerText)) return; // لسى ما دخل
+    navBusy = true;
+    try {
+      await chrome.storage.local.set({ sabaNavFor: req.ref });
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const find = async (t, tries = 12) => { for (let i = 0; i < tries; i++) { const el = textEls(t).find(visible) || textEls(t)[0]; if (el) return el; await wait(250); } return null; };
+      // 1) زر الإضافة موجود؟ (صفحة الإجازات مفتوحة)
+      let add = textEls("إضافة إجازة مرضية").find(visible);
+      if (!add) {
+        let link = textEls("الإجازات المرضية").find(visible);
+        if (!link) { const svc = await find("الخدمات", 4); if (svc) { realClick(svc); await wait(400); } link = await find("الإجازات المرضية", 8); }
+        if (link) { realClick(link); add = await find("إضافة إجازة مرضية", 20); }
+      }
+      if (add) { realClick(add); toastLocal("فتحت نموذج إضافة الإجازة"); }
+      else toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة");
+    } finally { navBusy = false; }
+  }
+
   // ---------- تشغيل ----------
   chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaMin"], d => {
     req = d.sabaReq || null; auto = d.sabaAuto !== false; minimized = !!d.sabaMin;
     $("#p").classList.toggle("min", minimized); $("#min").textContent = minimized ? "+" : "–";
     document.documentElement.append(host);
     render();
-    if (req && auto) setTimeout(() => { fill(req); render(); }, 600);
+    if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 900);
   });
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local") return;
-    if (ch.sabaReq) { req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; if (minimized) { minimized = false; $("#p").classList.remove("min"); } render(); if (req && auto) setTimeout(() => { fill(req); render(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
+    if (ch.sabaReq) { req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; if (minimized) { minimized = false; $("#p").classList.remove("min"); } render(); if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
   });
 
   // صحة تطبيق صفحة واحدة: نراقب تغيّر الصفحة وظهور خانات جديدة
@@ -389,7 +431,7 @@
     clearTimeout(deb);
     deb = setTimeout(() => {
       scanPsl();
-      if (req && auto) { fill(req); updateDots(); }
+      if (req && auto) { fill(req); updateDots(); openAddForm(); }
       const pslIn = $("#psl"); if (pslIn && newestPsl && !pslIn.value) pslIn.value = newestPsl;
       const acc = $(".acc"); if (req && acc) { const st = accountState(req).state; if (!acc.classList.contains(st)) render(); }
       if (req && /حسابات صحة طبي/.test(document.body.innerText)) highlightPicker(req);

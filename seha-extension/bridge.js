@@ -19,7 +19,7 @@
     const m = e.data;
     if (m.type === "SABA_EXT_PING") announce();
     if (m.type === "SABA_SEHA_FILL" && m.payload) {
-      chrome.storage.local.set({ sabaReq: m.payload }, () => post({ type: "SABA_SEHA_FILL_ACK", ref: m.payload.ref }));
+      chrome.storage.local.set({ sabaReq: m.payload, sabaNavFor: "" }, () => post({ type: "SABA_SEHA_FILL_ACK", ref: m.payload.ref }));
     }
     if (m.type === "SABA_SEHA_DONE_ACK") {
       chrome.storage.local.get("sabaDone", ({ sabaDone }) => { if (sabaDone && sabaDone.at === m.at) chrome.storage.local.remove("sabaDone"); });

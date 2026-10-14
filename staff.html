@@ -781,9 +781,11 @@ function sehaPayload(x) {
     sentAt: Date.now(),
   };
 }
-$("#sehaDrawer").addEventListener("click", () => {
+$("#sehaDrawer").addEventListener("click", e => {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
   const payload = sehaPayload(x);
+  // احتياط: نمرر الطلب عن طريق اسم النافذة الجديدة (يوصل للإضافة حتى لو الجسر ما اشتغل)
+  try { const w = window.open(SEHA_URL, "SABA_SEHA:" + JSON.stringify(payload)); if (w) e.preventDefault(); } catch {}
   window.postMessage({ type: "SABA_SEHA_FILL", payload }, location.origin);
   copyText("SABA_SEHA:" + JSON.stringify(payload)).catch(() => {}); // احتياط: لصق يدوي داخل الإضافة
 });
