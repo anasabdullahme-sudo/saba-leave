@@ -18,9 +18,10 @@ export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب
 export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
 export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
 export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة
-export const AI_MODEL = "gemini-3.5-flash";
-// لو الموديل مزحوم (500/503/429) ينتقل تلقائياً للي بعده
-export const AI_FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"];  // نسخة مستقرة حتى مايو 2027 على الأقل
+export const AI_MODEL = "gemini-3.5-flash-lite";   // الأسرع (Ultra fast)
+// احتياط: لو الأول تأخر أكثر من AI_HEDGE_MS أو كان مزحوم، يبدأ الثاني بالتوازي وناخذ أول نتيجة
+export const AI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+export const AI_HEDGE_MS = 6000;  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
 
@@ -418,26 +419,27 @@ async function liveBackend(role) {
     async ensureAnon() { if (!auth.currentUser) await AU.signInAnonymously(auth); return auth.currentUser.uid; },
     aiEnabled: AI_ENABLED, // بدون مفتاح reCAPTCHA يشتغل لين يصير App Check إلزامي (2 نوفمبر 2026)
     async warmup() { try { await api.ensureAnon(); if (api.aiEnabled) await getModel(); } catch (e) { console.warn(e); } },
-    extractTimeout: 60000,
+    extractTimeout: 45000,
     async extract(blob, type) {
-      const b64 = await blobToBase64(blob);
-      const parts = [aiPrompt(type), { inlineData: { data: b64, mimeType: blob.type || "image/jpeg" } }];
-      const busy = e => /\b(500|502|503|504|429)\b|high demand|overloaded|unavailable|resource.?exhausted|quota/i.test(String(e?.message || e));
-      let lastErr;
-      for (const name of [AI_MODEL, ...AI_FALLBACK_MODELS]) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const m = await getModel(name);
-            const res = await m.generateContent(parts);
-            return JSON.parse(res.response.text());
-          } catch (e) {
-            lastErr = e; console.warn("AI", name, e);
-            if (!busy(e)) { if (/not.?found|404|not supported/i.test(String(e?.message))) break; throw e; }
-            if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
-          }
-        }
-      }
-      throw lastErr;
+      // صورة أصغر للقراءة فقط (أسرع رفع وأسرع معالجة) — الصورة المحفوظة تبقى بجودتها
+      const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 1280, 0.8);
+      const b64 = await blobToBase64(small);
+      const parts = [aiPrompt(type), { inlineData: { data: b64, mimeType: small.type || "image/jpeg" } }];
+      const queue = [AI_MODEL, ...AI_FALLBACK_MODELS];
+      const run = name => getModel(name).then(m => m.generateContent(parts)).then(r => JSON.parse(r.response.text()));
+      return await new Promise((resolve, reject) => {
+        let running = 0, done = false, lastErr, timer;
+        const next = () => {
+          if (done) return;
+          const name = queue.shift();
+          if (!name) { if (!running) { done = true; reject(lastErr || new Error("ai_failed")); } return; }
+          running++;
+          clearTimeout(timer); timer = setTimeout(next, AI_HEDGE_MS); // لو تأخر، شغّل اللي بعده بالتوازي
+          run(name).then(v => { if (!done) { done = true; clearTimeout(timer); resolve(v); } })
+            .catch(e => { lastErr = e; console.warn("AI", name, e); running--; next(); }); // فشل؟ جرّب اللي بعده فوراً
+        };
+        next();
+      });
     },
     async uploadImage(blob, onProgress) {
       const uid = await api.ensureAnon();
