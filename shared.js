@@ -17,8 +17,8 @@ export const firebaseConfig = {
 export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب للذكاء الاصطناعي)
 export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
 export const IMAGE_STORE = "firestore";
-// القراءة بالذكاء من الصورة — موقوفة مؤقتاً (بيانات صحية على الخطة المجانية لـ Gemini). شغّلها لما يتفعل حساب الفوترة + reCAPTCHA
-export const AI_ENABLED = false;      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
+// القراءة بالذكاء من الصورة (تشتغل تلقائياً أول ما ينحط RECAPTCHA_SITE_KEY)
+export const AI_ENABLED = true;      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
 export const AI_MODEL = "gemini-3.5-flash";  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
