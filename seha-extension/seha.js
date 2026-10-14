@@ -10,7 +10,9 @@
   const FID = Math.random().toString(36).slice(2, 8);
 
   // ---------- إعدادات يمكن تعديلها ----------
-  const DATE_FMT = "YYYY-MM-DD";           // شكل التاريخ في خانات صحة (مثل 2026-10-14 و 1448-05-03)
+  // شكل التاريخ في صحة: الخطوة 1 (الهوية والميلاد) بـ "/" ، وبيانات الإجازة (الخطوة 2) بـ "-"
+  const DATE_FMT = "YYYY-MM-DD";           // الخطوة 2: 2026-10-14 و 1448-05-03
+  const DATE_FMT_STEP1 = "DD/MM/YYYY";     // الخطوة 1: 28/05/1999
   const TYPE_LABEL = {                      // نوع الإجازة في صحة لكل نوع طلب في سابا
     sick: "إجازة مرضية اعتيادية",
     companion: "إجازة مرافق",
@@ -22,9 +24,9 @@
   const norm = s => String(s || "")
     .replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
     .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[*:：]/g, " ").replace(/\s*\/\s*/g, "/").replace(/\s+/g, " ").trim();
-  const fmtDate = dmy => {
+  const fmtDate = (dmy, f = DATE_FMT) => {
     const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy || ""); if (!m) return dmy || "";
-    return DATE_FMT.replace("DD", m[1]).replace("MM", m[2]).replace("YYYY", m[3]);
+    return f.replace("DD", m[1]).replace("MM", m[2]).replace("YYYY", m[3]);
   };
   const visible = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
   // بحث يدخل داخل Shadow DOM (بعض صفحات صحة مبنية بمكوّنات معزولة)
@@ -54,16 +56,16 @@
 
   // ---------- خريطة الخانات (عنوان الخانة في صحة ← قيمة من الطلب) ----------
   // كل regex على النص بعد التطبيع: بدون همزات، ة→ه، والشرطة المائلة بدون مسافات
-  const G = k => r => fmtDate(r[k]);                    // ميلادي
-  const H = k => r => fmtDate(toHijriDmy(r[k]));        // هجري
+  const G = (k, f) => r => fmtDate(r[k], f);                    // ميلادي
+  const H = (k, f) => r => fmtDate(toHijriDmy(r[k]), f);        // هجري
   const startOf = r => r.type === "attendance" ? (r.visitDate || r.leaveStart) : r.leaveStart;
   const notAtt = r => r.type === "attendance", onlyAtt = r => r.type !== "attendance", onlyComp = r => r.type !== "companion";
   const RULES = [
     // الخطوة 1
     { key: "companionId", re: /هويه المرافق|اقامه المرافق/, skipIf: onlyComp },
     { key: "idNumber",    re: /رقم (ال)?هويه|رقم (ال)?اقامه|الهويه\/الاقامه/, not: /^(?!.*المريض).*المرافق/ },
-    { key: "dob",         re: /الميلاد\/?\s*ميلادي/, not: /المرافق/, val: G("dob") },
-    { key: "dob",         re: /الميلاد\/?\s*هجري/, not: /المرافق/, val: H("dob"), hijri: true },
+    { key: "dob",         re: /الميلاد\/?\s*ميلادي/, not: /المرافق/, val: G("dob", DATE_FMT_STEP1) },
+    { key: "dob",         re: /الميلاد\/?\s*هجري/, not: /المرافق/, val: H("dob", DATE_FMT_STEP1), hijri: true },
     // الخطوة 2 — معلومات مقدم الطلب
     { key: "fileNo",      re: /رقم السجل الطبي|رقم الملف الطبي/ },
     { key: "phone",       re: /(رقم )?(الجوال|الهاتف|المحمول)/, val: (r, el) => {
@@ -81,8 +83,8 @@
     { key: "leaveEnd",    re: /(تاريخ )?(نهايه|انتهاء) الاجازه/, val: G("leaveEnd"), skipIf: notAtt },
     // المرافق
     { key: "companionName", re: /اسم المرافق/, skipIf: onlyComp },
-    { key: "companionDob",  re: /ميلاد المرافق.*ميلادي|ميلاد المرافق$/, val: G("companionDob"), skipIf: onlyComp },
-    { key: "companionDob",  re: /ميلاد المرافق.*هجري/, val: H("companionDob"), hijri: true, skipIf: onlyComp },
+    { key: "companionDob",  re: /ميلاد المرافق.*ميلادي|ميلاد المرافق$/, val: G("companionDob", DATE_FMT_STEP1), skipIf: onlyComp },
+    { key: "companionDob",  re: /ميلاد المرافق.*هجري/, val: H("companionDob", DATE_FMT_STEP1), hijri: true, skipIf: onlyComp },
     { key: "relationship",  re: /صله القرابه|القرابه/, skipIf: onlyComp },
   ];
   const FIELD_LABELS = {
