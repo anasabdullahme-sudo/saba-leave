@@ -5,6 +5,9 @@
    ========================================================================== */
 (() => {
   if (window.__sabaSeha) return; window.__sabaSeha = true;
+  // صحة ممكن تفتح نموذج الإجازة داخل إطار (iframe): اللوحة في الصفحة الرئيسية، والتعبئة تشتغل في كل إطار
+  const TOP = window === window.top;
+  const FID = Math.random().toString(36).slice(2, 8);
 
   // ---------- إعدادات يمكن تعديلها ----------
   const DATE_FMT = "DD/MM/YYYY";           // شكل التاريخ في خانات صحة (غيّره إلى "YYYY-MM-DD" إذا لزم)
@@ -167,7 +170,7 @@
   // ---------- التعبئة ----------
   const filledEls = new WeakSet();
   let lastReport = {};
-  function fillPass(req, labs, report, hijriPass) {
+  function fillPass(req, labs, report, hijriPass, explicit) {
     for (const rule of RULES) {
       if (!!rule.hijri !== hijriPass || rule.skipIf?.(req)) continue;
       const lab = labs.find(x => rule.re.test(x.t) && !(rule.not && rule.not.test(x.t)));
@@ -176,7 +179,7 @@
       const val = rule.val ? rule.val(req, c) : String(req[rule.key] || "");
       if (!val) continue;
       if (c.value) { if (!hijriPass) report[rule.key] = report[rule.key] || "ok"; continue; } // ما نكتب فوق شي موجود
-      if (filledEls.has(c)) continue;
+      if (filledEls.has(c) && !explicit) continue;
       if (c instanceof HTMLSelectElement) { if (!pickOption(c, val)) continue; }
       else setValue(c, val);
       filledEls.add(c); flash(c);
@@ -202,8 +205,8 @@
       }
     }
     // 3) الميلادي والنصوص، وبعدها الهجري (لو صحة ما حسبته لحالها)
-    fillPass(req, labelCandidates(), report, false);
-    setTimeout(() => fillPass(req, labelCandidates(), {}, true), 700);
+    fillPass(req, labelCandidates(), report, false, explicit);
+    setTimeout(() => fillPass(req, labelCandidates(), {}, true, explicit), 700);
     // 4) الطبيب المعالج
     const d = pickDoctor(req, explicit);
     if (d) report.doctorAr = d;
@@ -346,7 +349,27 @@
   const TYPE_AR = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
   const LTR = new Set(["fileNo", "idNumber", "companionId", "dob", "companionDob", "phone", "leaveStart", "leaveEnd", "visitDate", "ref", "leaveDays", "patientNameEn"]);
 
+  function diagText() {
+    const labs = labelCandidates().filter(x => x.t.length < 45).slice(0, 90);
+    const d = el => el ? `${el.tagName.toLowerCase()}[${["type","id","name","formcontrolname","placeholder","readonly","disabled"].map(a => el.getAttribute(a) != null ? a + "=" + el.getAttribute(a) : "").filter(Boolean).join(" ")}] .${String(el.className).slice(0, 60)}` : "-";
+    const out = labs.map(x => { const c = controlFor(x.el), g = controlBelow(x.el); return `${x.el.tagName.toLowerCase()} «${x.t}» → ${d(c)}${g && g !== c ? " | geo:" + d(g) : ""}`; });
+    const ctrls = [...document.querySelectorAll(CONTROL + ", input[type=radio], [role=radio], [role=combobox], [contenteditable=true]")].filter(c => !c.closest("#saba-seha-host")).slice(0, 70)
+      .map(c => { const r = c.getBoundingClientRect(); return `${c.tagName.toLowerCase()} ${c.type || c.getAttribute("role") || ""} id=${c.id} name=${c.name || ""} fcn=${c.getAttribute("formcontrolname")} ph=${c.placeholder || ""} cls=${String(c.className).slice(0, 50)} vis=${visible(c)} ro=${c.readOnly} @${Math.round(r.left)},${Math.round(r.top)}`; });
+    return location.href + "\n--labels--\n" + out.join("\n") + "\n--controls--\n" + ctrls.join("\n");
+  }
+  // نرسل أمر لكل الإطارات ونجمع ردودها
+  async function askFrames(cmdKey, repPrefix) {
+    const at = Date.now();
+    await chrome.storage.local.set({ [cmdKey]: { at } });
+    await new Promise(r => setTimeout(r, 1200));
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all).filter(k => k.startsWith(repPrefix));
+    const got = keys.map(k => all[k]).filter(v => v && v.at === at);
+    if (keys.length) chrome.storage.local.remove(keys);
+    return got;
+  }
   function render() {
+    if (!TOP) return;
     const b = $("#body");
     if (!req) {
       b.innerHTML = `<div class="empty">افتح الطلب من <b>لوحة سابا</b> واضغط «افتح منصة صحة للرفع»، وبيوصل هنا تلقائياً.</div>
@@ -377,21 +400,21 @@
       <div><div class="lbl">رقم الإجازة في صحة (PSL…)</div><input class="psl" id="psl" placeholder="PSL…" value="${esc(newestPsl)}"></div>
       <button class="btn ok2" id="done">تم الرفع — حدّث لوحة سابا</button>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
-    $("#fill").onclick = () => { const r = fill(req, { explicit: true }); render(); const n = Object.values(r).filter(v => v === "ok").length; toastLocal(n ? `تعبّت ${n} خانة` : "ما لقيت خانات — اضغط «نسخ تقرير فني» وأرسله"); };
+    $("#fill").onclick = async () => {
+      const r = fill(req, { explicit: true });
+      const fr = await askFrames("sabaFillCmd", "sabaRep_");
+      fr.forEach(x => Object.assign(r, x.r)); lastReport = { ...lastReport, ...r };
+      render(); const n = Object.values(r).filter(v => v === "ok").length;
+      toastLocal(n ? `تعبّت ${n} خانة` : "ما لقيت خانات — اضغط «نسخ تقرير فني» وأرسله");
+    };
     $("#auto").onchange = e => { auto = e.target.checked; chrome.storage.local.set({ sabaAuto: auto }); };
     $("#goForm").onclick = () => openAddForm(true);
     $("#diag").onclick = async () => {
-      const labs = labelCandidates().filter(x => x.t.length < 45).slice(0, 80);
-      const out = labs.map(x => {
-        const c = controlFor(x.el), g = controlBelow(x.el);
-        const d = el => el ? `${el.tagName.toLowerCase()}[${["type","id","name","formcontrolname","placeholder","readonly","disabled"].map(a => el.getAttribute(a) != null ? a + "=" + el.getAttribute(a) : "").filter(Boolean).join(" ")}] .${String(el.className).slice(0, 60)}` : "-";
-        return `${x.el.tagName.toLowerCase()} «${x.t}» → ${d(c)}${g && g !== c ? " | geo:" + d(g) : ""}`;
-      });
-      const ctrls = [...document.querySelectorAll(CONTROL)].filter(c => !c.closest("#saba-seha-host")).slice(0, 60)
-        .map(c => { const r = c.getBoundingClientRect(); return `${c.tagName.toLowerCase()} ${c.type || ""} id=${c.id} name=${c.name} fcn=${c.getAttribute("formcontrolname")} ph=${c.placeholder || ""} vis=${visible(c)} ro=${c.readOnly} @${Math.round(r.left)},${Math.round(r.top)}`; });
-      const txt = "SABA-DIAG v" + chrome.runtime.getManifest().version + " " + location.href + "\n--labels--\n" + out.join("\n") + "\n--controls--\n" + ctrls.join("\n");
+      const fr = await askFrames("sabaDiagCmd", "sabaDiag_");
+      const frames = [...document.querySelectorAll("iframe, frame")].map(f => { const r = f.getBoundingClientRect(); return `iframe src=${String(f.src).slice(0, 140)} id=${f.id} @${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`; });
+      const txt = "SABA-DIAG v" + chrome.runtime.getManifest().version + "\n--frames--\n" + (frames.join("\n") || "none") + "\n" + diagText() + fr.map(x => "\n==== FRAME ====\n" + x.txt).join("");
       try { await navigator.clipboard.writeText(txt); } catch { const t = document.createElement("textarea"); t.value = txt; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
-      toastLocal("انسخ التقرير — الصقه لـ Claude");
+      toastLocal(`انسخ التقرير (${fr.length} إطار) — الصقه لـ Claude`);
     };
     $("#pasteBtn").onclick = () => { $("#pasteWrap").hidden = false; $("#paste").focus(); };
     $("#done").onclick = () => {
@@ -421,6 +444,7 @@
   }
   let tt;
   function toastLocal(msg) {
+    if (!TOP) return;
     let t = $("#t"); if (!t) { t = document.createElement("div"); t.id = "t"; t.style.cssText = "position:absolute;bottom:100%;left:0;margin-bottom:8px;background:#003765;color:#fff;padding:8px 12px;border-radius:10px;font-size:13px;direction:rtl;white-space:nowrap"; $("#p").parentNode.append(t); }
     t.textContent = msg; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 2200);
   }
@@ -446,7 +470,7 @@
   const onAddForm = () => norm(document.body.innerText).includes("اضافه اجازه مرضيه") && !!document.querySelector("input[type=radio]");
   let navBusy = false;
   async function openAddForm(force) {
-    if (navBusy || !req || onAddForm()) return;
+    if (!TOP || navBusy || !req || onAddForm()) return;
     const navFor = (await chrome.storage.local.get("sabaNavFor")).sabaNavFor;
     if (!force && navFor === req.ref) return;                 // مرة وحدة لكل طلب
     if (/حسابات صحة طبي|تسجيل الدخول/.test(document.body.innerText) && !/مرحبا بك/.test(document.body.innerText)) return; // لسى ما دخل
@@ -471,13 +495,17 @@
   chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaMin"], d => {
     req = d.sabaReq || null; auto = d.sabaAuto !== false; minimized = !!d.sabaMin;
     $("#p").classList.toggle("min", minimized); $("#min").textContent = minimized ? "+" : "–";
-    document.documentElement.append(host);
+    if (TOP) document.documentElement.append(host);
     render();
     if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 900);
   });
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local") return;
+    if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
+    if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
+    if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
     if (ch.sabaReq) { req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; if (minimized) { minimized = false; $("#p").classList.remove("min"); } render(); if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
+    if (!TOP && ch.sabaReq) return;
   });
 
   // صحة تطبيق صفحة واحدة: نراقب تغيّر الصفحة وظهور خانات جديدة

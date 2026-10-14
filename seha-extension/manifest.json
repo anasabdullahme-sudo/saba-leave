@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "سابا ← صحة",
   "short_name": "Saba Seha",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "تعبئة نموذج الإجازات في منصة صحة تلقائياً من لوحة رفع الإجازات في سابا.",
   "permissions": [
     "storage"
@@ -23,12 +23,15 @@
     {
       "matches": [
         "https://www.seha.sa/*",
-        "https://seha.sa/*"
+        "https://seha.sa/*",
+        "https://*.seha.sa/*"
       ],
       "js": [
         "seha.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
     },
     {
       "matches": [
