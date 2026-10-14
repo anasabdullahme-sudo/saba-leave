@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "سابا ← صحة",
+  "short_name": "Saba Seha",
+  "version": "1.0.0",
+  "description": "تعبئة نموذج الإجازات في منصة صحة تلقائياً من لوحة رفع الإجازات في سابا.",
+  "permissions": [
+    "storage"
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "سابا ← صحة",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.seha.sa/*",
+        "https://seha.sa/*"
+      ],
+      "js": [
+        "seha.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://anasabdullahme-sudo.github.io/*",
+        "https://anas-bit7.github.io/*",
+        "https://*.web.app/*",
+        "https://*.firebaseapp.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

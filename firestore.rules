@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isStaff() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && exists(/databases/$(database)/documents/staff/$(request.auth.uid));
+    }
+    function str(v, mn, mx) { return v is string && v.size() >= mn && v.size() <= mx; }
+
+    // قائمة الموظفين — تُضاف من الكونسول فقط
+    match /staff/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /requests/{id} {
+      allow read: if isStaff();
+
+      // المريض (دخول مجهول) يقدر ينشئ طلب جديد فقط — ما يقدر يقرأ أو يعدّل
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+             'ref','type','patientName','patientNameEn','idNumber','dob','phone',
+             'leaveStart','leaveEnd','leaveDays','visitDate',
+             'companionName','companionId','companionDob','relationship',
+             'doctorName','doctorId','branch','imagePath','aiFilled','aiQuality',
+             'fileNo','nationality','gender','reason','stampDoctor','docKind',
+             'uid','status','createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.type in ['sick','companion','attendance']
+        && request.resource.data.branch in ['haramain','sulaimaniyah','tala','bawadi','watanak']
+        && str(request.resource.data.patientName, 2, 120)
+        && str(request.resource.data.doctorName, 2, 120)
+        && request.resource.data.idNumber.matches('^[12][0-9]{9}$')
+        && request.resource.data.phone.matches('^05[0-9]{8}$')
+        && request.resource.data.imagePath.matches('^uploads/' + request.auth.uid + '/[0-9]+\\.(jpg|pdf)$');
+
+      // الموظف: يغيّر الحالة + يصحّح البيانات + ينقل الفرع
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status','doneAt','doneBy','branch','branchManual',
+             'holdReason','holdNote','heldAt','heldBy','companionDob','openedBy','openedAt','sehaRef',
+             'patientName','patientNameEn','idNumber','dob','phone',
+             'leaveStart','leaveEnd','leaveDays','visitDate',
+             'companionName','companionId','relationship','doctorName',
+             'fileNo','nationality','gender','reason','stampDoctor'])
+        && request.resource.data.status in ['pending','held','done']
+        // ما ينرفع الطلب مرتين: إذا كان "تم الرفع" ما يقبل "تم الرفع" ثاني (التراجع مسموح)
+        && !(resource.data.status == 'done' && request.resource.data.status == 'done'
+             && request.resource.data.diff(resource.data).affectedKeys().hasAny(['doneAt','doneBy']))
+        && (request.resource.data.status != 'held' || request.resource.data.holdReason in ['license','data','other'])
+        && request.resource.data.branch in ['haramain','sulaimaniyah','tala','bawadi','watanak'];
+
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,578 @@
+/* ==========================================================================
+   سابا — بوابة رفع الإجازات (ملف مشترك بين صفحة المريض ولوحة الموظف)
+   --------------------------------------------------------------------------
+   1) عبّ firebaseConfig من: Firebase Console › Project settings › Your apps
+   2) عبّ RECAPTCHA_SITE_KEY من: Firebase Console › App Check
+   إذا تركت apiKey فاضي → الموقع يشتغل "وضع تجريبي" على جهازك فقط (للمعاينة).
+   ========================================================================== */
+
+export const firebaseConfig = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
+export const RECAPTCHA_SITE_KEY = "";        // reCAPTCHA Enterprise site key (مطلوب للذكاء الاصطناعي)
+export const AI_MODEL = "gemini-3.5-flash";  // نسخة مستقرة حتى مايو 2027 على الأقل
+export const FB_VERSION = "13.0.0";
+export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
+
+export const DEMO = !firebaseConfig.apiKey;
+// الوضع التجريبي مسموح فقط على جهازك أو داخل Claude — على الموقع الحقيقي بدون إعدادات يتوقف بدل ما يحفظ في المتصفح
+const LOCAL_HOST = location.protocol === "file:" || ["localhost", "127.0.0.1", "", "[::1]"].includes(location.hostname);
+
+/* ---------- الفروع ---------- */
+export const BRANCHES = [
+  { id: "haramain",     ar: "الحرمين" },
+  { id: "sulaimaniyah", ar: "السليمانية" },
+  { id: "tala",         ar: "تالا" },
+  { id: "bawadi",       ar: "سابا البوادي" },
+  { id: "watanak",      ar: "وطنك" },
+];
+export const DEFAULT_BRANCH = "bawadi";
+
+/* ---------- حساب منصة صحة لكل فرع (من صفحة "حسابات صحة طبي") ---------- */
+export const SEHA_ACCOUNTS = {
+  bawadi:   { group: "سابا الطبية",                  role: "مدخل الإجازات المرضية", key: "البوادي" },
+  tala:     { group: "مجمع عيادات تالة الجبل الطبية", role: "مدخل الإجازات المرضية", key: "تالة" },
+  watanak:  { group: "مجمع عيادات وطنك",             role: "مدخل الإجازات المرضية", key: "وطنك" },
+  haramain: { group: "شركة سابا المتطورة المحدودة",  role: "مدخل الإجازات المرضية", key: "الحرمين" },
+  sulaimaniyah: { group: "سابا الطبية",                role: "مدخل الإجازات المرضية", key: "السليمانية" },
+}; // أي طبيب غير مذكور → ترخيصه على البوادي
+export const branchName = id => (BRANCHES.find(b => b.id === id) || {}).ar || id;
+
+/* ---------- أنواع الطلبات ---------- */
+export const TYPES = [
+  { id: "sick",       ar: "إجازة مرضية",       short: "إجازة مرضية" },
+  { id: "companion",  ar: "إجازة مرضية مرافق", short: "إجازة مرافق" },
+  { id: "attendance", ar: "مشهد حضور",         short: "مشهد حضور" },
+];
+export const typeName = id => (TYPES.find(t => t.id === id) || {}).ar || id;
+
+/* ---------- أسباب التعليق ---------- */
+export const HOLD_REASONS = [
+  { id: "license", ar: "ترخيص الطبيب" },
+  { id: "data",    ar: "خطأ في البيانات" },
+  { id: "other",   ar: "أخرى" },
+];
+export const holdName = id => (HOLD_REASONS.find(r => r.id === id) || {}).ar || id || "";
+
+/* ---------- الأطباء المرخّصين في فروع أخرى (عربي + إنجليزي + صيغ بديلة) ---------- */
+export const DOCTORS = [
+  // عيادات تالا الجبل
+  { id: "rasha-waziri",     branch: "tala", ar: "رشا الوزيري",     en: "Rasha Al-Waziri",     alt: ["Rasha Elwaziry", "Rasha Waziry"] },
+  { id: "nashwa-saqqa",     branch: "tala", ar: "نشوى السقا",      en: "Nashwa Al-Saqqa",     alt: ["نشوى عبدالكافي السقا", "Nashwa Sakka", "Nachwa Sakka", "Nashwa Elsakka"] },
+  { id: "ahmed-kashaf",     branch: "tala", ar: "أحمد كشاف",       en: "Ahmed Kashaf",        alt: ["Ahmad Kashaf", "Ahmed Kashef"] },
+  { id: "sahar-mohamed",    branch: "tala", ar: "سحر محمد",        en: "Sahar Mohamed",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
+  { id: "walaa-mansour",    branch: "tala", ar: "ولاء منصور",      en: "Walaa Mansour",       alt: ["Wala Mansour", "Walaa Mansor"] },
+  { id: "manal-dowidar",    branch: "tala", ar: "منال دويدار",     en: "Manal Dowidar",       alt: ["Manal Dewidar", "Manal Doweidar"] },
+  { id: "khaled-allam",     branch: "tala", ar: "خالد علام",       en: "Khaled Allam",        alt: ["Khalid Allam", "Khaled Alam"] },
+  { id: "rami-kilany",      branch: "tala", ar: "رامي الكيلاني",   en: "Rami El-Kilany",      alt: ["Ramy Elkilany", "Rami Al-Kilani", "Ramy Kilany"] },
+  { id: "hussein-hamid",    branch: "tala", ar: "حسين عبدالحميد",  en: "Hussein Abdelhamid",  alt: ["Hussein Abdel Hamid", "Hussain Abdulhameed", "Hosein Abdelhamid"] },
+  { id: "wejdan-bajubaa",   branch: "tala", ar: "وجدان باجبع",     en: "Wejdan Bajubaa",      alt: ["Wijdan Bajabaa", "Wejdan Bajaba"] },
+  // عيادات وطنك
+  { id: "wafaa-mohamed",    branch: "watanak", ar: "وفاء محمد",    en: "Wafaa Mohamed",       alt: ["Wafa Mohammed", "Wafaa Muhammad"] },
+  { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen",       alt: ["Ilham Shahin", "Elham Shahin"] },
+  // سابا الحرمين
+  { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara",       alt: ["Alia Alwaraa", "Aliaa Elwara"] },
+  { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },
+  { id: "sara-shoreiji",    branch: "haramain", ar: "سارة الشوربجي",  en: "Sarah El-Shourbagy",  alt: ["سارة الشوريجي", "ساره الشوربجي", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara Al-Shorbagy", "Sara Shoreiji"] },
+];
+export const doctorById = id => DOCTORS.find(d => d.id === id);
+
+/* ---------- تطبيع الأسماء + مطابقة الطبيب ---------- */
+const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩", FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+export function latinDigits(s = "") {
+  return String(s).replace(/[٠-٩]/g, c => AR_DIGITS.indexOf(c)).replace(/[۰-۹]/g, c => FA_DIGITS.indexOf(c));
+}
+export function normName(s = "") {
+  return latinDigits(s).toLowerCase()
+    .replace(/[ً-ْـ]/g, "")            // تشكيل وتطويل
+    .replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/ؤ/g, "و").replace(/ئ/g, "ي")
+    .replace(/\b(dr|doctor|prof|consultant|specialist)\b\.?/g, " ")
+    .replace(/(^|\s)(د|دكتور|دكتوره|الدكتور|الدكتوره|استشاري|استشاريه|اخصائي|اخصائيه)(\.|\s|$)/g, " ")
+    .replace(/[^a-zء-ي\s-]/g, " ")
+    .replace(/(^|\s)(al|el)[- ]/g, " ")
+    .replace(/(^|\s)ال/g, " ")
+    .replace(/-/g, " ").replace(/\s+/g, " ").trim();
+}
+function lev(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  const m = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) m[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    m[i][j] = Math.min(m[i-1][j] + 1, m[i][j-1] + 1, m[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return m[a.length][b.length];
+}
+const tokEq = (x, y) => x === y || (x.length > 3 && y.length > 3 && lev(x, y) <= 1) || (x.length > 5 && y.length > 5 && lev(x, y) <= 2);
+
+/** يرجّع { doctor, branch } — الطبيب null إذا ما انعرف (الفرع = البوادي) */
+export function matchDoctor(input) {
+  const toks = normName(input).split(" ").filter(Boolean);
+  if (!toks.length) return { doctor: null, branch: DEFAULT_BRANCH };
+  let best = null, bestScore = 0;
+  for (const d of DOCTORS) {
+    for (const v of [d.ar, d.en, ...(d.alt || [])]) {
+      const dt = normName(v).split(" ").filter(Boolean);
+      const first = toks.some(t => tokEq(t, dt[0]));
+      const rest = dt.slice(1).filter(x => toks.some(t => tokEq(t, x))).length;
+      let score = (first ? 2 : 0) + rest * 1.5;
+      if (first && rest) score += 2;
+      if (score > bestScore) { bestScore = score; best = d; }
+    }
+  }
+  if (best && bestScore >= 4) return { doctor: best, branch: best.branch };
+  // اسم أول فقط: يُقبل إذا كان فريد بين الأطباء
+  if (best && bestScore >= 2 && toks.length === 1) {
+    const sameFirst = DOCTORS.filter(d => [d.ar, d.en].some(v => tokEq(normName(v).split(" ")[0], toks[0])));
+    if (sameFirst.length === 1) return { doctor: best, branch: best.branch };
+  }
+  return { doctor: null, branch: DEFAULT_BRANCH };
+}
+
+/* ---------- أدوات عامة ---------- */
+export function fmtDateInput(v) {             // يحوّل أي إدخال إلى dd/mm/yyyy أثناء الكتابة
+  const d = latinDigits(v).replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return d.slice(0, 2) + "/" + d.slice(2);
+  return d.slice(0, 2) + "/" + d.slice(2, 4) + "/" + d.slice(4);
+}
+export function isoToDmy(iso = "") {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(latinDigits(iso));
+  return m ? `${m[3].padStart(2, "0")}/${m[2].padStart(2, "0")}/${m[1]}` : (iso || "");
+}
+export function addDaysDmy(dmy, n) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy || ""); if (!m || !(n > 0)) return "";
+  const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1] + n - 1));
+  return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+}
+/** كتابة يدوية + اختيار من التقويم لنفس الخانة (dd/mm/yyyy) */
+const CAL_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M7.5 13.5h2M11 13.5h2M14.5 13.5h2M7.5 17h2M11 17h2"/></svg>';
+export function attachDatePicker(inp) {
+  if (!inp || inp.dataset.dp) return; inp.dataset.dp = "1";
+  const doc = inp.ownerDocument, W = doc.defaultView;
+  const wrap = doc.createElement("span"); wrap.className = "dp"; wrap.innerHTML = CAL_SVG;
+  const nat = doc.createElement("input"); nat.type = "date"; nat.className = "dp-native"; nat.tabIndex = -1;
+  nat.setAttribute("aria-label", "اختر من التقويم"); nat.min = "1900-01-01"; nat.max = "2100-12-31";
+  wrap.append(nat);
+  const sync = () => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(inp.value || ""); nat.value = m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+  nat.addEventListener("click", () => { try { nat.showPicker?.(); } catch {} });
+  nat.addEventListener("change", () => {
+    if (!nat.value) return;
+    inp.value = isoToDmy(nat.value);
+    inp.dispatchEvent(new W.Event("input", { bubbles: true }));
+    inp.dispatchEvent(new W.Event("change", { bubbles: true }));
+  });
+  inp.addEventListener("input", sync); inp.addEventListener("focus", sync); sync();
+  inp.insertAdjacentElement("afterend", wrap);
+}
+export function validDmy(s) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || "");
+  if (!m) return false;
+  const [d, mo, y] = [+m[1], +m[2], +m[3]];
+  return d >= 1 && d <= 31 && mo >= 1 && mo <= 12 && y >= 1300 && y <= 2100;
+}
+export const dmyKey = s => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || ""); return m ? +(m[3] + m[2] + m[1]) : 0; };
+export function normPhone(s = "") {
+  let p = latinDigits(s).replace(/\D/g, "");
+  if (p.startsWith("00966")) p = p.slice(5);
+  if (p.startsWith("966")) p = p.slice(3);
+  if (p.length === 9 && p.startsWith("5")) p = "0" + p;
+  return p;
+}
+export const validPhone = p => /^05\d{8}$/.test(normPhone(p));
+export const validId = s => /^[12]\d{9}$/.test(latinDigits(s).replace(/\D/g, ""));
+export const makeRef = () => {
+  const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return "SB-" + Array.from(crypto.getRandomValues(new Uint8Array(5)), x => a[x % a.length]).join("");
+};
+export function timeAgo(ms) {
+  const s = Math.max(1, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return "الآن";
+  const m = Math.round(s / 60); if (m < 60) return `قبل ${m} د`;
+  const h = Math.round(m / 60); if (h < 24) return `قبل ${h} س`;
+  return `قبل ${Math.round(h / 24)} يوم`;
+}
+
+/** ضغط الصورة قبل الرفع (أسرع رفع + أسرع قراءة) */
+export async function compressImage(file, maxSide = 1800, quality = 0.85) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, "image/jpeg", quality));
+    return blob || file;
+  } catch { return file; }
+}
+export const blobToBase64 = b => new Promise((res, rej) => {
+  const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(b);
+});
+const blobToDataURL = b => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
+
+/* ==========================================================================
+   تعليمات القراءة الذكية
+   ========================================================================== */
+function aiPrompt(type) {
+  const list = DOCTORS.map(d => `- id="${d.id}" | ${d.ar} | ${d.en}${d.alt?.length ? " | " + d.alt.join(" / ") : ""}`).join("\n");
+  return `You read phone photos of Saba Clinics (سابا) printed reports. Photos may be tilted, curled, folded, shadowed, partly cropped, or upside down.
+The patient chose request type: ${type} (${typeName(type)}).
+
+THE USUAL TEMPLATE ("Sick Leave Report / تقرير بإجازة مرضية", printed by Athir HIS):
+Top-right block, English label on the left, value in the middle, Arabic label on the right:
+  Patient ID / رقم الملف الطبي  → a 7-digit clinic FILE number. This is NOT the national ID. Put it ONLY in patient_file_no.
+  National ID / رقم الهوية الوطنية → 10 digits starting with 1 (Saudi) or 2 (Iqama). Put it in id_number.
+  Name / الاسم → English name in CAPITALS, with the Arabic name printed in small text right under it.
+  Nationality, Age ("33 Y - 6 M - 28 D", ignore), Date of Birth (YYYY-MM-DD), Gender.
+Middle block:
+  "Sick Leave for ( N ) one day / منحه إجازة مرضية لمدة ( N ) يوم" → leave_days = N
+  "Starting from DD-MM-YYYY / اعتباراً من" → leave_start (note: DAY-MONTH-YEAR here, unlike Date of Birth)
+  "Mobile number / رقم الجوال" → 12 digits like 9665XXXXXXXX
+  "Accompanied By / برفقة" → usually empty; if filled it is the companion's name.
+  "reason / السبب" → diagnosis text (English or Arabic).
+Bottom: "Physician Name / اسم الطبيب" printed in English (left) and Arabic (right).
+A blue/purple rubber STAMP (ختم) usually sits below it with the signing doctor's name, e.g. "Dr. Sarah El-Shourbagy / د. سارة الشوربجي".
+The stamped doctor CAN DIFFER from the printed Physician Name — read both separately.
+Ignore: Tax Number (300105513910003), branch address footer, clinic name "SABA CLINICS AL BAWADI".
+
+OUTPUT RULES:
+- "" for anything not clearly readable. Never invent or guess digits. Convert Arabic-Indic digits to 0-9.
+- All dates as Gregorian YYYY-MM-DD. If only Hijri is shown, convert and put the original in *_raw.
+- leave_end = leave_start + leave_days − 1 (if a separate end date is printed, use it).
+- patient_name_en: the English (capitals) name. patient_name_ar: the Arabic name. patient_name: Arabic if present, else English.
+- mobile: digits only as printed.
+- doctor_name: printed Physician Name (English as printed; include the Arabic too, e.g. "Sara Fouad Elgarhi / ساره فؤاد الجارحي").
+- stamp_doctor_name: the name on the stamp, or "" if no stamp/unreadable.
+- doctor_id: match the printed physician to the list below (any spelling, ignore titles like Dr./د./استشاري). stamp_doctor_id: same for the stamp. Use "" when no clear match — a shared first name alone is NOT a match.
+${list}
+- document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise.
+- For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
+- For attendance: visit_date = the visit date.
+- quality: "good", "blurry" (text hard to read), "cropped" (key fields cut off), or "not_document".`;
+}
+
+/* ==========================================================================
+   الواجهة الخلفية (Firebase حقيقي أو وضع تجريبي)
+   ========================================================================== */
+let _api;
+export function backend(role /* 'patient' | 'staff' */) {
+  return _api ||= (async () => {
+    if (!DEMO) return liveBackend(role);
+    if (!LOCAL_HOST && !window.claude?.use) { blockPage(); return new Promise(() => {}); }
+    if (window.claude?.use) { const a = await artifactBackend().catch(e => (console.warn(e), null)); if (a) return a; }
+    return demoBackend();
+  })();
+}
+
+function blockPage() {
+  const d = document.createElement("div");
+  d.setAttribute("role", "alert");
+  d.style.cssText = "position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:#F3FAFE;font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;direction:rtl;padding:24px;text-align:center;color:#003765";
+  d.innerHTML = '<div style="max-width:420px"><h1 style="font-size:24px;margin:0 0 10px">الموقع غير مربوط بقاعدة البيانات</h1><p style="color:#5B7690;line-height:1.8;margin:0">إعدادات Firebase ناقصة في ملف shared.js، فتم إيقاف الموقع حتى لا تضيع أي بيانات. تواصل مع مسؤول النظام.</p></div>';
+  (document.body || document.documentElement).append(d);
+}
+
+/* ------------- نسخة التجربة داخل Claude (قاعدة بيانات + قراءة بـ Claude) ------------- */
+const AI_KEYS = ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
+  "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
+  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship"];
+async function artifactBackend() {
+  const [db, sample, assets, user] = await Promise.all(["db", "sample", "assets", "user"].map(n => window.claude.use(n).catch(() => null)));
+  if (!db) return null;
+  const col = db.collection("requests");
+  const toObj = d => ({ id: d.id, ...d.data() });
+  const own = b => b.arrayBuffer().then(buf => new Blob([buf], { type: b.type || "image/jpeg" })); // نسخة من نفس الصفحة
+  async function topCrop(blob) {
+    try {
+      const bmp = await createImageBitmap(blob); const h = Math.round(bmp.height * 0.62);
+      const c = document.createElement("canvas"); c.width = bmp.width; c.height = h;
+      c.getContext("2d").drawImage(bmp, 0, 0, bmp.width, h, 0, 0, bmp.width, h);
+      return await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
+    } catch { return null; }
+  }
+  let me = null;
+  const everSeen = new Set();
+  const api = {
+    demo: false, trial: true, extractTimeout: 120000,
+    ensureAnon: async () => "trial",
+    warmup: async () => {},
+    async extract(blob, type) {
+      if (!sample) throw new Error("sample unavailable");
+      const lim = await sample.limits().catch(() => null);
+      if (!lim?.images) throw new Error("images unavailable");
+      const full = await own(blob);
+      const imgs = [full];
+      if ((lim.images.maxCount || 1) > 1) { const c = await topCrop(full); if (c) imgs.push(c); }
+      const prompt = aiPrompt(type) + `
+
+${imgs.length > 1 ? "Image 1 is the whole page. Image 2 is a zoomed crop of the TOP part of the same page (sharper digits) — use it to read the numbers and names accurately.\n" : ""}Reply with ONLY one JSON object with exactly these keys, every value a string ("" when unknown):
+${AI_KEYS.join(", ")}, document_kind, quality.`;
+      const r = await sample.json(prompt, { images: imgs, modelTier: "quick", cache: false });
+      const out = {}; for (const k of [...AI_KEYS, "document_kind", "quality"]) out[k] = r && r[k] != null ? String(r[k]) : "";
+      return out;
+    },
+    async uploadImage(blob, onProgress) {
+      onProgress?.(0.15);
+      const b = await own(blob);
+      if (assets) {
+        try { const r = await assets.upload(b, { type: b.type === "application/pdf" ? "application/pdf" : "image/jpeg" }); onProgress?.(1); return "/_blob/" + r.id; }
+        catch (e) { console.warn("assets", e); }
+      }
+      const small = b.type === "application/pdf" ? b : await compressImage(b, 1000, 0.62);
+      onProgress?.(1); return await blobToDataURL(small);
+    },
+    async createRequest(data) {
+      const ref = col.doc();
+      await ref.set({ ...data, status: "pending", createdAt: Date.now(), doneAt: null, doneBy: null });
+      return ref.id;
+    },
+    onAuth(cb) {
+      (async () => {
+        let name = "";
+        try { name = (await user?.me())?.name || ""; } catch {}
+        me = { uid: "trial", email: "", name: name || "الموظف" }; cb(me);
+      })();
+      return () => {};
+    },
+    login: async () => {}, logout: async () => {},
+    watchPending(cb, onErr) {
+      let first = true;
+      return col.where("status", "in", ["pending", "held"]).onSnapshot(s => {
+        const list = s.docs.map(toObj).sort((a, b) => a.createdAt - b.createdAt);
+        const added = first ? [] : list.filter(x => !everSeen.has(x.id)).map(x => x.id);
+        list.forEach(x => everSeen.add(x.id)); first = false;
+        cb(list, added);
+      }, e => onErr?.({ code: e.code, message: e.message }));
+    },
+    async loadDone(branch, type) {
+      const s = await col.where("status", "==", "done").where("branch", "==", branch).where("type", "==", type).orderBy("doneAt", "desc").limit(50).get();
+      return { items: s.docs.map(toObj), cursor: null, more: false };
+    },
+    async countDoneToday(branch, type) {
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      const s = await col.where("status", "==", "done").where("branch", "==", branch).where("type", "==", type).where("doneAt", ">=", +d0).get();
+      return s.size;
+    },
+    async markDone(id, by) {
+      const cur = await col.doc(id).get();
+      if (cur.exists && cur.data().status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.data().doneBy });
+      await col.doc(id).update({ status: "done", doneAt: Date.now(), doneBy: by });
+    },
+    claim: (id, by) => col.doc(id).update({ openedBy: by, openedAt: Date.now() }),
+    undoDone: id => col.doc(id).update({ status: "pending", doneAt: null, doneBy: null }),
+    markHeld: (id, reason, note, by) => col.doc(id).update({ status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }),
+    unhold: id => col.doc(id).update({ status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }),
+    update: (id, patch) => col.doc(id).update(patch),
+    imageUrl: async path => path,
+  };
+  return api;
+}
+
+/* ---------------------------- Firebase ---------------------------- */
+async function liveBackend(role) {
+  const u = n => `https://www.gstatic.com/firebasejs/${FB_VERSION}/firebase-${n}.js`;
+  const [A, AU, FS, ST, AC] = await Promise.all([u("app"), u("auth"), u("firestore"), u("storage"), u("app-check")].map(x => import(x)));
+  const app = A.initializeApp(firebaseConfig);
+  if (RECAPTCHA_SITE_KEY) AC.initializeAppCheck(app, { provider: new AC.ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true });
+  const auth = AU.getAuth(app);
+  const db = role === "staff"
+    ? FS.initializeFirestore(app, { localCache: FS.persistentLocalCache({ tabManager: FS.persistentMultipleTabManager() }) })
+    : FS.getFirestore(app);
+  const st = ST.getStorage(app);
+  const col = FS.collection(db, "requests");
+  const toObj = d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now(), doneAt: x.doneAt?.toMillis?.() ?? null, heldAt: x.heldAt?.toMillis?.() ?? null, openedAt: x.openedAt?.toMillis?.() ?? null }; };
+
+  let model = null;
+  async function getModel() {
+    if (model) return model;
+    const AI = await import(u("ai"));
+    const S = AI.Schema;
+    const props = {};
+    ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
+     "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
+     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship"].forEach(k => props[k] = S.string());
+    props.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] });
+    props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
+    const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
+    const cfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: props }), temperature: 0 };
+    try { model = AI.getGenerativeModel(ai, { model: AI_MODEL, generationConfig: { ...cfg, thinkingConfig: { thinkingLevel: AI.ThinkingLevel.LOW } } }); }
+    catch { model = AI.getGenerativeModel(ai, { model: AI_MODEL, generationConfig: cfg }); }
+    return model;
+  }
+
+  const api = {
+    demo: false,
+    /* --- المريض --- */
+    async ensureAnon() { if (!auth.currentUser) await AU.signInAnonymously(auth); return auth.currentUser.uid; },
+    async warmup() { try { await api.ensureAnon(); await getModel(); } catch (e) { console.warn(e); } },
+    async extract(blob, type) {
+      const m = await getModel();
+      const b64 = await blobToBase64(blob);
+      const res = await m.generateContent([aiPrompt(type), { inlineData: { data: b64, mimeType: blob.type || "image/jpeg" } }]);
+      return JSON.parse(res.response.text());
+    },
+    async uploadImage(blob, onProgress) {
+      const uid = await api.ensureAnon();
+      const pdf = blob.type === "application/pdf";
+      const path = `uploads/${uid}/${Date.now()}.${pdf ? "pdf" : "jpg"}`;
+      const task = ST.uploadBytesResumable(ST.ref(st, path), blob, { contentType: pdf ? "application/pdf" : "image/jpeg" });
+      await new Promise((res, rej) => task.on("state_changed", s => onProgress?.(s.bytesTransferred / s.totalBytes), rej, res));
+      return path;
+    },
+    async createRequest(data) {
+      const uid = await api.ensureAnon();
+      const ref = FS.doc(col);
+      await FS.setDoc(ref, { ...data, uid, status: "pending", createdAt: FS.serverTimestamp() });
+      return ref.id;
+    },
+    /* --- الموظف --- */
+    onAuth(cb) {
+      return AU.onAuthStateChanged(auth, async user => {
+        if (!user || user.isAnonymous) return cb(null);
+        const s = await FS.getDoc(FS.doc(db, "staff", user.uid)).catch(() => null);
+        cb(s?.exists() ? { uid: user.uid, email: user.email, name: s.data().name || user.email } : { uid: user.uid, email: user.email, denied: true });
+      });
+    },
+    login: (e, p) => AU.signInWithEmailAndPassword(auth, e, p),
+    logout: () => AU.signOut(auth),
+    watchPending(cb, onErr) {
+      return FS.onSnapshot(FS.query(col, FS.where("status", "in", ["pending", "held"])), s => {
+        const list = s.docs.map(toObj).sort((a, b) => a.createdAt - b.createdAt);
+        cb(list, s.docChanges().filter(c => c.type === "added" && !s.metadata.fromCache && !c.doc.metadata.hasPendingWrites).map(c => c.doc.id));
+      }, onErr);
+    },
+    async loadDone(branch, type, cursor, n = 30) {
+      const cons = [FS.where("status", "==", "done"), FS.where("branch", "==", branch), FS.where("type", "==", type), FS.orderBy("doneAt", "desc"), FS.limit(n)];
+      if (cursor) cons.splice(4, 0, FS.startAfter(cursor));
+      const s = await FS.getDocs(FS.query(col, ...cons));
+      return { items: s.docs.map(toObj), cursor: s.docs[s.docs.length - 1] || null, more: s.docs.length === n };
+    },
+    async countDoneToday(branch, type) {
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      const q = FS.query(col, FS.where("status", "==", "done"), FS.where("branch", "==", branch), FS.where("type", "==", type), FS.where("doneAt", ">=", FS.Timestamp.fromDate(d0)));
+      return (await FS.getCountFromServer(q)).data().count;
+    },
+    markDone: (id, by) => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(col, id), cur = await tx.get(ref);
+      if (cur.exists() && cur.data().status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.data().doneBy });
+      tx.update(ref, { status: "done", doneAt: FS.serverTimestamp(), doneBy: by });
+    }),
+    claim: (id, by) => FS.updateDoc(FS.doc(col, id), { openedBy: by, openedAt: FS.serverTimestamp() }),
+    undoDone: id => FS.updateDoc(FS.doc(col, id), { status: "pending", doneAt: null, doneBy: null }),
+    markHeld: (id, reason, note, by) => FS.updateDoc(FS.doc(col, id), { status: "held", holdReason: reason, holdNote: note || "", heldAt: FS.serverTimestamp(), heldBy: by }),
+    unhold: id => FS.updateDoc(FS.doc(col, id), { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }),
+    update: (id, patch) => FS.updateDoc(FS.doc(col, id), patch),
+    imageUrl: path => ST.getDownloadURL(ST.ref(st, path)),
+  };
+  return api;
+}
+
+/* ---------------------------- وضع تجريبي ---------------------------- */
+function demoBackend() {
+  const KEY = "saba_leave_demo_v2", bc = "BroadcastChannel" in window ? new BroadcastChannel(KEY) : null;
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; } };
+  const save = list => { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { console.warn("demo storage full", e); } bc?.postMessage("x"); fire(); };
+  let listeners = [];
+  const fire = () => listeners.forEach(f => f());
+  bc && (bc.onmessage = fire);
+  window.addEventListener("storage", e => e.key === KEY && fire());
+
+  if (!load()) save(seed());
+
+  const api = {
+    demo: true,
+    ensureAnon: async () => "demo",
+    warmup: async () => {},
+    async extract(blob, type) {
+      await new Promise(r => setTimeout(r, 2200));
+      const d = DOCTORS[Math.floor(Math.random() * DOCTORS.length)];
+      return { patient_name: "محمد عبدالله الغامدي", patient_name_ar: "محمد عبدالله الغامدي", patient_name_en: "MOHAMMED ABDULLAH ALGHAMDI",
+        patient_file_no: "7400123", nationality: "Saudi Arabia", gender: "Male", mobile: "966551234567", reason: "Acute gastroenteritis",
+        stamp_doctor_name: "Dr. " + d.en, stamp_doctor_id: d.id, document_kind: type === "companion" ? "companion_leave" : type === "attendance" ? "attendance" : "sick_leave",
+        id_number: "1098765432", dob: "1991-03-14", leave_start: new Date().toISOString().slice(0, 10), leave_end: new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10),
+        leave_days: "3", visit_date: new Date().toISOString().slice(0, 10), doctor_name: "Dr. " + d.en, doctor_id: d.id,
+        companion_name: type === "companion" ? "عبدالله سعيد الغامدي" : "", companion_id: type === "companion" ? "1022334455" : "", companion_dob: type === "companion" ? "1965-07-02" : "", relationship: type === "companion" ? "ابن" : "", quality: "good" };
+    },
+    async uploadImage(blob, onProgress) {
+      for (let i = 1; i <= 5; i++) { await new Promise(r => setTimeout(r, 120)); onProgress?.(i / 5); }
+      const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 900, 0.7);
+      return await blobToDataURL(small);
+    },
+    async createRequest(data) {
+      const list = load() || []; const id = "d" + Date.now();
+      list.push({ ...data, id, status: "pending", createdAt: Date.now() }); save(list); return id;
+    },
+    onAuth(cb) { const u = sessionStorage.getItem(KEY + "_u"); cb(u ? { uid: "demo", email: u, name: u.split("@")[0] } : null); api._authCb = cb; return () => {}; },
+    async login(e) { sessionStorage.setItem(KEY + "_u", e || "staff@saba.sa"); api._authCb?.({ uid: "demo", email: e, name: (e || "staff").split("@")[0] }); },
+    async logout() { sessionStorage.removeItem(KEY + "_u"); api._authCb?.(null); },
+    watchPending(cb) {
+      let known = null; const everSeen = new Set();
+      const run = () => {
+        const list = (load() || []).filter(x => x.status === "pending" || x.status === "held").sort((a, b) => a.createdAt - b.createdAt);
+        const added = known ? list.filter(x => !everSeen.has(x.id)).map(x => x.id) : [];
+        known = true; list.forEach(x => everSeen.add(x.id)); cb(list, added);
+      };
+      listeners.push(run); run();
+      return () => listeners = listeners.filter(f => f !== run);
+    },
+    async loadDone(branch, type) {
+      const items = (load() || []).filter(x => x.status === "done" && x.branch === branch && x.type === type).sort((a, b) => b.doneAt - a.doneAt);
+      return { items, cursor: null, more: false };
+    },
+    async countDoneToday(branch, type) {
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      return (load() || []).filter(x => x.status === "done" && x.branch === branch && x.type === type && x.doneAt >= +d0).length;
+    },
+    async markDone(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) { x.status = "done"; x.doneAt = Date.now(); x.doneBy = by; } save(l); },
+    async claim(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.openedBy = by; x.openedAt = Date.now(); } save(l); },
+    async undoDone(id) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.status = "pending"; x.doneAt = null; x.doneBy = null; } save(l); },
+    async markHeld(id, reason, note, by) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }); save(l); },
+    async unhold(id) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); save(l); },
+    async update(id, patch) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, patch); save(l); },
+    imageUrl: async path => path,
+  };
+  return api;
+}
+
+function demoDoc(name, id, docName, kind) {
+  const c = document.createElement("canvas"); c.width = 620; c.height = 820;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fbfcfd"; g.fillRect(0, 0, 620, 820);
+  g.fillStyle = "#0082D4"; g.fillRect(0, 0, 620, 90);
+  g.fillStyle = "#fff"; g.font = "bold 30px sans-serif"; g.textAlign = "center"; g.fillText(kind, 310, 56);
+  g.fillStyle = "#003765"; g.textAlign = "right"; g.font = "22px sans-serif";
+  const rows = [["اسم المريض", name], ["رقم الهوية", id], ["الطبيب المعالج", docName], ["تاريخ الإصدار", new Date().toLocaleDateString("en-GB")]];
+  rows.forEach(([k, v], i) => { g.fillStyle = "#6b8299"; g.fillText(k, 580, 160 + i * 90); g.fillStyle = "#003765"; g.font = "bold 24px sans-serif"; g.fillText(v, 580, 195 + i * 90); g.font = "22px sans-serif"; });
+  g.strokeStyle = "#cfe3f1"; for (let i = 0; i < 9; i++) { g.beginPath(); g.moveTo(40, 560 + i * 26); g.lineTo(580, 560 + i * 26); g.stroke(); }
+  g.save(); g.translate(310, 470); g.rotate(-0.5); g.fillStyle = "rgba(0,130,212,.12)"; g.font = "bold 64px sans-serif"; g.textAlign = "center"; g.fillText("نموذج تجريبي", 0, 0); g.restore();
+  return c.toDataURL("image/jpeg", 0.6);
+}
+function seed() {
+  const people = [
+    ["سعد خالد الحربي", "1087654321", "rasha-waziri", "sick", 34],
+    ["Fatimah Ali Hassan", "2456789012", "ehab-metwally", "sick", 21],
+    ["نورة عبدالرحمن القحطاني", "1122334455", "nashwa-saqqa", "companion", 15],
+    ["عمر سالم باوزير", "1099887766", "", "sick", 9],
+    ["Ahmed Youssef Mahmoud", "2387766554", "elham-shaheen", "attendance", 6],
+    ["ريم فهد العتيبي", "1144556677", "khaled-allam", "attendance", 3],
+    ["ماجد حسن الزهراني", "1066554433", "sara-shoreiji", "sick", 2],
+    ["هند محمد الشهري", "1033221100", "rami-kilany", "sick", 300],
+    ["Yasser Kamal", "2211009988", "wafaa-mohamed", "sick", 200],
+  ];
+  return people.map(([n, id, did, type, mins], i) => {
+    const d = doctorById(did);
+    const docName = d ? (n.match(/[a-z]/i) ? "Dr. " + d.en : "د. " + d.ar) : "د. أكرم الشرقاوي";
+    const done = i >= 7;
+    const t = Date.now() - mins * 60000;
+    const today = isoToDmy(new Date(t).toISOString());
+    return { id: "seed" + i, ref: "SB-" + (48210 + i), type, patientName: n, idNumber: id, dob: "14/03/1990", phone: "05" + String(51234567 + i * 1111),
+      leaveStart: type === "attendance" ? "" : today, leaveEnd: type === "attendance" ? "" : today, leaveDays: type === "attendance" ? "" : "1",
+      visitDate: type === "attendance" ? today : "", doctorName: docName, doctorId: did || "", branch: d ? d.branch : DEFAULT_BRANCH,
+      companionName: type === "companion" ? "فهد عبدالرحمن القحطاني" : "", companionId: type === "companion" ? "1011223344" : "", companionDob: type === "companion" ? "02/07/1985" : "", relationship: type === "companion" ? "زوج" : "",
+      ...(i === 3 ? { holdReason: "license", holdNote: "الطبيب غير مسجل في أي فرع", heldAt: t + 120000, heldBy: "anas" } : {}),
+      imagePath: demoDoc(n, id, docName, typeName(type)), status: done ? "done" : i === 3 ? "held" : "pending", createdAt: t, doneAt: done ? t + 600000 : null, doneBy: done ? "anas" : null, aiFilled: true };
+  });
+}

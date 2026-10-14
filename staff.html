@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#F3FAFE">
+<title>لوحة الإجازات | سابا</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#003765; --blue:#0082D4; --sky:#00A6E2; --sky-2:#7FD0F0; --ice:#EAF6FC; --ice-2:#F5FBFE;
+  --ink:#0B2B47; --muted:#5B7690; --line:#DCEBF4; --white:#fff; --red:#E5383B; --amber:#D98B12; --ok:#0E9F6E;
+  --shadow:0 1px 2px rgba(0,55,101,.05),0 14px 36px -16px rgba(0,55,101,.22);
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;
+  background:radial-gradient(1200px 520px at 50% -220px,#CDEEFB 0%,rgba(205,238,251,0) 70%),linear-gradient(180deg,#F3FAFE 0%,#F8FCFE 100%);background-attachment:fixed}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+:focus-visible{outline:3px solid var(--sky);outline-offset:2px;border-radius:8px}
+[hidden]{display:none!important}
+
+/* ---------- top bar ---------- */
+.bar{position:sticky;top:0;z-index:10;backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px);background:rgba(243,250,254,.78);border-bottom:1px solid rgba(220,235,244,.7)}
+.bar-in{max-width:1320px;margin:0 auto;padding:12px 22px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--navy)}
+.brand b{font-size:19px;font-weight:700}
+.brand small{display:block;font-size:12px;color:var(--muted);margin-top:-3px}
+.branches{display:flex;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:99px;padding:5px;box-shadow:0 1px 2px rgba(0,55,101,.04)}
+.br{position:relative;height:38px;padding:0 18px;border-radius:99px;font-size:15px;font-weight:500;color:var(--muted);white-space:nowrap;transition:background .2s,color .2s}
+.br:hover{color:var(--navy);background:var(--ice-2)}
+.br.on{background:var(--navy);color:#fff}
+.badge{position:absolute;top:-6px;left:-4px;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--red);color:#fff;font-size:11.5px;font-weight:700;line-height:20px;text-align:center;border:2px solid #F3FAFE;font-variant-numeric:tabular-nums}
+.badge.pop{animation:pop .5s}
+@keyframes pop{40%{transform:scale(1.35)}}
+.me{display:flex;align-items:center;gap:8px;justify-self:end}
+.icon-btn{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--muted);background:var(--white);border:1px solid var(--line)}
+.icon-btn:hover{color:var(--navy)}
+.icon-btn.on{color:var(--blue);border-color:var(--sky-2)}
+.seha{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:99px;background:linear-gradient(180deg,#1495E4,var(--blue));color:#fff;font-weight:600;font-size:14.5px;text-decoration:none;white-space:nowrap;box-shadow:0 6px 16px -8px rgba(0,130,212,.7)}
+.seha:hover{filter:brightness(1.07)}
+.seha:focus-visible{outline:3px solid var(--sky);outline-offset:2px}
+.seha-wide{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;border-radius:12px;border:1.5px dashed var(--sky-2);background:var(--ice-2);color:var(--blue);font-weight:600;font-size:15px;text-decoration:none}
+.seha-wide:hover{background:var(--ice);border-style:solid}
+.seha-wide{flex-direction:column;gap:0;height:auto;min-height:44px;padding:7px 10px;line-height:1.35}
+.seha-wide .l1{display:flex;align-items:center;gap:8px}
+.seha-wide .l2{font-size:12px;font-weight:500;color:var(--muted)}
+.ext-hint{font-size:12px;color:var(--muted);text-align:center;margin-top:-2px}
+.ext-hint b{color:var(--ok)}
+.who{font-size:13.5px;color:var(--muted);padding-inline:4px}
+.demo-pill{font-size:12px;background:#FFF4D6;color:#7A5A00;padding:4px 10px;border-radius:99px}
+
+/* ---------- heading ---------- */
+main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
+.head{text-align:center}
+.head h1{font-size:clamp(28px,4vw,42px);font-weight:700;color:var(--navy);letter-spacing:-.4px}
+.head p{color:var(--muted);margin-top:6px;font-size:16px}
+.types{display:flex;justify-content:center;gap:10px;margin-top:22px;flex-wrap:wrap}
+.ty{position:relative;display:flex;align-items:center;gap:10px;height:48px;padding:0 20px;border-radius:14px;background:var(--white);border:1px solid var(--line);font-weight:600;color:var(--muted);transition:.2s}
+.ty svg{color:var(--sky)}
+.ty:hover{border-color:var(--sky-2);color:var(--navy)}
+.ty.on{border-color:var(--blue);color:var(--navy);box-shadow:0 0 0 3px rgba(0,130,212,.12)}
+.ty .badge{top:-8px;left:-6px;border-color:#F6FBFE}
+
+.tools{display:flex;justify-content:center;margin-top:22px}
+.search{position:relative;width:min(460px,100%)}
+.search input{width:100%;height:46px;border-radius:99px;border:1px solid var(--line);background:var(--white);padding:0 44px 0 16px;font-size:15px}
+.search input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 4px rgba(0,166,226,.14)}
+.search svg{position:absolute;right:16px;top:13px;color:var(--muted)}
+
+/* ---------- lanes ---------- */
+.lane-switch{display:none}
+.lanes{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:18px;margin-top:28px;align-items:start}
+.lane{background:rgba(255,255,255,.75);border:1px solid var(--line);border-radius:22px;overflow:hidden}
+.lane-h{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);background:var(--white)}
+.lane-h h2{font-size:17px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:10px}
+.count{min-width:28px;height:26px;border-radius:99px;padding:0 9px;display:inline-grid;place-items:center;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.count.red{background:var(--red);color:#fff}
+.count.ok{background:#E3F6EF;color:var(--ok)}
+.count.amber{background:#FFF1DC;color:var(--amber)}
+.l-held .lane-h{background:#FFFBF4}
+.chip.hold{background:#FFF1DC;color:#9A5B00}
+.hold-note{font-size:13px;color:#8A5A12;margin-top:5px;line-height:1.5}
+.quick-row{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+.quick-row .quick{margin-top:0}
+.quick.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+.quick.ghost:hover{background:#FFF1DC;color:#9A5B00;border-color:#F3D3A2}
+.btn-row{display:grid;grid-template-columns:1fr auto;gap:8px}
+.btn-hold{background:#FFF7EA;color:#9A5B00;border:1px solid #F3D3A2}
+.btn-hold:hover{background:#FFEFD6}
+.hold-box{border:1px solid #F3D3A2;background:#FFFBF4;border-radius:14px;padding:12px;display:grid;gap:10px}
+.hold-box h4{font-size:14px;color:#7A4A00}
+.reasons{display:flex;gap:6px;flex-wrap:wrap}
+.reasons button{height:38px;padding:0 14px;border-radius:99px;border:1px solid #F3D3A2;background:#fff;color:#7A4A00;font-weight:600;font-size:14px}
+.reasons button[aria-pressed="true"]{background:#9A5B00;border-color:#9A5B00;color:#fff}
+.hold-box textarea{width:100%;min-height:62px;border:1px solid #F3D3A2;border-radius:10px;padding:8px 10px;font:inherit;font-size:14.5px;resize:vertical;background:#fff}
+.hold-box textarea:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(217,139,18,.15)}
+.hold-banner{margin:0 20px;padding:10px 12px;border-radius:12px;background:#FFF1DC;color:#7A4A00;font-size:14px;line-height:1.6}
+.hold-banner b{display:block}
+.chip.open{background:#E6F0FB;color:#0B5CA8}
+.open-banner{margin:12px 20px 0;padding:10px 12px;border-radius:12px;background:#E6F0FB;color:#0B4A87;font-size:14px;line-height:1.6}
+.lane-h span{font-size:13px;color:var(--muted)}
+.list{max-height:calc(100vh - 330px);min-height:240px;overflow:auto;padding:10px}
+.row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;width:100%;text-align:right;padding:14px 14px;border-radius:14px;background:var(--white);border:1px solid transparent;margin-bottom:8px;transition:border-color .15s,box-shadow .15s}
+.row:hover{border-color:var(--sky-2);box-shadow:var(--shadow)}
+.row.sel{border-color:var(--blue)}
+.row.new{animation:flash 2.2s}
+@keyframes flash{0%,40%{background:#E0F4FC}}
+.row .nm{font-weight:600;font-size:16px;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row .meta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:5px;font-size:13.5px;color:var(--muted)}
+.row .meta .id{direction:ltr;font-variant-numeric:tabular-nums;color:var(--ink)}
+.chip{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--ice);color:var(--blue)}
+.chip.dup{background:#FDECEC;color:var(--red)}
+.chip.warn{background:#FFF3E0;color:var(--amber)}
+.age{font-size:12.5px;color:var(--muted);white-space:nowrap;text-align:left}
+.age.late{color:var(--amber);font-weight:600}
+.quick{margin-top:6px;height:34px;padding:0 12px;border-radius:10px;background:var(--ice);color:var(--blue);font-size:13.5px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.quick:hover{background:var(--blue);color:#fff}
+.done-row .nm{color:var(--muted)}
+.empty{padding:50px 20px;text-align:center;color:var(--muted)}
+.empty b{display:block;font-size:17px;color:var(--navy);margin-bottom:4px}
+.more{display:block;margin:6px auto 4px;font-size:14px;color:var(--blue);font-weight:600;padding:8px 14px}
+
+/* ---------- drawer ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,35,64,.32);opacity:0;pointer-events:none;transition:.25s;z-index:30}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;bottom:0;left:0;width:min(980px,100vw);background:var(--white);z-index:31;transform:translateX(-102%);transition:transform .32s cubic-bezier(.2,.8,.2,1);display:grid;grid-template-columns:420px 1fr;box-shadow:24px 0 60px -20px rgba(0,35,64,.3)}
+.drawer.on{transform:none}
+.viewer{background:#0B2B47;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;order:2}
+.viewer img{max-width:100%;max-height:100%;transition:transform .25s;cursor:zoom-in;user-select:none}
+.viewer.zoom img{cursor:zoom-out}
+.viewer iframe{width:100%;height:100%;border:0;background:#fff}
+.vtools{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:6px;background:rgba(255,255,255,.95);padding:6px;border-radius:99px}
+.vtools button,.vtools a{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--navy)}
+.vtools button:hover,.vtools a:hover{background:var(--ice)}
+.panel{display:flex;flex-direction:column;min-height:0;order:1;border-left:1px solid var(--line)}
+.panel-h{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start}
+.panel-h h3{font-size:20px;color:var(--navy);line-height:1.35}
+.panel-h p{font-size:13.5px;color:var(--muted);margin-top:3px}
+.panel-h .x{margin-inline-start:auto}
+.fields{flex:1;overflow:auto;padding:12px 20px 20px}
+.sec{font-size:13px;font-weight:600;color:var(--blue);margin:14px 0 6px}
+.fr{display:grid;grid-template-columns:110px 1fr 34px;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.fr label{font-size:13px;color:var(--muted)}
+.fr input,.fr select{width:100%;height:38px;border:1px solid transparent;border-radius:9px;padding:0 8px;font-size:15.5px;font-weight:500;background:transparent}
+.fr input:hover,.fr select:hover{border-color:var(--line)}
+.fr input:focus,.fr select:focus{outline:none;border-color:var(--sky);background:var(--ice-2)}
+.fr input.ltr{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
+.fr{position:relative}
+.fr input[data-date]{padding-left:44px}
+.fr .dp{left:46px;top:50%;transform:translateY(-50%);width:32px;height:32px}
+.dp{position:absolute;display:grid;place-items:center;width:36px;height:36px;border-radius:9px;color:var(--blue);background:var(--ice-2,#F5FBFE);pointer-events:auto}
+.dp:hover,.dp:focus-within{background:var(--ice,#EAF6FC)}
+.dp-native{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0;margin:0;font-size:16px}
+.dp-native::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:auto;height:auto;margin:0;padding:0;cursor:pointer}
+.cp{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--muted)}
+.cp:hover{background:var(--ice);color:var(--blue)}
+.cp.ok{color:var(--ok)}
+.panel-f{padding:16px 20px;border-top:1px solid var(--line);display:grid;gap:8px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:52px;padding:0 22px;border-radius:14px;font-weight:600;font-size:16.5px}
+.btn-primary{background:linear-gradient(180deg,#1495E4,var(--blue));color:#fff;box-shadow:0 8px 20px -8px rgba(0,130,212,.6)}
+.btn-primary:hover{filter:brightness(1.06)}
+.btn-ghost{background:var(--ice-2);color:var(--blue);border:1px solid var(--line)}
+.btn[disabled]{opacity:.6;cursor:not-allowed}
+.hint{font-size:12.5px;color:var(--muted);text-align:center}
+kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px;padding:1px 6px;color:var(--navy)}
+
+/* ---------- login ---------- */
+.login{min-height:100vh;display:grid;place-items:center;padding:20px}
+.login .card{width:min(420px,100%);background:var(--white);border:1px solid var(--line);border-radius:24px;padding:34px 28px;box-shadow:var(--shadow)}
+.login h1{font-size:26px;color:var(--navy);margin-top:18px}
+.login p{color:var(--muted);margin-top:4px}
+.login label{display:block;font-size:14px;margin:16px 0 6px;font-weight:500}
+.login input{width:100%;height:50px;border:1.5px solid var(--line);border-radius:12px;padding:0 14px;font-size:16px;direction:ltr;text-align:right}
+.login input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 4px rgba(0,166,226,.14)}
+.login .btn{width:100%;margin-top:22px}
+.login .err{color:var(--red);font-size:14px;margin-top:12px;min-height:20px}
+
+.toast{position:fixed;bottom:24px;right:50%;transform:translateX(50%) translateY(30px);opacity:0;background:var(--navy);color:#fff;padding:12px 16px 12px 12px;border-radius:14px;font-size:14.5px;transition:.25s;z-index:50;display:flex;align-items:center;gap:14px;max-width:92vw}
+.toast.on{opacity:1;transform:translateX(50%)}
+.toast button{color:var(--sky-2);font-weight:700;padding:4px 8px}
+
+@media (max-width:1240px) and (min-width:821px){
+  .lanes{grid-template-columns:1fr 1fr}
+  .l-done{grid-column:1 / -1}
+}
+@media (max-width:1100px){
+  .bar-in{grid-template-columns:1fr auto;grid-template-areas:"brand me" "nav nav"}
+  .brand{grid-area:brand}.me{grid-area:me}.branches{grid-area:nav;justify-self:center;max-width:100%;overflow-x:auto;scrollbar-width:none;padding-top:10px}
+  .drawer{grid-template-columns:1fr;grid-template-rows:42vh 1fr}
+  .viewer{order:1}.panel{order:2;border-left:0}
+}
+@media (max-width:820px){
+  .types{flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;padding:10px 4px 4px;margin-top:12px;scrollbar-width:none}
+  .ty{flex:none;height:44px;padding:0 14px;font-size:14.5px}
+  .lane-switch{display:flex;justify-content:center;gap:6px;margin-top:20px}
+  .lane-switch button{height:40px;padding:0 16px;border-radius:99px;border:1px solid var(--line);background:var(--white);font-weight:600;color:var(--muted)}
+  .lane-switch button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .lanes{grid-template-columns:1fr;margin-top:14px}
+  .lanes[data-show=pending] .lane:not(.l-pending),.lanes[data-show=held] .lane:not(.l-held),.lanes[data-show=done] .lane:not(.l-done){display:none}
+  .list{max-height:none}
+  .br{padding:0 13px;font-size:14px}
+  .who{display:none}
+  .seha{height:38px;padding:0 12px;font-size:13.5px}
+  .me .demo-pill,.brand small{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ تسجيل الدخول ============ -->
+<section class="login" id="vLogin" hidden>
+  <form class="card" id="loginForm">
+    <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
+    <h1>لوحة رفع الإجازات</h1>
+    <p>دخول موظفي سابا</p>
+    <label for="em">البريد الإلكتروني</label><input id="em" type="email" autocomplete="username" required>
+    <label for="pw">كلمة المرور</label><input id="pw" type="password" autocomplete="current-password" required>
+    <button class="btn btn-primary" type="submit">دخول</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</section>
+
+<!-- ============ اللوحة ============ -->
+<div id="vApp" hidden>
+  <header class="bar"><div class="bar-in">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
+      <span><b>سابا</b><small>لوحة رفع الإجازات</small></span>
+    </div>
+    <nav class="branches" id="branches" aria-label="الفروع"></nav>
+    <div class="me">
+      <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
+      <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
+      <span class="who" id="who"></span>
+      <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
+      <button class="icon-btn" id="btnOut" title="تسجيل الخروج" aria-label="تسجيل الخروج"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 8l-4 4 4 4M5 12h11"/></svg></button>
+    </div>
+  </div></header>
+
+  <main>
+    <div class="head">
+      <h1 id="hTitle"></h1>
+      <p id="hSub"></p>
+      <div class="types" id="types"></div>
+      <div class="tools"><label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" placeholder="ابحث بالاسم، رقم الهوية، الجوال أو رقم الطلب" aria-label="بحث"></label></div>
+    </div>
+    <div class="lane-switch"><button class="on" data-lane="pending">في الانتظار</button><button data-lane="held">معلّق</button><button data-lane="done">تم الرفع</button></div>
+    <div class="lanes" id="lanes" data-show="pending">
+      <section class="lane l-pending">
+        <div class="lane-h"><h2>في الانتظار <span class="count red" id="cPending">0</span></h2><span>الأقدم أولاً</span></div>
+        <div class="list" id="lPending"></div>
+      </section>
+      <section class="lane l-held">
+        <div class="lane-h"><h2>معلّق <span class="count amber" id="cHeld">0</span></h2><span>يحتاج متابعة</span></div>
+        <div class="list" id="lHeld"></div>
+      </section>
+      <section class="lane l-done">
+        <div class="lane-h"><h2>تم الرفع <span class="count ok" id="cDone">0</span></h2><span id="doneToday">اليوم</span></div>
+        <div class="list" id="lDone"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- ============ تفاصيل الطلب ============ -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="panel">
+    <div class="panel-h">
+      <div><h3 id="dName"></h3><p id="dMeta"></p></div>
+      <button class="icon-btn x" id="dClose" aria-label="إغلاق"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="fields" id="dFields"></div>
+    <div class="hold-banner" id="dHoldInfo" hidden></div>
+    <div class="open-banner" id="dOpenInfo" hidden></div>
+    <div class="panel-f">
+      <div class="hold-box" id="holdBox" hidden>
+        <h4>سبب التعليق</h4>
+        <div class="reasons" id="reasons"></div>
+        <textarea id="holdNote" placeholder="ملاحظة (مطلوبة إذا اخترت أخرى)"></textarea>
+        <div class="btn-row"><button class="btn btn-hold" id="holdConfirm">تعليق الطلب</button><button class="btn btn-ghost" id="holdCancel">إلغاء</button></div>
+      </div>
+      <a class="seha-wide" id="sehaDrawer" target="_blank" rel="noopener"><span class="l1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span id="sehaTxt">افتح منصة صحة للرفع</span></span><span class="l2" id="sehaAcc"></span></a>
+      <div class="ext-hint" id="extHint"></div>
+      <div class="btn-row" id="dActions">
+        <button class="btn btn-primary" id="dDone"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>تم الرفع على صحة</span></button>
+        <button class="btn btn-hold" id="dHold">تعليق</button>
+        <button class="btn btn-ghost" id="dUnhold" hidden>إرجاع للانتظار</button>
+      </div>
+      <p class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> لتأكيد الرفع · <kbd>Esc</kbd> للإغلاق</p>
+    </div>
+  </div>
+  <div class="viewer" id="viewer">
+    <img id="dImg" alt="صورة التقرير">
+    <iframe id="dPdf" title="ملف التقرير" hidden></iframe>
+    <div class="vtools">
+      <button id="vRot" title="تدوير" aria-label="تدوير"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+      <button id="vZoom" title="تكبير" aria-label="تكبير"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M11 8v6M8 11h6"/></svg></button>
+      <a id="vOpen" target="_blank" rel="noopener" title="فتح في نافذة جديدة" aria-label="فتح في نافذة جديدة"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+    </div>
+  </div>
+</aside>
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
+
+<script type="module">
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS } from "./shared.js";
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const LS = { get: (k, d) => { try { return localStorage.getItem("saba_staff_" + k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem("saba_staff_" + k, v); } catch {} } };
+const ICON = {
+  sick: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M12 12v6M9 15h6"/></svg>',
+  companion: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8.5" cy="7.5" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M2.5 20c.6-3.4 3-5.5 6-5.5s5.4 2.1 6 5.5M14.5 14.6c.6-.2 1.3-.3 2-.3 2.5 0 4.4 1.8 4.9 4.7"/></svg>',
+  attendance: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14.5l2 2 4-4"/></svg>',
+};
+const CHECK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const COPY = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+
+const S = {
+  me: null, pending: [], held: [], done: [], doneCursor: null, doneMore: false, doneToday: 0,
+  branch: LS.get("branch", "tala"), type: LS.get("type", "sick"), q: "", openId: null, fresh: new Set(),
+  sound: LS.get("sound", "1") === "1", unsub: null, firstLoad: true,
+};
+if (!BRANCHES.some(b => b.id === S.branch)) S.branch = BRANCHES[0].id;
+
+$("#sehaTop").href = SEHA_URL; $("#sehaDrawer").href = SEHA_URL;
+const api = await backend("staff");
+if (api.demo || api.trial) { $("#demoPill").hidden = false; $("#demoPill").textContent = api.trial ? "نسخة تجربة" : "وضع تجريبي"; }
+if (api.trial) $("#btnOut").hidden = true;
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch { const a = document.createElement("textarea"); a.value = t; a.style.position = "fixed"; a.style.opacity = "0"; document.body.append(a); a.select(); const ok = document.execCommand("copy"); a.remove(); if (!ok) throw new Error("copy"); }
+}
+
+/* ---------- الدخول ---------- */
+api.onAuth(user => {
+  S.me = user;
+  if (!user || user.denied) {
+    $("#vApp").hidden = true; $("#vLogin").hidden = false;
+    $("#loginErr").textContent = user?.denied ? "هذا الحساب غير مفعّل كموظف. تواصل مع المسؤول." : "";
+    if (user?.denied) api.logout();
+    S.unsub?.(); S.unsub = null; return;
+  }
+  $("#vLogin").hidden = true; $("#vApp").hidden = false;
+  $("#who").textContent = user.name;
+  start();
+});
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault(); $("#loginErr").textContent = "";
+  try { await api.login($("#em").value.trim(), $("#pw").value); }
+  catch (err) { $("#loginErr").textContent = /invalid|wrong|user-not-found|credential/i.test(err.code || err.message) ? "البريد أو كلمة المرور غير صحيحة" : "تعذّر الدخول، حاول مرة ثانية"; }
+});
+if (DEMO) { $("#em").value = "anas@saba.sa"; $("#pw").value = "demo"; }
+$("#btnOut").onclick = () => api.logout();
+
+/* ---------- التشغيل ---------- */
+function start() {
+  if (S.unsub) return;
+  buildNav();
+  let prevIds = null, doneTimer;
+  S.unsub = api.watchPending((list, added) => {
+    const ids = new Set(list.map(x => x.id));
+    if (prevIds && [...prevIds].some(id => !ids.has(id))) { clearTimeout(doneTimer); doneTimer = setTimeout(() => loadDone(true), 900); } // موظف ثاني رفع طلب
+    prevIds = ids;
+    S.pending = list.filter(x => x.status !== "held");
+    S.held = list.filter(x => x.status === "held");
+    const fresh = S.pending.filter(x => added.includes(x.id));
+    if (!S.firstLoad && fresh.length) notify(fresh);
+    S.firstLoad = false;
+    renderCounts(); renderPending(); renderHeld();
+    if (doneMsgQueue) handleSehaDone(doneMsgQueue);
+    if (S.openId) {
+      const x = list.find(r => r.id === S.openId);
+      if (x) { fillDrawerMeta(x); const o = openByOther(x); $("#dOpenInfo").hidden = !o; if (o) $("#dOpenInfo").textContent = `هذا الطلب مفتوح الآن عند ${o}. تأكد منه قبل الرفع حتى لا ينرفع مرتين.`; }
+      else if (!S.done.some(r => r.id === S.openId)) { closeDrawer(); toast("هذا الطلب تمت معالجته من موظف ثاني"); }
+    }
+  }, err => toast("انقطع الاتصال بقاعدة البيانات: " + (err.code || err.message)));
+  loadDone(true);
+}
+
+function buildNav() {
+  $("#branches").innerHTML = BRANCHES.map(b => `<button class="br" data-b="${b.id}">${b.ar}<span class="badge" hidden></span></button>`).join("");
+  $("#types").innerHTML = TYPES.map(t => `<button class="ty" data-t="${t.id}">${ICON[t.id]}${t.ar}<span class="badge" hidden></span></button>`).join("");
+  $("#branches").onclick = e => { const b = e.target.closest(".br"); if (b) select(b.dataset.b, S.type); };
+  $("#types").onclick = e => { const t = e.target.closest(".ty"); if (t) select(S.branch, t.dataset.t); };
+  markNav();
+}
+function select(branch, type) {
+  if (branch === S.branch && type === S.type) return;
+  S.branch = branch; S.type = type; LS.set("branch", branch); LS.set("type", type);
+  markNav(); renderCounts(); renderPending(); renderHeld(); loadDone(true);
+}
+function markNav() {
+  document.querySelectorAll(".br").forEach(b => b.classList.toggle("on", b.dataset.b === S.branch));
+  document.querySelectorAll(".ty").forEach(t => t.classList.toggle("on", t.dataset.t === S.type));
+  $("#hTitle").textContent = "فرع " + branchName(S.branch).replace(/^سابا\s+/, "");
+}
+function setBadge(el, n) {
+  if (!el) return;
+  const prev = +el.textContent || 0;
+  el.hidden = !n; el.textContent = n > 99 ? "99+" : n;
+  if (n > prev) { el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
+}
+function renderCounts() {
+  BRANCHES.forEach(b => setBadge(document.querySelector(`.br[data-b="${b.id}"] .badge`), S.pending.filter(x => x.branch === b.id).length));
+  TYPES.forEach(t => setBadge(document.querySelector(`.ty[data-t="${t.id}"] .badge`), S.pending.filter(x => x.branch === S.branch && x.type === t.id).length));
+  const inBranch = S.pending.filter(x => x.branch === S.branch).length;
+  const heldIn = S.held.filter(x => x.branch === S.branch).length;
+  $("#hSub").textContent = (inBranch ? `${inBranch} طلب بانتظار الرفع` : "لا توجد طلبات بانتظار الرفع") + (heldIn ? ` و ${heldIn} معلّق` : "") + " في هذا الفرع";
+  const total = S.pending.length;
+  document.title = (total ? `(${total}) ` : "") + "لوحة الإجازات | سابا";
+}
+
+/* ---------- القوائم ---------- */
+const match = x => {
+  if (!S.q) return true;
+  const q = S.q.toLowerCase();
+  return [x.patientName, x.patientNameEn, x.idNumber, x.phone, x.ref, x.companionName, x.companionId, x.doctorName].some(v => String(v || "").toLowerCase().includes(q));
+};
+function dates(x) {
+  if (x.type === "attendance") return x.visitDate ? `حضور ${x.visitDate}` : "";
+  if (!x.leaveStart) return "";
+  return x.leaveEnd && x.leaveEnd !== x.leaveStart ? `${x.leaveStart} ← ${x.leaveEnd}` : x.leaveStart;
+}
+const OPEN_MS = 5 * 60000;
+const myName = () => S.me?.name || S.me?.email || "";
+const openByOther = x => x.openedBy && x.openedBy !== myName() && x.openedAt && Date.now() - x.openedAt < OPEN_MS ? x.openedBy : "";
+function rowHTML(x, mode) {
+  const done = mode === "done", held = mode === "held";
+  const dupe = mode === "pending" && S.pending.filter(y => y.idNumber === x.idNumber && y.type === x.type && (y.leaveStart || y.visitDate) === (x.leaveStart || x.visitDate)).length > 1;
+  const late = mode === "pending" && Date.now() - x.createdAt > 30 * 60000;
+  const unknownDoc = !x.doctorId;
+  const byStamp = x.stampDoctor && x.doctorId && matchDoctor(x.doctorName).doctor?.id !== x.doctorId ? doctorById(x.doctorId) : null;
+  const actions = done ? `<div class="age">${esc(x.doneBy || "")}</div>`
+    : held ? `<div class="quick-row"><button class="quick ghost" data-unhold="${x.id}">إرجاع</button><button class="quick" data-quick="${x.id}">${CHECK}تم الرفع</button></div>`
+    : `<div class="quick-row"><button class="quick ghost" data-hold="${x.id}">تعليق</button><button class="quick" data-quick="${x.id}">${CHECK}تم الرفع</button></div>`;
+  return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${x.id}" role="button" tabindex="0">
+    <div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(x.doctorName)}</span><span>${esc(dates(x))}</span></div>
+      ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
+    </div>
+    <div style="text-align:left">
+      <div class="age ${late ? "late" : ""}">${timeAgo(done ? x.doneAt : held ? (x.heldAt || x.createdAt) : x.createdAt)}</div>
+      ${actions}
+    </div>
+  </div>`;
+}
+function renderPending() {
+  const list = S.pending.filter(x => x.branch === S.branch && x.type === S.type && match(x));
+  $("#cPending").textContent = list.length;
+  $("#lPending").innerHTML = list.length ? list.map(x => rowHTML(x, "pending")).join("")
+    : `<div class="empty"><b>${S.q ? "لا نتائج مطابقة" : "لا يوجد طلبات بانتظار الرفع"}</b>${S.q ? "جرّب اسم أو رقم مختلف" : "الطلبات الجديدة تظهر هنا مباشرة"}</div>`;
+}
+function renderHeld() {
+  const list = S.held.filter(x => x.branch === S.branch && x.type === S.type && match(x)).sort((a, b) => (a.heldAt || 0) - (b.heldAt || 0));
+  $("#cHeld").textContent = list.length;
+  $("#lHeld").innerHTML = list.length ? list.map(x => rowHTML(x, "held")).join("")
+    : `<div class="empty"><b>لا يوجد طلبات معلّقة</b>علّق أي طلب فيه مشكلة ترخيص أو خطأ في البيانات</div>`;
+}
+function renderDone() {
+  const list = S.done.filter(match);
+  $("#cDone").textContent = S.doneToday;
+  $("#doneToday").textContent = "اليوم";
+  $("#lDone").innerHTML = (list.length ? list.map(x => rowHTML(x, "done")).join("") : `<div class="empty"><b>لا يوجد طلبات مرفوعة بعد</b>أي طلب تضغط عليه "تم الرفع" ينتقل هنا</div>`)
+    + (S.doneMore ? `<button class="more" id="more">عرض الأقدم</button>` : "");
+}
+let doneSeq = 0;
+async function loadDone(reset) {
+  const seq = ++doneSeq, b = S.branch, t = S.type;
+  if (reset) { S.done = []; S.doneCursor = null; $("#lDone").innerHTML = '<div class="empty">جاري التحميل…</div>'; }
+  try {
+    const [r, c] = await Promise.all([api.loadDone(b, t, reset ? null : S.doneCursor), reset ? api.countDoneToday(b, t) : S.doneToday]);
+    if (seq !== doneSeq) return;
+    S.done = reset ? r.items : S.done.concat(r.items); S.doneCursor = r.cursor; S.doneMore = r.more; S.doneToday = c;
+    renderDone();
+  } catch (e) {
+    console.error(e);
+    $("#lDone").innerHTML = `<div class="empty"><b>تعذّر تحميل المرفوع</b>${/index/i.test(e.message) ? "ينقص فهرس في قاعدة البيانات — راجع دليل التشغيل" : esc(e.message)}</div>`;
+  }
+}
+
+$("#q").addEventListener("input", e => { S.q = e.target.value.trim(); renderPending(); renderHeld(); renderDone(); });
+document.querySelector(".lane-switch").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  document.querySelectorAll(".lane-switch button").forEach(x => x.classList.toggle("on", x === b));
+  $("#lanes").dataset.show = b.dataset.lane;
+};
+$("#lanes").addEventListener("click", e => {
+  const q = e.target.closest("[data-quick]");
+  if (q) { e.stopPropagation(); return markDone(q.dataset.quick); }
+  const h = e.target.closest("[data-hold]");
+  if (h) { e.stopPropagation(); return openDrawer(h.dataset.hold, true); }
+  const u = e.target.closest("[data-unhold]");
+  if (u) { e.stopPropagation(); return unholdRequest(u.dataset.unhold); }
+  if (e.target.id === "more") return loadDone(false);
+  const r = e.target.closest(".row"); if (r) openDrawer(r.dataset.id);
+});
+$("#lanes").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.classList.contains("row")) openDrawer(e.target.dataset.id); });
+
+/* ---------- تم الرفع ---------- */
+async function markDone(id) {
+  const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id); if (!x) return;
+  const by = S.me?.name || S.me?.email || "";
+  // تحديث فوري في الواجهة
+  S.pending = S.pending.filter(r => r.id !== id); S.held = S.held.filter(r => r.id !== id);
+  const doneItem = { ...x, status: "done", doneAt: Date.now(), doneBy: by };
+  if (x.branch === S.branch && x.type === S.type) { S.done.unshift(doneItem); S.doneToday++; }
+  renderCounts(); renderPending(); renderHeld(); renderDone();
+  if (S.openId === id) closeDrawer();
+  try {
+    await api.markDone(id, by);
+    toast(`تم نقل ${x.patientName} إلى "تم الرفع"`, "تراجع", async () => {
+      await api.undoDone(id);
+      S.done = S.done.filter(r => r.id !== id); S.doneToday = Math.max(0, S.doneToday - 1); renderDone();
+    });
+  } catch (e) {
+    console.error(e);
+    if (e?.code === "already_done" || e?.code === "permission-denied") { toast(`هذا الطلب سبق رفعه${e.by ? " من " + e.by : ""}`); loadDone(true); return; }
+    toast("ما تم الحفظ — تأكد من الاتصال");
+    (x.status === "held" ? S.held : S.pending).push(x); S.done = S.done.filter(r => r.id !== id); renderCounts(); renderPending(); renderHeld(); renderDone();
+  }
+}
+
+/* ---------- التعليق ---------- */
+let holdReason = null;
+$("#reasons").innerHTML = HOLD_REASONS.map(r => `<button type="button" data-r="${r.id}" aria-pressed="false">${r.ar}</button>`).join("");
+$("#reasons").onclick = e => {
+  const b = e.target.closest("[data-r]"); if (!b) return;
+  holdReason = b.dataset.r;
+  document.querySelectorAll("#reasons button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  if (holdReason === "other") $("#holdNote").focus();
+};
+function showHoldBox(on) {
+  $("#holdBox").hidden = !on; $("#dActions").hidden = on; $("#sehaDrawer").hidden = on; $("#extHint").hidden = on;
+  if (on) { holdReason = null; $("#holdNote").value = ""; document.querySelectorAll("#reasons button").forEach(x => x.setAttribute("aria-pressed", "false")); }
+}
+$("#dHold").onclick = () => showHoldBox(true);
+$("#holdCancel").onclick = () => showHoldBox(false);
+$("#holdConfirm").onclick = async () => {
+  const id = S.openId, note = $("#holdNote").value.trim();
+  if (!holdReason) return toast("اختر سبب التعليق");
+  if (holdReason === "other" && !note) { $("#holdNote").focus(); return toast("اكتب السبب في الملاحظة"); }
+  const x = S.pending.find(r => r.id === id); if (!x) return;
+  const by = S.me?.name || S.me?.email || "";
+  Object.assign(x, { status: "held", holdReason, holdNote: note, heldAt: Date.now(), heldBy: by });
+  S.pending = S.pending.filter(r => r.id !== id); S.held.push(x);
+  closeDrawer(); renderCounts(); renderPending(); renderHeld();
+  try {
+    await api.markHeld(id, holdReason, note, by);
+    toast(`تم تعليق ${x.patientName}: ${holdName(x.holdReason)}`, "تراجع", () => unholdRequest(id, true));
+  } catch (e) {
+    console.error(e); toast("ما تم الحفظ — تأكد من الاتصال");
+    Object.assign(x, { status: "pending" }); S.held = S.held.filter(r => r.id !== id); S.pending.push(x); renderCounts(); renderPending(); renderHeld();
+  }
+};
+async function unholdRequest(id, quiet) {
+  const x = S.held.find(r => r.id === id); if (!x) return;
+  S.held = S.held.filter(r => r.id !== id);
+  Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); S.pending.push(x);
+  S.pending.sort((a, b) => a.createdAt - b.createdAt);
+  if (S.openId === id) closeDrawer();
+  renderCounts(); renderPending(); renderHeld();
+  try { await api.unhold(id); if (!quiet) toast(`رجع ${x.patientName} إلى "في الانتظار"`); }
+  catch (e) { console.error(e); toast("ما تم الحفظ — تأكد من الاتصال"); }
+}
+$("#dUnhold").onclick = () => S.openId && unholdRequest(S.openId);
+
+/* ---------- التفاصيل ---------- */
+let rot = 0, zoom = false;
+const DATE_KEYS = ["dob", "companionDob", "leaveStart", "leaveEnd", "visitDate"];
+const FIELDS = x => [
+  x.type === "companion" && ["بيانات المرافق (صاحب الإجازة)"],
+  x.type === "companion" && ["companionName", "اسم المرافق"],
+  x.type === "companion" && ["companionId", "هوية المرافق", true],
+  x.type === "companion" && ["companionDob", "ميلاد المرافق", true],
+  x.type === "companion" && ["relationship", "صلة القرابة"],
+  ["بيانات المريض"],
+  ["patientName", "اسم المريض"],
+  x.patientNameEn && ["patientNameEn", "الاسم بالإنجليزي", true],
+  ["idNumber", "رقم الهوية", true],
+  x.fileNo && ["fileNo", "رقم الملف", true],
+  ["dob", "تاريخ الميلاد", true],
+  x.nationality && ["nationality", "الجنسية"],
+  x.gender && ["gender", "الجنس"],
+  ["phone", "الجوال", true],
+  [x.type === "attendance" ? "بيانات الحضور" : "بيانات الإجازة"],
+  ...(x.type === "attendance" ? [["visitDate", "تاريخ الحضور", true]] : [["leaveStart", "بداية الإجازة", true], ["leaveEnd", "نهاية الإجازة", true], x.leaveDays && ["leaveDays", "عدد الأيام", true]]),
+  x.reason && ["reason", "السبب"],
+  ["doctorName", "الطبيب المعالج"],
+  x.stampDoctor && ["stampDoctor", "ختم الطبيب"],
+  ["@branch", "الفرع"],
+  ["ref", "رقم الطلب", true, true],
+  x.sehaRef && ["sehaRef", "رقم صحة (PSL)", true, true],
+].filter(Boolean);
+
+async function openDrawer(id, holdNow) {
+  const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id) || S.done.find(r => r.id === id); if (!x) return;
+  S.openId = id; rot = 0; zoom = false;
+  document.querySelectorAll(".row").forEach(r => r.classList.toggle("sel", r.dataset.id === id));
+  fillDrawerMeta(x);
+  $("#dFields").innerHTML = FIELDS(x).map(f => {
+    if (f.length === 1) return `<div class="sec">${f[0]}</div>`;
+    const [k, label, ltr, ro] = f;
+    if (k === "@branch") return `<div class="fr"><label>${label}</label><select data-k="branch">${BRANCHES.map(b => `<option value="${b.id}" ${b.id === x.branch ? "selected" : ""}>${b.ar}</option>`).join("")}</select><span></span></div>`;
+    return `<div class="fr"><label>${label}</label><input data-k="${k}" value="${esc(x[k])}" ${ltr ? 'class="ltr"' : ""} ${ro ? "readonly" : ""} ${DATE_KEYS.includes(k) ? 'data-date="1" inputmode="numeric" maxlength="10"' : ""}><button class="cp" data-cp="${k}" title="نسخ" aria-label="نسخ ${label}">${COPY}</button></div>`;
+  }).join("");
+  $("#dFields").querySelectorAll("input[data-date]").forEach(i => { i.addEventListener("input", () => { i.value = fmtDateInput(i.value); }); attachDatePicker(i); });
+  const isDone = x.status === "done", isHeld = x.status === "held";
+  showHoldBox(false);
+  $("#dActions").hidden = isDone; $("#sehaDrawer").hidden = isDone; $("#extHint").hidden = isDone;
+  const acc = SEHA_ACCOUNTS[x.branch];
+  $("#sehaAcc").textContent = acc ? `الحساب: ${acc.group} ← ${acc.role}` : "حساب صحة لهذا الفرع غير محدد";
+  renderExtHint();
+  $("#dHold").hidden = isHeld; $("#dUnhold").hidden = !isHeld;
+  $("#dHoldInfo").hidden = !isHeld;
+  if (isHeld) $("#dHoldInfo").innerHTML = `<b>معلّق: ${esc(holdName(x.holdReason))}</b>${esc(x.holdNote || "")}${x.heldBy ? ` — ${esc(x.heldBy)}` : ""}`;
+  if (holdNow && !isHeld && !isDone) showHoldBox(true);
+  const other = !isDone && openByOther(x);
+  $("#dOpenInfo").hidden = !other;
+  if (other) $("#dOpenInfo").textContent = `هذا الطلب مفتوح الآن عند ${other}. تأكد منه قبل الرفع حتى لا ينرفع مرتين.`;
+  if (!isDone && !other) api.claim?.(id, myName()).catch(() => {});
+  // الصورة
+  const img = $("#dImg"), pdf = $("#dPdf");
+  img.style.transform = ""; $("#viewer").classList.remove("zoom");
+  img.removeAttribute("src"); pdf.hidden = true; img.hidden = false;
+  $("#scrim").classList.add("on"); $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
+  try {
+    const url = await api.imageUrl(x.imagePath);
+    if (S.openId !== id) return;
+    const isPdf = /\.pdf(\?|$)|^data:application\/pdf/i.test(x.imagePath || "");
+    if (isPdf) { pdf.src = url; pdf.hidden = false; img.hidden = true; } else img.src = url;
+    $("#vOpen").href = url;
+  } catch (e) { console.error(e); toast("تعذّر تحميل الصورة"); }
+}
+function fillDrawerMeta(x) {
+  $("#dName").textContent = x.patientName;
+  const d = doctorById(x.doctorId);
+  $("#dMeta").textContent = `${typeName(x.type)} — وصل ${timeAgo(x.createdAt)}${d ? "" : " — الطبيب غير مدرج (تحقق من الفرع)"}`;
+}
+function closeDrawer() {
+  S.openId = null;
+  $("#scrim").classList.remove("on"); $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true");
+  document.querySelectorAll(".row.sel").forEach(r => r.classList.remove("sel"));
+}
+$("#dClose").onclick = closeDrawer; $("#scrim").onclick = closeDrawer;
+$("#dDone").onclick = () => S.openId && markDone(S.openId);
+addEventListener("keydown", e => {
+  if (!S.openId) return;
+  if (e.key === "Escape") closeDrawer();
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && $("#holdBox").hidden) { e.preventDefault(); markDone(S.openId); }
+});
+$("#dFields").addEventListener("click", async e => {
+  const b = e.target.closest("[data-cp]"); if (!b) return;
+  const v = $(`#dFields [data-k="${b.dataset.cp}"]`).value;
+  try { await copyText(v); b.classList.add("ok"); b.innerHTML = CHECK; setTimeout(() => { b.classList.remove("ok"); b.innerHTML = COPY; }, 1200); } catch { toast("النسخ غير مسموح في هذا المتصفح"); }
+});
+$("#dFields").addEventListener("change", async e => {
+  const el = e.target.closest("[data-k]"); if (!el || el.readOnly || !S.openId) return;
+  const k = el.dataset.k, v = el.value.trim(), id = S.openId;
+  const patch = { [k]: v };
+  if (k === "branch") patch.branchManual = true;
+  try {
+    await api.update(id, patch);
+    [S.pending, S.held, S.done].forEach(l => { const r = l.find(x => x.id === id); if (r) Object.assign(r, patch); });
+    if (k === "branch") { toast(`تم نقل الطلب إلى فرع ${branchName(v)}`); closeDrawer(); }
+    else toast("تم حفظ التعديل");
+    renderCounts(); renderPending(); renderHeld(); renderDone();
+  } catch (err) { console.error(err); toast("ما تم حفظ التعديل"); }
+});
+$("#vRot").onclick = () => { rot = (rot + 90) % 360; applyImg(); };
+$("#vZoom").onclick = () => { zoom = !zoom; applyImg(); };
+$("#dImg").onclick = () => { zoom = !zoom; applyImg(); };
+function applyImg() { $("#viewer").classList.toggle("zoom", zoom); $("#dImg").style.transform = `rotate(${rot}deg) scale(${zoom ? 1.9 : 1})`; }
+
+/* ---------- التنبيهات ---------- */
+let actx;
+function chime() {
+  if (!S.sound) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1320].forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * .14;
+      o.type = "sine"; o.frequency.value = f; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.18, t + .02); g.gain.exponentialRampToValueAtTime(.001, t + .5);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + .55);
+    });
+  } catch {}
+}
+function notify(items) {
+  items.forEach(x => S.fresh.add(x.id)); setTimeout(() => { items.forEach(x => S.fresh.delete(x.id)); }, 4000);
+  chime();
+  const x = items[items.length - 1];
+  toast(items.length > 1 ? `${items.length} طلبات جديدة` : `طلب جديد: ${typeName(x.type)} — ${branchName(x.branch)}`);
+  if (document.hidden && "Notification" in window && Notification.permission === "granted")
+    new Notification("طلب جديد — سابا", { body: `${x.patientName} — ${typeName(x.type)} — ${branchName(x.branch)}`, tag: "saba-leave" });
+}
+$("#btnSound").classList.toggle("on", S.sound);
+$("#btnSound").onclick = () => {
+  S.sound = !S.sound; LS.set("sound", S.sound ? "1" : "0"); $("#btnSound").classList.toggle("on", S.sound);
+  if (S.sound) { chime(); if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); }
+  toast(S.sound ? "تنبيه الطلبات الجديدة: مفعّل" : "تنبيه الطلبات الجديدة: متوقف");
+};
+setInterval(() => { if (S.pending.length) renderPending(); if (S.held.length) renderHeld(); }, 60000); // تحديث "قبل كم دقيقة"
+
+/* ---------- ربط إضافة «سابا ← صحة» ---------- */
+let extVersion = null;
+function renderExtHint() {
+  $("#sehaTxt").textContent = extVersion ? "افتح صحة وعبّي تلقائياً" : "افتح منصة صحة للرفع";
+  $("#extHint").innerHTML = extVersion ? "<b>✓</b> إضافة التعبئة شغالة" : "ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً";
+}
+function sehaPayload(x) {
+  const pick = k => x[k] || "";
+  return {
+    v: 1, id: x.id, ref: x.ref, type: x.type, branch: x.branch, account: SEHA_ACCOUNTS[x.branch] || null,
+    fileNo: pick("fileNo"), doctorAr: doctorById(x.doctorId)?.ar || "", doctorEn: doctorById(x.doctorId)?.en || "",
+    patientName: pick("patientName"), patientNameEn: pick("patientNameEn"), idNumber: pick("idNumber"), dob: pick("dob"), phone: pick("phone"),
+    leaveStart: pick("leaveStart"), leaveEnd: pick("leaveEnd"), leaveDays: pick("leaveDays"), visitDate: pick("visitDate"),
+    companionName: pick("companionName"), companionId: pick("companionId"), companionDob: pick("companionDob"), relationship: pick("relationship"),
+    doctorName: pick("doctorName"), stampDoctor: pick("stampDoctor"), reason: pick("reason"), nationality: pick("nationality"), gender: pick("gender"),
+    sentAt: Date.now(),
+  };
+}
+$("#sehaDrawer").addEventListener("click", () => {
+  const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
+  const payload = sehaPayload(x);
+  window.postMessage({ type: "SABA_SEHA_FILL", payload }, location.origin);
+  copyText("SABA_SEHA:" + JSON.stringify(payload)).catch(() => {}); // احتياط: لصق يدوي داخل الإضافة
+});
+addEventListener("message", async e => {
+  if (e.source !== window || !e.data || typeof e.data !== "object") return;
+  const m = e.data;
+  if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; renderExtHint(); }
+  if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
+  if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
+});
+let doneMsgQueue = null;
+async function handleSehaDone(m) {
+  const find = l => l.find(r => r.id === m.id || (m.ref && r.ref === m.ref));
+  const x = find(S.pending) || find(S.held);
+  if (!x) {
+    if (S.done.some(r => r.id === m.id || r.ref === m.ref)) window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
+    else doneMsgQueue = m; // القائمة لسى ما وصلت
+    return;
+  }
+  window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
+  doneMsgQueue = null;
+  if (m.psl) { try { await api.update(x.id, { sehaRef: m.psl }); x.sehaRef = m.psl; } catch (err) { console.error(err); } }
+  markDone(x.id);
+}
+window.postMessage({ type: "SABA_EXT_PING" }, location.origin);
+renderExtHint();
+
+/* ---------- toast ---------- */
+function toast(msg, action, fn) {
+  const t = $("#toast"), b = $("#toastBtn");
+  $("#toastTxt").textContent = msg;
+  b.hidden = !action; b.textContent = action || ""; b.onclick = action ? async () => { t.classList.remove("on"); await fn(); } : null;
+  t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), action ? 6000 : 2800);
+}
+</script>
+</body>
+</html>

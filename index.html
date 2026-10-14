@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cut">
+<meta name="theme-color" content="#F3FAFE">
+<title>سابا | رفع الإجازات</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://www.gstatic.com">
+<style>
+:root{
+  --navy:#003765; --blue:#0082D4; --sky:#00A6E2; --sky-2:#7FD0F0; --ice:#EAF6FC; --ice-2:#F5FBFE;
+  --ink:#0B2B47; --muted:#5B7690; --line:#D6E8F3; --white:#fff; --red:#E5383B; --ok:#0E9F6E;
+  --r-lg:22px; --r-md:14px; --r-sm:10px;
+  --shadow:0 1px 2px rgba(0,55,101,.06),0 12px 32px -12px rgba(0,55,101,.18);
+}
+*{box-sizing:border-box;margin:0}
+html,body{min-height:100%}
+body{
+  font-family:"IBM Plex Sans Arabic",system-ui,sans-serif; color:var(--ink); -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(1100px 520px at 50% -180px, #CDEEFB 0%, rgba(205,238,251,0) 70%),
+    linear-gradient(180deg,#F3FAFE 0%,#FFFFFF 60%);
+  background-attachment:fixed;
+}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+:focus-visible{outline:3px solid var(--sky);outline-offset:2px;border-radius:8px}
+
+/* ---------- header ---------- */
+.top{max-width:1120px;margin:0 auto;padding:18px 20px;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--navy)}
+.brand b{font-size:22px;font-weight:700;letter-spacing:-.2px}
+.brand small{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:-2px}
+.help{font-size:14px;color:var(--muted)}
+.demo-pill{font-size:12px;background:#FFF4D6;color:#7A5A00;padding:4px 10px;border-radius:99px}
+
+main{max-width:1120px;margin:0 auto;padding:12px 20px 64px}
+.screen{display:none}
+.screen.on{display:block;animation:in .35s ease}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ---------- home ---------- */
+.hero{text-align:center;padding:48px 0 36px}
+.hero h1{font-size:clamp(32px,6vw,56px);line-height:1.15;font-weight:700;color:var(--navy);letter-spacing:-.5px;max-width:15ch;margin:0 auto}
+.hero p{margin:18px auto 0;max-width:46ch;font-size:clamp(16px,2.2vw,19px);line-height:1.75;color:var(--muted)}
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+.choice{
+  position:relative;text-align:right;background:var(--white);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:26px 24px 24px;min-height:210px;display:flex;flex-direction:column;justify-content:space-between;
+  transition:border-color .2s,transform .2s,box-shadow .2s;
+}
+.choice:hover{border-color:var(--sky);transform:translateY(-3px);box-shadow:var(--shadow)}
+.choice .ic{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--ice);color:var(--blue)}
+.choice h2{font-size:22px;font-weight:700;color:var(--navy);margin-top:22px}
+.choice p{font-size:15px;color:var(--muted);line-height:1.6;margin-top:6px}
+.choice .go{position:absolute;left:22px;top:26px;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--ice-2);color:var(--blue);transition:background .2s,color .2s}
+.choice:hover .go{background:var(--blue);color:#fff}
+.how{display:flex;justify-content:center;gap:28px;flex-wrap:wrap;margin-top:44px;color:var(--muted);font-size:14px}
+.how span{display:flex;align-items:center;gap:8px}
+.how i{font-style:normal;width:24px;height:24px;border-radius:50%;background:var(--white);border:1px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--blue)}
+
+/* ---------- flow shell ---------- */
+.flow{max-width:620px;margin:8px auto 0}
+.flow-head{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.back{width:42px;height:42px;border-radius:50%;background:var(--white);border:1px solid var(--line);display:grid;place-items:center;color:var(--navy);flex:none}
+.flow-head h1{font-size:24px;font-weight:700;color:var(--navy)}
+.flow-head p{font-size:14px;color:var(--muted)}
+.steps{display:flex;gap:6px;margin-bottom:22px}
+.steps div{flex:1;height:5px;border-radius:9px;background:var(--line);overflow:hidden}
+.steps div.on{background:linear-gradient(90deg,var(--sky),var(--blue))}
+
+.card{background:var(--white);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+
+/* ---------- capture ---------- */
+.drop{padding:34px 24px;text-align:center}
+.drop .frame{
+  width:150px;height:190px;margin:0 auto 22px;border-radius:18px;position:relative;
+  background:linear-gradient(180deg,var(--ice-2),var(--ice));border:2px dashed var(--sky-2);display:grid;place-items:center;color:var(--sky)
+}
+.drop h2{font-size:22px;color:var(--navy);font-weight:700}
+.drop p{color:var(--muted);margin-top:6px;line-height:1.7}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:56px;padding:0 26px;border-radius:16px;font-weight:600;font-size:17px;transition:filter .15s,transform .1s}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:linear-gradient(180deg,#1495E4,var(--blue));color:#fff;box-shadow:0 8px 20px -8px rgba(0,130,212,.6)}
+.btn-primary:hover{filter:brightness(1.06)}
+.btn-primary[disabled]{filter:grayscale(.6) opacity(.6);cursor:not-allowed}
+.btn-ghost{background:var(--ice-2);color:var(--blue);border:1px solid var(--line)}
+.drop .actions{display:grid;gap:10px;margin-top:24px}
+.tips{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:22px;font-size:13px;color:var(--muted)}
+.tips span{display:flex;align-items:center;gap:6px}
+
+/* ---------- scan + review ---------- */
+.shot{position:relative;border-radius:18px;overflow:hidden;background:#0b2b47;margin:14px 14px 0;max-height:300px}
+.shot img{display:block;width:100%;max-height:300px;object-fit:contain;background:#0b2b47}
+.scan{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .3s}
+.scanning .scan{opacity:1}
+.scan::before{content:"";position:absolute;left:0;right:0;height:38%;top:-38%;
+  background:linear-gradient(180deg,rgba(0,166,226,0) 0%,rgba(0,166,226,.28) 85%,rgba(127,208,240,.95) 100%);
+  animation:sweep 1.6s cubic-bezier(.45,.05,.55,.95) infinite}
+.scan::after{content:"";position:absolute;inset:0;background:linear-gradient(rgba(0,55,101,.25),rgba(0,55,101,.25))}
+@keyframes sweep{to{top:100%}}
+@media (prefers-reduced-motion:reduce){.scan::before{animation:none;top:30%}}
+.shot .retake{position:absolute;bottom:10px;left:10px;background:rgba(255,255,255,.92);color:var(--navy);font-size:14px;font-weight:600;padding:8px 14px;border-radius:99px;display:flex;gap:6px;align-items:center}
+.status{display:flex;align-items:center;gap:10px;padding:14px 18px 0;font-size:15px;color:var(--muted);min-height:38px}
+.status .dot{width:10px;height:10px;border-radius:50%;background:var(--sky);box-shadow:0 0 0 0 rgba(0,166,226,.6);animation:pulse 1.4s infinite}
+.status.ok .dot{background:var(--ok);animation:none}
+.status.warn .dot{background:#E9A23B;animation:none}
+@keyframes pulse{70%{box-shadow:0 0 0 10px rgba(0,166,226,0)}100%{box-shadow:0 0 0 0 rgba(0,166,226,0)}}
+.upbar{height:3px;background:var(--ice);margin:12px 18px 0;border-radius:3px;overflow:hidden}
+.upbar i{display:block;height:100%;width:0;background:var(--sky);transition:width .2s}
+
+form{padding:18px}
+.group{margin-top:6px}
+.group-title{font-size:14px;font-weight:600;color:var(--blue);margin:16px 2px 10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.f{display:block;margin-bottom:12px;position:relative}
+.f span{display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:500;color:var(--ink);margin-bottom:6px}
+.f .lb{font-style:normal}.f .lb b{color:var(--red);font-weight:600}
+.f span em{font-style:normal;font-size:11.5px;font-weight:600;color:var(--sky);background:var(--ice);padding:2px 8px;border-radius:99px;opacity:0;transition:opacity .3s}
+.f.ai span em{opacity:1}
+.f input{width:100%;height:52px;border:1.5px solid var(--line);border-radius:var(--r-md);padding:0 14px;font-size:16.5px;background:var(--white);transition:border-color .15s,box-shadow .15s,background .6s}
+.f input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 4px rgba(0,166,226,.15)}
+.f input.ltr{direction:ltr;text-align:right}
+.f.ai input{background:#F1FAFE}
+.f.bad input{border-color:var(--red);box-shadow:0 0 0 4px rgba(229,56,59,.1)}
+.f input[data-date]{padding-left:54px}
+.f .dp{left:8px;top:35px}
+.loading .f .dp{visibility:hidden}
+.dp{position:absolute;display:grid;place-items:center;width:36px;height:36px;border-radius:9px;color:var(--blue);background:var(--ice-2,#F5FBFE);pointer-events:auto}
+.dp:hover,.dp:focus-within{background:var(--ice,#EAF6FC)}
+.dp-native{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0;margin:0;font-size:16px}
+.dp-native::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:auto;height:auto;margin:0;padding:0;cursor:pointer}
+.f .err{display:none;font-size:13px;color:var(--red);margin-top:5px}
+.f.bad .err{display:block}
+.loading .f input{color:transparent;background:linear-gradient(90deg,#F1F7FB 25%,#E3F1F9 50%,#F1F7FB 75%);background-size:200% 100%;animation:shim 1.2s infinite;pointer-events:none}
+@keyframes shim{to{background-position:-200% 0}}
+.submit{margin-top:10px;width:100%}
+.fine{font-size:13px;color:var(--muted);text-align:center;margin-top:12px;line-height:1.7}
+.note{margin:14px 18px 0;padding:12px 14px;border-radius:12px;background:#FFF7E8;color:#7A5200;font-size:14px;line-height:1.6;display:none}
+.note.on{display:block}
+
+/* ---------- success ---------- */
+.done{padding:44px 26px;text-align:center}
+.done .tick{width:84px;height:84px;margin:0 auto;border-radius:50%;display:grid;place-items:center;background:linear-gradient(180deg,var(--sky),var(--blue));color:#fff;box-shadow:0 14px 30px -10px rgba(0,130,212,.6)}
+.done h2{font-size:26px;color:var(--navy);margin-top:22px}
+.done p{color:var(--muted);line-height:1.8;margin-top:8px}
+.ref{margin:22px auto 0;display:inline-flex;align-items:center;gap:12px;padding:12px 18px;border-radius:14px;background:var(--ice);color:var(--navy);font-size:22px;font-weight:700;direction:ltr;letter-spacing:1px}
+.ref button{font-size:13px;color:var(--blue);font-weight:600;letter-spacing:0}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(30px);opacity:0;background:var(--navy);color:#fff;padding:12px 18px;border-radius:12px;font-size:14.5px;transition:.25s;z-index:20;max-width:90vw}
+.toast.on{opacity:1;transform:translateX(-50%)}
+
+@media (max-width:820px){
+  .choices{grid-template-columns:1fr;gap:12px;margin-top:30px}
+  .choice{min-height:0;flex-direction:row;align-items:center;gap:16px;justify-content:flex-start;padding:18px}
+  .choice h2{margin-top:0;font-size:19px}
+  .choice p{font-size:14px}
+  .choice .go{position:static;margin-inline-start:auto;flex:none}
+  .hero{padding:28px 0 8px}
+  .how{gap:14px;margin-top:30px}
+}
+@media (max-width:480px){
+  .grid2{grid-template-columns:1fr;gap:0}
+  .top{padding:14px 16px} main{padding:8px 16px 48px}
+  .help{display:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./" aria-label="سابا">
+    <svg width="38" height="38" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
+    <span><b>سابا</b><small>بوابة رفع الإجازات</small></span>
+  </a>
+  <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
+  <span class="help">للاستفسار: استقبال الفرع</span>
+</header>
+
+<main>
+  <!-- ============ الرئيسية ============ -->
+  <section class="screen on" id="sHome">
+    <div class="hero">
+      <h1>ارفع إجازتك لمنصة صحة بصورة واحدة</h1>
+      <p>صوّر التقرير الطبي، ونقرأ بياناتك منه تلقائياً، وفريق سابا يرفعها لك على منصة صحة.</p>
+    </div>
+    <div class="choices" id="choices"></div>
+    <div class="how" aria-label="الخطوات">
+      <span><i>1</i>اختر نوع الطلب</span>
+      <span><i>2</i>صوّر التقرير</span>
+      <span><i>3</i>راجع بياناتك وأرسل</span>
+    </div>
+  </section>
+
+  <!-- ============ التصوير ============ -->
+  <section class="screen" id="sCapture">
+    <div class="flow">
+      <div class="flow-head">
+        <button class="back" data-back aria-label="رجوع"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        <div><h1 class="ttl"></h1><p>صوّر التقرير الطبي أو اختر صورته</p></div>
+      </div>
+      <div class="steps"><div class="on"></div><div class="on"></div><div></div></div>
+      <div class="card drop">
+        <div class="frame"><svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></div>
+        <h2>صوّر التقرير كامل</h2>
+        <p>خلّ الورقة كاملة داخل الصورة، والكتابة واضحة.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btnCam"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>افتح الكاميرا</button>
+          <button class="btn btn-ghost" id="btnPick">اختر من الصور</button>
+        </div>
+        <div class="tips"><span>☀︎ إضاءة جيدة</span><span>▭ سطح مستوٍ</span><span>✕ بدون انعكاس فلاش</span></div>
+        <input type="file" id="inCam" accept="image/*" capture="environment" hidden>
+        <input type="file" id="inPick" accept="image/*,application/pdf" hidden>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ المراجعة ============ -->
+  <section class="screen" id="sReview">
+    <div class="flow">
+      <div class="flow-head">
+        <button class="back" data-back aria-label="رجوع"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        <div><h1 class="ttl"></h1><p>راجع البيانات وعدّل أي خانة قبل الإرسال</p></div>
+      </div>
+      <div class="steps"><div class="on"></div><div class="on"></div><div class="on"></div></div>
+      <div class="card">
+        <div class="shot scanning" id="shot">
+          <img id="shotImg" alt="صورة التقرير">
+          <div class="scan"></div>
+          <button class="retake" id="btnRetake"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>إعادة التصوير</button>
+        </div>
+        <div class="upbar"><i id="upbar"></i></div>
+        <div class="status" id="status"><span class="dot"></span><span id="statusTxt">نقرأ بياناتك من الصورة…</span></div>
+        <div class="note" id="note"></div>
+        <form id="form" class="loading" novalidate autocomplete="off"></form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ تم ============ -->
+  <section class="screen" id="sDone">
+    <div class="flow">
+      <div class="card done">
+        <div class="tick"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+        <h2>وصل طلبك</h2>
+        <p>طلبك الحين عند فريق سابا، ويتم رفعه على منصة صحة في أقرب وقت.<br>احتفظ برقم الطلب للمتابعة مع الاستقبال.</p>
+        <div class="ref"><span id="refTxt"></span><button id="btnCopyRef">نسخ</button></div>
+        <div style="margin-top:28px"><button class="btn btn-ghost" id="btnNew">طلب جديد</button></div>
+      </div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey } from "./shared.js";
+
+const $ = s => document.querySelector(s);
+const ICONS = {
+  sick: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4M12 12v6M9 15h6"/></svg>',
+  companion: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="7.5" r="3.2"/><circle cx="16.5" cy="9" r="2.6"/><path d="M2.5 20c.6-3.4 3-5.5 6-5.5s5.4 2.1 6 5.5M14.5 14.6c.6-.2 1.3-.3 2-.3 2.5 0 4.4 1.8 4.9 4.7"/></svg>',
+  attendance: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14.5l2 2 4-4"/></svg>',
+};
+const DESC = {
+  sick: "إجازة مرضية صادرة لك من طبيب سابا",
+  companion: "إجازة لمرافق مريض (أب، أم، ابن…)",
+  attendance: "إثبات حضورك للعيادة في تاريخ الزيارة",
+};
+const ARROW = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>';
+
+$("#choices").innerHTML = TYPES.map(t => `
+  <button class="choice" data-type="${t.id}">
+    <span class="ic">${ICONS[t.id]}</span>
+    <span><h2>${t.ar}</h2><p>${DESC[t.id]}</p></span>
+    <span class="go">${ARROW}</span>
+  </button>`).join("");
+
+
+let api; const apiReady = backend("patient").then(a => {
+  api = a; a.warmup();
+  if (a.demo || a.trial) { $("#demoPill").hidden = false; $("#demoPill").textContent = a.trial ? "نسخة تجربة" : "وضع تجريبي"; }
+  return a;
+});
+const state = { type: null, blob: null, imagePath: null, uploadP: null, ai: {}, preview: null };
+
+/* ---------- التنقل ---------- */
+const stack = ["sHome"]; let histOK = window === window.top;
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id));
+  scrollTo({ top: 0, behavior: "instant" });
+}
+function go(screen) {
+  stack.push(screen); show(screen);
+  if (histOK) { try { history.pushState({ screen }, ""); } catch { histOK = false; } }
+}
+function back() {
+  if (histOK) { try { history.back(); return; } catch { histOK = false; } }
+  if (stack.length > 1) { stack.pop(); show(stack[stack.length - 1]); }
+}
+function reset(screen) {
+  stack.length = 0; stack.push(screen); show(screen);
+  if (histOK) { try { history.replaceState({ screen }, ""); } catch { histOK = false; } }
+}
+addEventListener("popstate", e => { const sc = e.state?.screen || "sHome"; const i = stack.lastIndexOf(sc); stack.length = i >= 0 ? i + 1 : 1; if (i < 0) stack[0] = sc; show(sc); });
+if (histOK) { try { history.replaceState({ screen: "sHome" }, ""); } catch { histOK = false; } }
+document.querySelectorAll("[data-back]").forEach(b => b.onclick = back);
+
+$("#choices").addEventListener("click", e => {
+  const c = e.target.closest(".choice"); if (!c) return;
+  state.type = c.dataset.type;
+  document.querySelectorAll(".ttl").forEach(h => h.textContent = typeName(state.type));
+  go("sCapture");
+});
+
+/* ---------- التصوير ---------- */
+$("#btnCam").onclick = () => $("#inCam").click();
+$("#btnPick").onclick = () => $("#inPick").click();
+$("#btnRetake").onclick = () => $("#inCam").click();
+["#inCam", "#inPick"].forEach(s => $(s).addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) onPhoto(f); }));
+
+const toast = (m, ms = 2600) => { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), ms); };
+
+async function onPhoto(file) {
+  if (file.size > 25 * 1024 * 1024) return toast("الصورة كبيرة جداً، صوّرها مرة ثانية");
+  const isPdf = file.type === "application/pdf";
+  const blob = isPdf ? file : await compressImage(file);
+  state.blob = blob; state.imagePath = null; state.ai = {};
+  state.preview = isPdf ? "" : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(""); fr.readAsDataURL(blob); });
+  $("#shotImg").src = state.preview || "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0b2b47"/><text x="200" y="110" fill="#7FD0F0" font-size="22" text-anchor="middle" font-family="sans-serif">PDF</text></svg>');
+  renderForm(); setLoading(true); setStatus("نقرأ بياناتك من الصورة…"); $("#note").classList.remove("on");
+  if (!document.querySelector("#sReview.on")) go("sReview");
+
+  await apiReady;
+  // الرفع والقراءة يشتغلون مع بعض
+  $("#upbar").style.width = "0";
+  state.uploadP = api.uploadImage(blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")
+    .then(p => (state.imagePath = p))
+    .catch(err => { console.error(err); state.imagePath = null; throw err; });
+  state.uploadP.catch(() => {});
+
+  const myBlob = blob;
+  try {
+    const r = await Promise.race([api.extract(blob, state.type), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
+    if (state.blob !== myBlob) return;
+    state.ai = r || {};
+    fillFromAI(state.ai);
+    const kindFor = { sick: "sick_leave", companion: "companion_leave", attendance: "attendance" };
+    if (r?.document_kind && r.document_kind !== "other" && r.document_kind !== kindFor[state.type]) {
+      const nm = { sick_leave: "إجازة مرضية", companion_leave: "إجازة مرافق", attendance: "مشهد حضور" }[r.document_kind];
+      $("#note").textContent = `التقرير يبدو "${nm}" وأنت اخترت "${typeName(state.type)}". تأكد من نوع الطلب قبل الإرسال.`; $("#note").classList.add("on");
+    }
+    if (r?.quality && r.quality !== "good") {
+      const msg = { blurry: "الصورة غير واضحة. يُفضّل تعيد التصوير بإضاءة أفضل.", cropped: "جزء من الورقة خارج الصورة. صوّرها كاملة.", not_document: "ما قدرنا نتعرف على تقرير طبي في الصورة. تأكد إنك صوّرت التقرير الصحيح." }[r.quality];
+      $("#note").textContent = msg; $("#note").classList.add("on");
+    }
+    setStatus("قرأنا البيانات. راجعها قبل الإرسال", "ok");
+  } catch (e) {
+    console.warn("AI", e);
+    if (state.blob !== myBlob) return;
+    setStatus("ما قدرنا نقرأ الصورة تلقائياً — عبّ البيانات يدوياً", "warn");
+  } finally {
+    if (state.blob === myBlob) setLoading(false);
+  }
+}
+function setLoading(on) { $("#form").classList.toggle("loading", on); $("#shot").classList.toggle("scanning", on); }
+function setStatus(t, kind = "") { $("#status").className = "status " + kind; $("#statusTxt").textContent = t; }
+
+/* ---------- النموذج ---------- */
+const F = (k, label, o = {}) => `<label class="f" data-k="${k}"><span><i class="lb">${label}${o.req ? ' <b>*</b>' : ""}</i><em>من الصورة</em></span>
+  <input name="${k}" ${o.ltr ? 'class="ltr"' : ""} ${o.mode ? `inputmode="${o.mode}"` : ""} ${o.ph ? `placeholder="${o.ph}"` : ""} ${o.max ? `maxlength="${o.max}"` : ""} ${o.date ? 'data-date="1"' : ""} ${o.req ? "required" : ""}>
+  <div class="err">${o.err || "هذه الخانة مطلوبة"}</div></label>`;
+
+function renderForm() {
+  const t = state.type, date = { mode: "numeric", ph: "اكتب أو اختر من التقويم", max: 10, date: true, ltr: true, err: "اكتب التاريخ بالشكل 25/10/2026 أو اختره من التقويم" };
+  let h = "";
+  if (t === "companion") {
+    h += `<div class="group-title">بيانات المرافق (صاحب الإجازة)</div>`;
+    h += F("companionName", "اسم المرافق", { req: true });
+    h += `<div class="grid2">${F("companionId", "رقم هوية المرافق", { req: true, mode: "numeric", max: 10, ltr: true, err: "رقم الهوية 10 أرقام ويبدأ بـ 1 أو 2" })}${F("companionDob", "تاريخ ميلاد المرافق", { ...date, req: true })}</div>`;
+    h += F("relationship", "صلة القرابة بالمريض", { ph: "مثال: ابن" });
+    h += `<div class="group-title">بيانات المريض</div>`;
+  }
+  h += F("patientName", "اسم المريض", { req: true });
+  h += `<div class="grid2">${F("idNumber", "رقم الهوية / الإقامة", { req: true, mode: "numeric", max: 10, ltr: true, err: "رقم الهوية 10 أرقام ويبدأ بـ 1 أو 2" })}${F("dob", "تاريخ الميلاد", { ...date, req: true })}</div>`;
+  if (t === "attendance") h += F("visitDate", "تاريخ الحضور", { ...date, req: true });
+  else h += `<div class="grid2">${F("leaveStart", "بداية الإجازة", { ...date, req: true })}${F("leaveEnd", "نهاية الإجازة", { ...date, err: "النهاية لازم تكون بعد البداية أو نفس اليوم (يوم/شهر/سنة)" })}</div>`;
+  h += F("doctorName", "اسم الطبيب المعالج", { req: true, ph: "كما هو مكتوب في التقرير" });
+  h += F("phone", "رقم الجوال", { req: true, mode: "tel", ph: "05xxxxxxxx", max: 14, ltr: true, err: "اكتب رقم جوال سعودي صحيح يبدأ بـ 05" });
+  h += `<button class="btn btn-primary submit" id="btnSend" type="submit">إرسال الطلب</button>
+        <p class="fine">بإرسالك الطلب توافق على استخدام بياناتك لرفع الإجازة على منصة صحة فقط.</p>`;
+  $("#form").innerHTML = h;
+  $("#form").querySelectorAll("input[data-date]").forEach(i => { i.addEventListener("input", () => { i.value = fmtDateInput(i.value); }); attachDatePicker(i); });
+  $("#form").querySelectorAll("input[name=idNumber],input[name=companionId]").forEach(i => i.addEventListener("input", () => { i.value = latinDigits(i.value).replace(/\D/g, ""); }));
+  $("#form").querySelectorAll("input").forEach(i => i.addEventListener("input", () => { i.closest(".f").classList.remove("bad", "ai"); }));
+}
+
+function setField(k, v) {
+  const i = $(`#form [name="${k}"]`); if (!i || !v || i.value) return;
+  i.value = v; i.closest(".f").classList.add("ai");
+}
+function fillFromAI(r) {
+  const digits = v => latinDigits(v || "").replace(/\D/g, "");
+  setField("patientName", r.patient_name_ar || r.patient_name || r.patient_name_en);
+  setField("idNumber", digits(r.id_number).slice(0, 10));
+  setField("dob", isoToDmy(r.dob));
+  const start = isoToDmy(r.leave_start), days = parseInt(digits(r.leave_days)) || 0;
+  setField("leaveStart", start);
+  setField("leaveEnd", isoToDmy(r.leave_end) || addDaysDmy(start, days));
+  setField("visitDate", isoToDmy(r.visit_date || r.leave_start));
+  setField("doctorName", r.doctor_name);
+  setField("phone", r.mobile ? normPhone(r.mobile) : "");
+  setField("companionName", r.companion_name || r.accompanied_by);
+  setField("companionId", digits(r.companion_id).slice(0, 10));
+  setField("companionDob", isoToDmy(r.companion_dob));
+  setField("relationship", r.relationship);
+}
+
+$("#form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const fd = Object.fromEntries(new FormData($("#form")));
+  const bad = [];
+  for (const [k, v] of Object.entries(fd)) {
+    const i = $(`#form [name="${k}"]`), val = (v || "").trim();
+    let ok = !i.required || !!val;
+    if (ok && val && (k === "idNumber" || k === "companionId")) ok = validId(val);
+    if (ok && val && i.dataset.date) ok = validDmy(val);
+    if (ok && k === "phone") ok = validPhone(val);
+    if (ok && k === "leaveEnd" && val && fd.leaveStart && dmyKey(val) < dmyKey(fd.leaveStart)) ok = false;
+    i.closest(".f").classList.toggle("bad", !ok); if (!ok) bad.push(i);
+  }
+  if (bad.length) { bad[0].focus(); bad[0].scrollIntoView({ block: "center", behavior: "smooth" }); return toast("في خانات تحتاج تصحيح"); }
+
+  const btn = $("#btnSend"); btn.disabled = true; btn.textContent = "جاري الإرسال…";
+  try {
+    if (!state.imagePath) {
+      btn.textContent = "نكمّل رفع الصورة…";
+      try { await state.uploadP; } catch { await (state.uploadP = api.uploadImage(state.blob, p => $("#upbar").style.width = Math.round(p * 100) + "%").then(p => (state.imagePath = p))); }
+    }
+    // الأولوية: الطبيب الموقّع بالختم ← الاسم المكتوب ← مطابقة الذكاء
+    const ai = state.ai, m = matchDoctor(fd.doctorName), ms = matchDoctor(ai.stamp_doctor_name || "");
+    const doc = ms.doctor || doctorById(ai.stamp_doctor_id) || m.doctor || doctorById(ai.doctor_id) || null;
+    const ref = makeRef();
+    const clean = s => (s || "").trim();
+    await api.createRequest({
+      ref, type: state.type,
+      patientName: clean(fd.patientName), patientNameEn: clean(ai.patient_name_en), idNumber: latinDigits(fd.idNumber),
+      dob: fd.dob, phone: normPhone(fd.phone),
+      leaveStart: fd.leaveStart || "", leaveEnd: fd.leaveEnd || "", leaveDays: clean(ai.leave_days),
+      visitDate: fd.visitDate || "",
+      companionName: clean(fd.companionName), companionId: latinDigits(fd.companionId || ""), companionDob: fd.companionDob || "", relationship: clean(fd.relationship),
+      doctorName: clean(fd.doctorName), doctorId: doc?.id || "", branch: doc?.branch || m.branch,
+      imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: ai.quality || "",
+      fileNo: clean(ai.patient_file_no), nationality: clean(ai.nationality), gender: clean(ai.gender), reason: clean(ai.reason).slice(0, 300),
+      stampDoctor: clean(ai.stamp_doctor_name), docKind: ai.document_kind || "",
+    });
+    $("#refTxt").textContent = ref;
+    reset("sDone");
+  } catch (err) {
+    console.error(err);
+    toast("ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
+  } finally { btn.disabled = false; btn.textContent = "إرسال الطلب"; }
+});
+
+$("#btnCopyRef").onclick = async () => {
+  const t = $("#refTxt").textContent;
+  try { await navigator.clipboard.writeText(t); } catch { const a = document.createElement("textarea"); a.value = t; document.body.append(a); a.select(); document.execCommand("copy"); a.remove(); }
+  toast("تم نسخ رقم الطلب");
+};
+$("#btnNew").onclick = () => { state.type = null; state.blob = null; reset("sHome"); };
+</script>
+</body>
+</html>
