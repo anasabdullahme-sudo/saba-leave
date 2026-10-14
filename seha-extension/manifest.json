@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "سابا ← صحة",
   "short_name": "Saba Seha",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "تعبئة نموذج الإجازات في منصة صحة تلقائياً من لوحة رفع الإجازات في سابا.",
   "permissions": [
     "storage"
@@ -32,9 +32,8 @@
     },
     {
       "matches": [
-        "https://anasabdullahme-sudo.github.io/*",
+        "https://*.github.io/*",
         "https://*.netlify.app/*",
-        "https://anas-bit7.github.io/*",
         "https://*.web.app/*",
         "https://*.firebaseapp.com/*",
         "http://localhost/*",
