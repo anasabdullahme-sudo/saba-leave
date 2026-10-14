@@ -394,7 +394,7 @@ function start() {
     const fresh = S.pending.filter(x => added.includes(x.id));
     if (!S.firstLoad && fresh.length) notify(fresh);
     S.firstLoad = false;
-    renderCounts(); renderPending(); renderHeld();
+    renderCounts(); renderPending(); renderHeld(); postQueue();
     if (doneMsgQueue) handleSehaDone(doneMsgQueue);
     if (S.openId) {
       const x = list.find(r => r.id === S.openId);
@@ -781,6 +781,13 @@ function sehaPayload(x) {
     sentAt: Date.now(),
   };
 }
+// قائمة الطلبات المنتظرة → للإضافة (تظهر داخل صحة بعد «تم الرفع» عشان تختار اللي بعده)
+function postQueue() {
+  try {
+    if (!extVersion || !S.pending) return;
+    window.postMessage({ type: "SABA_QUEUE", items: S.pending.map(x => ({ ...sehaPayload(x), sentAt: 0 })) }, location.origin);
+  } catch (err) { /* اللوحة لسى تحمّل */ }
+}
 $("#sehaDrawer").addEventListener("click", e => {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
   const payload = sehaPayload(x);
@@ -792,7 +799,7 @@ $("#sehaDrawer").addEventListener("click", e => {
 addEventListener("message", async e => {
   if (e.source !== window || !e.data || typeof e.data !== "object") return;
   const m = e.data;
-  if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; renderExtHint(); }
+  if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; renderExtHint(); postQueue(); }
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
 });

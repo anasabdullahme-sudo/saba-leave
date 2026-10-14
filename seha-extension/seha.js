@@ -309,8 +309,11 @@
   async function switchAccount(force) {
     const acc = req?.account; if (!TOP || !acc) return;
     if (swRef !== req.ref) { swRef = req.ref; swTries = 0; swNext = 0; }
-    if (!force && (swTries >= 3 || Date.now() < swNext)) return;
+    if (!force && (swTries >= 1 || Date.now() < swNext)) return;
     swTries++; swNext = Date.now() + 5000;
+    // التبديل التلقائي مرة وحدة بس لكل طلب — لو بدّلت أنت بعدها لعيادة ثانية ما نرجّعك
+    if (!force) { const { sabaSwFor } = await chrome.storage.local.get("sabaSwFor"); if (sabaSwFor === req.ref) return; }
+    await chrome.storage.local.set({ sabaSwFor: req.ref });
     const wait = ms => new Promise(r => setTimeout(r, ms));
     let item = pickAccountItem(acc);
     if (!item) {   // نفتح قائمة الحسابات (اسم المنشأة فوق)
@@ -391,17 +394,36 @@
     input.psl:focus{border-color:#00A6E2}
     .lbl{font-size:12.5px;color:#5B7690;margin-bottom:4px}
     .min .b{display:none}
+    .p.min{width:auto;border-radius:999px}
+    .p.min .h{padding:8px 14px}
+    .h .cnt{background:#E5484D;color:#fff;border-radius:999px;font-size:11.5px;font-weight:700;padding:1px 7px;margin-inline-start:4px}
+    .qh{font-weight:700;font-size:14px}
+    .ql{display:grid;gap:6px;max-height:46vh;overflow:auto}
+    .qi{all:unset;cursor:pointer;display:grid;gap:2px;border:1px solid #DCEBF4;border-radius:11px;padding:8px 10px;font-size:13.5px}
+    .qi:hover{background:#F5FBFE;border-color:#7FD0F0}
+    .qi span{font-size:12px;color:#5B7690}
+    .qi.here{border-color:#0E9F6E}
+    .tiny{font-size:11.5px;color:#8AA0B4}
+    details summary{cursor:pointer;font-size:12.5px;color:#0082D4}
     .note{font-size:12px;color:#8A5A12;background:#FFF7EA;border-radius:8px;padding:6px 8px}
   </style>
   <div class="p" id="p">
-    <div class="h" id="hd"><span class="dot"></span><b>سابا ← صحة</b><button id="min" title="تصغير">–</button></div>
+    <div class="h" id="hd"><span class="dot"></span><b>سابا ← صحة<span class="cnt" id="cnt" hidden></span></b><button id="min" title="تصغير">–</button></div>
     <div class="b" id="body"></div>
   </div>`;
   const $ = s => root.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
-  let req = null, auto = true, minimized = false;
+  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [];
+  // الطلب «نشط» لما يكون انرسل من لوحة سابا قريب — غير كذا الإضافة ما تتحرك لحالها (عشان لو دخلت صحة بس تتأكد من سكليف)
+  const reqAge = () => req ? Date.now() - (req.sentAt || 0) : Infinity;
+  const navActive = () => !!req && reqAge() < 5 * 60000;
+  const fillActive = () => !!req && reqAge() < 60 * 60000;
+  const pendingQ = () => queue.filter(q => !doneIds.includes(q.id) && q.id !== req?.id);
+  function setMin(v) { minimized = v; $("#p").classList.toggle("min", v); $("#min").textContent = v ? "+" : "–"; }
+  function updateCount() { const c = $("#cnt"), n = pendingQ().length; c.hidden = !n; c.textContent = n; }
+  function useReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
   const TYPE_AR = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
   const LTR = new Set(["fileNo", "idNumber", "companionId", "dob", "companionDob", "phone", "leaveStart", "leaveEnd", "visitDate", "ref", "leaveDays", "patientNameEn"]);
 
@@ -428,9 +450,18 @@
   function render() {
     if (!TOP) return;
     const b = $("#body");
+    updateCount();
     if (!req) {
-      b.innerHTML = `<div class="empty">افتح الطلب من <b>لوحة سابا</b> واضغط «افتح منصة صحة للرفع»، وبيوصل هنا تلقائياً.</div>
-        <div><div class="lbl">أو الصق الطلب هنا (Ctrl+V)</div><textarea id="paste" placeholder="الصق هنا"></textarea></div>`;
+      const cur = norm(currentAccountText()), pend = pendingQ();
+      const here = q => q.account && cur && cur.includes(norm(q.account.key));
+      pend.sort((a, b) => here(b) - here(a));
+      const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
+      b.innerHTML = `<div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
+        <div class="ql">${pend.map(q => `<button class="qi ${here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
+          || `<div class="empty">${queueAt ? "ما فيه طلبات تنتظر ✓" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
+        ${hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
+        <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
+      root.querySelectorAll(".qi").forEach(el => el.onclick = () => { const q = queue.find(x => x.id === el.dataset.id); if (q) useReq(q); });
       bindPaste(); return;
     }
     const acc = accountState(req);
@@ -449,7 +480,7 @@
         <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>نوع صحة: ${esc(TYPE_LABEL[req.type] || "")}</span></div>
       </div>
       <div class="acc ${acc.state}">${accTxt}</div>
-      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button><button class="btn sec" id="pasteBtn" title="لصق طلب ثاني">طلب آخر</button></div>
+      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button><button class="btn sec" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق</button></div>
       <button class="btn sec" id="diag" style="flex:none;height:30px;line-height:30px;font-size:12px">نسخ تقرير فني (لو ما تعبّت الخانات)</button>
       <label class="tg"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية لما تظهر خانات جديدة</label>
       <div class="note">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
@@ -474,10 +505,14 @@
       try { await navigator.clipboard.writeText(txt); } catch { const t = document.createElement("textarea"); t.value = txt; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
       toastLocal(`انسخ التقرير (${fr.length} إطار) — الصقه لـ Claude`);
     };
-    $("#pasteBtn").onclick = () => { $("#pasteWrap").hidden = false; $("#paste").focus(); };
+    $("#closeReq").onclick = () => chrome.storage.local.remove("sabaReq");
     $("#done").onclick = () => {
       const psl = $("#psl").value.trim();
-      chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() } }, () => toastLocal("تم — بيتحدث الطلب في لوحة سابا"));
+      doneIds = [...doneIds, req.id].slice(-300);
+      chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() }, sabaDoneIds: doneIds }, () => {
+        chrome.storage.local.remove("sabaReq");
+        toastLocal("تم ✓ — بيتحدث الطلب في لوحة سابا");
+      });
     };
     root.querySelectorAll(".cp").forEach(btn => btn.onclick = async () => {
       const v = String(req[btn.dataset.k] || "");
@@ -498,7 +533,7 @@
       const m = /SABA_SEHA:(\{[\s\S]*\})/.exec(t || "");
       e.preventDefault();
       if (!m) return toastLocal("هذا مو طلب من لوحة سابا");
-      try { chrome.storage.local.set({ sabaReq: JSON.parse(m[1]), sabaNavFor: "", sabaAddFor: "" }); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
+      try { useReq(JSON.parse(m[1])); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
     });
   }
   let tt;
@@ -507,13 +542,13 @@
     let t = $("#t"); if (!t) { t = document.createElement("div"); t.id = "t"; t.style.cssText = "position:absolute;bottom:100%;left:0;margin-bottom:8px;background:#003765;color:#fff;padding:8px 12px;border-radius:10px;font-size:13px;direction:rtl;white-space:nowrap"; $("#p").parentNode.append(t); }
     t.textContent = msg; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 2200);
   }
-  $("#hd").onclick = () => { minimized = !minimized; $("#p").classList.toggle("min", minimized); $("#min").textContent = minimized ? "+" : "–"; chrome.storage.local.set({ sabaMin: minimized }); };
+  $("#hd").onclick = () => { setMin(!minimized); if (!minimized) render(); };
 
   // ---------- استلام الطلب عن طريق اسم النافذة (احتياط لو الجسر ما اشتغل) ----------
   try {
     if (String(window.name).startsWith("SABA_SEHA:")) {
       const payload = JSON.parse(window.name.slice(10)); window.name = "";
-      chrome.storage.local.set({ sabaReq: payload, sabaNavFor: "", sabaAddFor: "" });
+      chrome.storage.local.set({ sabaReq: payload, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" });
     }
   } catch (e) { console.warn("saba name", e); }
 
@@ -568,22 +603,30 @@
     } finally { navBusy = false; }
   }
   // الصفحة الرئيسية أحياناً تحمّل بدون تغييرات نلقطها — نحاول كل ثانيتين لمدة دقيقتين بعد وصول الطلب
-  setInterval(() => { if (TOP && req && auto && Date.now() < navUntil && !document.hidden) openAddForm(); }, 2000);
+  setInterval(() => { if (TOP && auto && navActive() && !document.hidden) openAddForm(); }, 2000);
 
   // ---------- تشغيل ----------
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaMin"], d => {
-    req = d.sabaReq || null; auto = d.sabaAuto !== false; minimized = !!d.sabaMin;
-    $("#p").classList.toggle("min", minimized); $("#min").textContent = minimized ? "+" : "–";
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaDoneIds"], d => {
+    req = d.sabaReq || null; auto = d.sabaAuto !== false;
+    queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; doneIds = d.sabaDoneIds || [];
+    if (req && !fillActive()) { req = null; if (TOP) chrome.storage.local.remove("sabaReq"); }   // طلب قديم → نتجاهله
+    setMin(!req);                                                                             // بدون طلب: اللوحة مصغّرة وما تزعج
     if (TOP) document.documentElement.append(host);
     render();
-    if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 900);
+    if (req && auto) setTimeout(() => { fill(req); render(); if (navActive()) openAddForm(); }, 900);
   });
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local") return;
     if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
-    if (ch.sabaReq) { navUntil = Date.now() + 120000; req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; if (minimized) { minimized = false; $("#p").classList.remove("min"); } render(); if (req && auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
+    if (ch.sabaQueue) { queue = ch.sabaQueue.newValue?.items || []; queueAt = ch.sabaQueue.newValue?.at || 0; if (!req && !minimized) render(); else updateCount(); }
+    if (ch.sabaDoneIds) doneIds = ch.sabaDoneIds.newValue || [];
+    if (ch.sabaReq) {
+      req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = "";
+      if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
+      else { setMin(!pendingQ().length); render(); }                    // بعد «تم الرفع»: قائمة الطلبات التالية، أو تتصغّر لو ما فيه
+    }
     if (!TOP && ch.sabaReq) return;
   });
 
@@ -594,12 +637,12 @@
     clearTimeout(deb);
     deb = setTimeout(() => {
       scanPsl();
-      if (req && auto) { fill(req); updateDots(); openAddForm(); }
+      if (auto && fillActive()) { fill(req); updateDots(); if (navActive()) openAddForm(); }
       const pslIn = $("#psl"); if (pslIn && newestPsl && !pslIn.value) pslIn.value = newestPsl;
       const acc = $(".acc"); if (req && acc) { const st = accountState(req).state; if (!acc.classList.contains(st)) render(); }
       if (req && /حسابات صحة طبي/.test(document.body.innerText)) highlightPicker(req);
     }, 450);
   }).observe(document.body, { childList: true, subtree: true });
-  setInterval(() => { if (req && auto && shadowHosts.length && !document.hidden) { fill(req); updateDots(); } }, 2000);
+  setInterval(() => { if (auto && fillActive() && shadowHosts.length && !document.hidden) { fill(req); updateDots(); } }, 2000);
   addEventListener("hashchange", () => setTimeout(() => render(), 500));
 })();
