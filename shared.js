@@ -7,16 +7,18 @@
    ========================================================================== */
 
 export const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyCjfyElLq4gBcUu9H7O590yPDkDt8UPqwc",
+  authDomain: "saba-leave.firebaseapp.com",
+  projectId: "saba-leave",
+  storageBucket: "saba-leave.firebasestorage.app",
+  messagingSenderId: "371968010939",
+  appId: "1:371968010939:web:987e7a3e10debb9409979e"
 };
 export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب للذكاء الاصطناعي)
 export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
-export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
+export const IMAGE_STORE = "firestore";
+// القراءة بالذكاء من الصورة — موقوفة مؤقتاً (بيانات صحية على الخطة المجانية لـ Gemini). شغّلها لما يتفعل حساب الفوترة + reCAPTCHA
+export const AI_ENABLED = false;      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
 export const AI_MODEL = "gemini-3.5-flash";  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
@@ -412,7 +414,8 @@ async function liveBackend(role) {
     demo: false,
     /* --- المريض --- */
     async ensureAnon() { if (!auth.currentUser) await AU.signInAnonymously(auth); return auth.currentUser.uid; },
-    async warmup() { try { await api.ensureAnon(); await getModel(); } catch (e) { console.warn(e); } },
+    aiEnabled: AI_ENABLED && !!RECAPTCHA_SITE_KEY,
+    async warmup() { try { await api.ensureAnon(); if (api.aiEnabled) await getModel(); } catch (e) { console.warn(e); } },
     async extract(blob, type) {
       const m = await getModel();
       const b64 = await blobToBase64(blob);

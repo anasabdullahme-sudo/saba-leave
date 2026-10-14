@@ -328,10 +328,12 @@ async function onPhoto(file) {
   state.blob = blob; state.imagePath = null; state.ai = {};
   state.preview = isPdf ? "" : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(""); fr.readAsDataURL(blob); });
   $("#shotImg").src = state.preview || "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0b2b47"/><text x="200" y="110" fill="#7FD0F0" font-size="22" text-anchor="middle" font-family="sans-serif">PDF</text></svg>');
-  renderForm(); setLoading(true); setStatus("نقرأ بياناتك من الصورة…"); $("#note").classList.remove("on");
+  await apiReady;
+  const useAI = api.aiEnabled !== false;
+  renderForm(); setLoading(useAI); $("#note").classList.remove("on");
+  setStatus(useAI ? "نقرأ بياناتك من الصورة…" : "عبّ بياناتك كما هي في التقرير", useAI ? "" : "ok");
   if (!document.querySelector("#sReview.on")) go("sReview");
 
-  await apiReady;
   // الرفع والقراءة يشتغلون مع بعض
   $("#upbar").style.width = "0";
   state.uploadP = api.uploadImage(blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")
@@ -340,6 +342,7 @@ async function onPhoto(file) {
   state.uploadP.catch(() => {});
 
   const myBlob = blob;
+  if (!useAI) { $("#form [name]")?.focus({ preventScroll: true }); return; }
   try {
     const r = await Promise.race([api.extract(blob, state.type), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
     if (state.blob !== myBlob) return;
