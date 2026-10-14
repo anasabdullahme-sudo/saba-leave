@@ -10,7 +10,7 @@
   const FID = Math.random().toString(36).slice(2, 8);
 
   // ---------- إعدادات يمكن تعديلها ----------
-  const DATE_FMT = "DD/MM/YYYY";           // شكل التاريخ في خانات صحة (غيّره إلى "YYYY-MM-DD" إذا لزم)
+  const DATE_FMT = "YYYY-MM-DD";           // شكل التاريخ في خانات صحة (مثل 2026-10-14 و 1448-05-03)
   const TYPE_LABEL = {                      // نوع الإجازة في صحة لكل نوع طلب في سابا
     sick: "إجازة مرضية اعتيادية",
     companion: "إجازة مرافق",
@@ -27,6 +27,20 @@
     return DATE_FMT.replace("DD", m[1]).replace("MM", m[2]).replace("YYYY", m[3]);
   };
   const visible = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+  // بحث يدخل داخل Shadow DOM (بعض صفحات صحة مبنية بمكوّنات معزولة)
+  const shadowOf = el => el.shadowRoot || (chrome.dom?.openOrClosedShadowRoot ? (() => { try { return chrome.dom.openOrClosedShadowRoot(el); } catch { return null; } })() : null);
+  let shadowHosts = [];
+  function deepAll(sel) {
+    const out = [], hosts = [];
+    const walk = r => {
+      out.push(...r.querySelectorAll(sel));
+      for (const el of r.querySelectorAll("*")) { if (el.id === "saba-seha-host") continue; const sr = shadowOf(el); if (sr) { hosts.push(el); walk(sr); } }
+    };
+    walk(document); shadowHosts = hosts;
+    return out.filter(el => !el.closest("#saba-seha-host"));
+  }
+  const deepText = () => deepAll("*").map(ownText).filter(Boolean).join(" ");
+  const ownText = el => { let t = ""; for (const n of el.childNodes) if (n.nodeType === 3) t += n.textContent; return t.trim(); };
   const CONTROL = "input:not([type=radio]):not([type=checkbox]):not([type=hidden]):not([type=button]):not([type=submit]), select, textarea";
 
   // ---------- التاريخ الهجري (أم القرى — نفس تقويم صحة) ----------
@@ -80,11 +94,10 @@
 
   // ---------- إيجاد الخانة من عنوانها ----------
   // أي عنصر فيه نص مباشر (مو بس label) — صحة تحط النجمة والأيقونات داخل العنوان
-  const ownText = el => { let t = ""; for (const n of el.childNodes) if (n.nodeType === 3) t += n.textContent; return t.trim(); };
   const SKIP_TAG = /^(SCRIPT|STYLE|NOSCRIPT|OPTION|SELECT|TEXTAREA|BUTTON|svg|path)$/i;
   function labelCandidates() {
     const out = [];
-    for (const el of document.body.querySelectorAll("*")) {
+    for (const el of deepAll("*")) {
       if (SKIP_TAG.test(el.tagName) || el.closest("#saba-seha-host")) continue;
       const own = ownText(el); if (!own) continue;
       if (!visible(el)) continue;
@@ -97,7 +110,7 @@
   function controlBelow(labelEl) {
     const L = labelEl.getBoundingClientRect(); if (!L.width) return null;
     let best = null, bestD = 1e9;
-    for (const c of document.querySelectorAll(CONTROL)) {
+    for (const c of deepAll(CONTROL)) {
       if (c.closest("#saba-seha-host") || !visible(c)) continue;
       const R = c.getBoundingClientRect();
       const dy = R.top - L.bottom;
@@ -138,7 +151,7 @@
   function clickRadioByText(text) {
     const want = norm(text);
     const RADIO = "input[type=radio], [role=radio], mat-radio-button, .mat-radio-button, .mat-mdc-radio-button, p-radiobutton";
-    const cands = [...document.body.querySelectorAll("*")]
+    const cands = deepAll("*")
       .filter(el => ownText(el) && visible(el) && !el.closest("#saba-seha-host"))
       .filter(el => { const t = norm(el.textContent); return t === want || (t.includes(want) && t.length <= want.length + 4); });
     for (const el of cands) {
@@ -160,7 +173,7 @@
   }
   // احتياط: خانة عليها placeholder / aria-label يطابق
   function controlByHint(re, not) {
-    return [...document.querySelectorAll(CONTROL)].find(c => {
+    return deepAll(CONTROL).find(c => {
       if (c.closest("#saba-seha-host") || !visible(c)) return false;
       const h = norm([c.placeholder, c.getAttribute("aria-label"), c.title].filter(Boolean).join(" "));
       return h && re.test(h) && !(not && not.test(h));
@@ -191,7 +204,7 @@
     const report = {};
     // 1) نوع الإجازة
     const typeText = TYPE_LABEL[req.type];
-    if (typeText && norm(document.body.innerText).includes("نوع الاجازه")) {
+    if (typeText && norm(deepText()).includes("نوع الاجازه")) {
       if (clickRadioByText(typeText)) report.type = "ok";
     }
     // 2) نوع الهوية
@@ -353,9 +366,10 @@
     const labs = labelCandidates().filter(x => x.t.length < 45).slice(0, 90);
     const d = el => el ? `${el.tagName.toLowerCase()}[${["type","id","name","formcontrolname","placeholder","readonly","disabled"].map(a => el.getAttribute(a) != null ? a + "=" + el.getAttribute(a) : "").filter(Boolean).join(" ")}] .${String(el.className).slice(0, 60)}` : "-";
     const out = labs.map(x => { const c = controlFor(x.el), g = controlBelow(x.el); return `${x.el.tagName.toLowerCase()} «${x.t}» → ${d(c)}${g && g !== c ? " | geo:" + d(g) : ""}`; });
-    const ctrls = [...document.querySelectorAll(CONTROL + ", input[type=radio], [role=radio], [role=combobox], [contenteditable=true]")].filter(c => !c.closest("#saba-seha-host")).slice(0, 70)
+    const ctrls = deepAll(CONTROL + ", input[type=radio], [role=radio], [role=combobox], [contenteditable=true]").filter(c => !c.closest("#saba-seha-host")).slice(0, 70)
       .map(c => { const r = c.getBoundingClientRect(); return `${c.tagName.toLowerCase()} ${c.type || c.getAttribute("role") || ""} id=${c.id} name=${c.name || ""} fcn=${c.getAttribute("formcontrolname")} ph=${c.placeholder || ""} cls=${String(c.className).slice(0, 50)} vis=${visible(c)} ro=${c.readOnly} @${Math.round(r.left)},${Math.round(r.top)}`; });
-    return location.href + "\n--labels--\n" + out.join("\n") + "\n--controls--\n" + ctrls.join("\n");
+    const sh = shadowHosts.map(h => h.tagName.toLowerCase()); const tags = [...new Set(deepAll("*").map(e => e.tagName.toLowerCase()).filter(t => t.includes("-")))].slice(0, 40);
+    return location.href + `\nshadow=${sh.length} [${[...new Set(sh)].slice(0, 15).join(",")}] custom=[${tags.join(",")}] ctrlsTotal=${document.querySelectorAll("input,select,textarea").length}` + "\n--labels--\n" + out.join("\n") + "\n--controls--\n" + ctrls.join("\n");
   }
   // نرسل أمر لكل الإطارات ونجمع ردودها
   async function askFrames(cmdKey, repPrefix) {
@@ -461,13 +475,13 @@
   // ---------- فتح نموذج «إضافة إجازة مرضية» تلقائياً ----------
   // (فتح النموذج ما يخصم نقاط — الخصم يكون عند «تحقق/حفظ» واللي ما نضغطها أبداً)
   const textEls = t => {
-    const all = [...document.querySelectorAll("a, button, span, li, div, p")]
+    const all = deepAll("a, button, span, li, div, p")
       .filter(el => !el.closest("#saba-seha-host") && el.childElementCount <= 2 && norm(el.textContent) === norm(t));
     return all.filter(el => !all.some(o => o !== el && el.contains(o)));   // الأعمق فقط
   };
   const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el.closest("li") || el;
   const realClick = el => { el = clickable(el); ["mousedown", "mouseup", "click"].forEach(t => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }))); };
-  const onAddForm = () => norm(document.body.innerText).includes("اضافه اجازه مرضيه") && !!document.querySelector("input[type=radio]");
+  const onAddForm = () => norm(deepText()).includes("اضافه اجازه مرضيه") && deepAll("input[type=radio]").length > 0;
   let navBusy = false;
   async function openAddForm(force) {
     if (!TOP || navBusy || !req || onAddForm()) return;
@@ -521,5 +535,6 @@
       if (req && /حسابات صحة طبي/.test(document.body.innerText)) highlightPicker(req);
     }, 450);
   }).observe(document.body, { childList: true, subtree: true });
+  setInterval(() => { if (req && auto && shadowHosts.length && !document.hidden) { fill(req); updateDots(); } }, 2000);
   addEventListener("hashchange", () => setTimeout(() => render(), 500));
 })();
