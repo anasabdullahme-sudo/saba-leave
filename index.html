@@ -458,7 +458,7 @@ $("#form").addEventListener("submit", async e => {
     reset("sDone");
   } catch (err) {
     console.error(err);
-    toast("ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
+    toast(err?.code === "pdf_too_big" ? "ملف PDF كبير — صوّر التقرير بالكاميرا بدلاً منه" : "ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
   } finally { btn.disabled = false; btn.textContent = "إرسال الطلب"; }
 });
 

@@ -49,6 +49,17 @@ button{cursor:pointer;border:0;background:none}
 .seha-wide .l2{font-size:12px;font-weight:500;color:var(--muted)}
 .ext-hint{font-size:12px;color:var(--muted);text-align:center;margin-top:-2px}
 .ext-hint b{color:var(--ok)}
+.admin-btn{height:38px;padding:0 14px;border-radius:99px;border:1px solid var(--line);background:var(--white);color:var(--muted);font-weight:600;font-size:13.5px}
+.admin-btn:hover{color:var(--navy);border-color:var(--sky-2)}
+.modal{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(0,35,64,.35);padding:16px}
+.modal .box{width:min(440px,100%);background:var(--white);border-radius:20px;padding:22px;box-shadow:var(--shadow);display:grid;gap:12px}
+.modal h3{font-size:19px;color:var(--navy)}
+.modal p{font-size:14.5px;color:var(--muted);line-height:1.7}
+.modal label{font-size:14px;font-weight:500}
+.modal input{height:44px;border:1.5px solid var(--line);border-radius:12px;padding:0 12px;font-size:15px;width:100%}
+.modal .res{font-size:15px;color:var(--navy);background:var(--ice);border-radius:12px;padding:10px 12px;min-height:44px}
+.btn-danger{background:#E5383B;color:#fff}
+.img-gone{color:#BFE6F7;font-size:15px;text-align:center;padding:20px;line-height:1.8}
 .who{font-size:13.5px;color:var(--muted);padding-inline:4px}
 .demo-pill{font-size:12px;background:#FFF4D6;color:#7A5A00;padding:4px 10px;border-radius:99px}
 
@@ -236,6 +247,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who"></span>
+      <button class="admin-btn" id="btnClean" hidden>تنظيف الصور</button>
       <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
       <button class="icon-btn" id="btnOut" title="تسجيل الخروج" aria-label="تسجيل الخروج"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 8l-4 4 4 4M5 12h11"/></svg></button>
     </div>
@@ -304,6 +316,16 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     </div>
   </div>
 </aside>
+<div class="modal" id="cleanModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="cleanTtl">
+    <h3 id="cleanTtl">تنظيف الصور الشهري</h3>
+    <p>يمسح صور التقارير اللي انرفعت قبل التاريخ المحدد. بيانات الطلبات نفسها تبقى كاملة، وصور الطلبات اللي لسى في الانتظار أو معلّقة ما تنمسح.</p>
+    <label for="cleanDate">امسح الصور قبل تاريخ</label>
+    <input id="cleanDate" type="date">
+    <div class="res" id="cleanRes">…</div>
+    <div class="btn-row"><button class="btn btn-danger" id="cleanGo" disabled>امسح الصور</button><button class="btn btn-ghost" id="cleanCancel">إلغاء</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
@@ -347,6 +369,7 @@ api.onAuth(user => {
   }
   $("#vLogin").hidden = true; $("#vApp").hidden = false;
   $("#who").textContent = user.name;
+  $("#btnClean").hidden = !(user.role === "admin" && api.cleanupImages);
   start();
 });
 $("#loginForm").addEventListener("submit", async e => {
@@ -627,7 +650,7 @@ async function openDrawer(id, holdNow) {
   // الصورة
   const img = $("#dImg"), pdf = $("#dPdf");
   img.style.transform = ""; $("#viewer").classList.remove("zoom");
-  img.removeAttribute("src"); pdf.hidden = true; img.hidden = false;
+  img.removeAttribute("src"); pdf.hidden = true; img.hidden = false; $("#viewer .img-gone")?.setAttribute("hidden", "");
   $("#scrim").classList.add("on"); $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
   try {
     const url = await api.imageUrl(x.imagePath);
@@ -635,7 +658,11 @@ async function openDrawer(id, holdNow) {
     const isPdf = /\.pdf(\?|$)|^data:application\/pdf/i.test(x.imagePath || "");
     if (isPdf) { pdf.src = url; pdf.hidden = false; img.hidden = true; } else img.src = url;
     $("#vOpen").href = url;
-  } catch (e) { console.error(e); toast("تعذّر تحميل الصورة"); }
+  } catch (e) {
+    console.error(e);
+    if (e?.code === "image_deleted") { img.hidden = true; let g = $("#viewer .img-gone"); if (!g) { g = document.createElement("div"); g.className = "img-gone"; $("#viewer").prepend(g); } g.hidden = false; g.textContent = "صورة التقرير انمسحت في التنظيف الشهري — بيانات الطلب موجودة"; }
+    else toast("تعذّر تحميل الصورة");
+  }
 }
 function fillDrawerMeta(x) {
   $("#dName").textContent = x.patientName;
@@ -705,6 +732,36 @@ $("#btnSound").onclick = () => {
   toast(S.sound ? "تنبيه الطلبات الجديدة: مفعّل" : "تنبيه الطلبات الجديدة: متوقف");
 };
 setInterval(() => { if (S.pending.length) renderPending(); if (S.held.length) renderHeld(); }, 60000); // تحديث "قبل كم دقيقة"
+
+/* ---------- تنظيف الصور الشهري (للمسؤول) ---------- */
+let cleanSeq = 0;
+function monthStartIso() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; }
+async function previewClean() {
+  const seq = ++cleanSeq, v = $("#cleanDate").value;
+  $("#cleanGo").disabled = true;
+  if (!v) { $("#cleanRes").textContent = "اختر التاريخ"; return; }
+  $("#cleanRes").textContent = "جاري الحساب…";
+  try {
+    const list = await api.oldImages(new Date(v + "T00:00:00").getTime());
+    if (seq !== cleanSeq) return;
+    const mb = list.reduce((a, x) => a + x.size, 0) / 1048576;
+    $("#cleanRes").textContent = list.length ? `${list.length} صورة (${mb.toFixed(1)} ميجا) بتنمسح` : "ما فيه صور قبل هذا التاريخ";
+    $("#cleanGo").disabled = !list.length;
+  } catch (e) { console.error(e); $("#cleanRes").textContent = "تعذّر الحساب: " + (e.code || e.message); }
+}
+$("#btnClean").onclick = () => { $("#cleanModal").hidden = false; $("#cleanDate").value = monthStartIso(); previewClean(); };
+$("#cleanDate").onchange = previewClean;
+$("#cleanCancel").onclick = () => { $("#cleanModal").hidden = true; };
+$("#cleanGo").onclick = async () => {
+  const v = $("#cleanDate").value; if (!v) return;
+  $("#cleanGo").disabled = true; $("#cleanCancel").disabled = true;
+  try {
+    const n = await api.cleanupImages(new Date(v + "T00:00:00").getTime(), p => { $("#cleanRes").textContent = `جاري المسح… ${Math.round(p * 100)}%`; });
+    $("#cleanRes").textContent = `تم مسح ${n} صورة`;
+    toast(`تم مسح ${n} صورة قديمة`);
+  } catch (e) { console.error(e); $("#cleanRes").textContent = "ما تم المسح: " + (e.code || e.message); }
+  finally { $("#cleanCancel").disabled = false; }
+};
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null;

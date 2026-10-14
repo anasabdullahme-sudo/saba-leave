@@ -9,47 +9,38 @@
 
 ---
 
-## التشغيل الحقيقي (مرة وحدة ~20 دقيقة)
+## التشغيل الحقيقي (الخطة المجانية — بدون Blaze)
 
-### 1) مشروع Firebase
-1. ادخل [console.firebase.google.com](https://console.firebase.google.com) ← مشروع جديد (أو مشروعك الحالي).
-2. فعّل خطة **Blaze** (الدفع حسب الاستخدام) — مطلوبة للتخزين وتعطي حدود أعلى للذكاء.
-3. **Authentication ← Sign-in method**: فعّل **Anonymous** و **Email/Password**.
-4. **Firestore Database ← Create** (اختر أقرب موقع متاح للسعودية).
-5. **Storage ← Get started** (نفس الموقع).
-6. **AI Logic ← Get started** ← اختر **Gemini Developer API**.
-7. **App Check**: سجّل التطبيق بـ **reCAPTCHA Enterprise** وأضف دومين موقعك ← انسخ الـ Site key.
-   (ابتداءً من 2 نوفمبر 2026 App Check إلزامي للذكاء الاصطناعي.)
-8. **Project settings ← Your apps ← Web** ← انسخ `firebaseConfig`.
+الموقع مضبوط يشتغل على **خطة Spark المجانية**: صور التقارير تنحفظ مضغوطة داخل Firestore (`IMAGE_STORE = "firestore"`)، والتنظيف الشهري يمسحها.
+لما يتفعل حساب الفوترة (CNTXT) غيّر `IMAGE_STORE` إلى `"storage"` و`RECAPTCHA_PROVIDER` إلى `"enterprise"` إذا حبيت.
 
-### 2) عبّ الإعدادات
-افتح `shared.js` وعبّ أول جزء:
+### 1) مشروع Firebase (من الكونسول)
+1. **Authentication ← Sign-in method**: فعّل **Anonymous** و **Email/Password**.
+2. **Firestore Database ← Create database**: أقرب موقع متاح + **Production mode**.
+3. **AI Logic ← Get started** ← **Gemini Developer API**.
+4. **Project settings ← Your apps ← Web `</>`**: سجّل التطبيق وانسخ `firebaseConfig`.
+5. **reCAPTCHA v3**: من [google.com/recaptcha/admin/create](https://www.google.com/recaptcha/admin/create) اختر **Score based (v3)** وأضف الدومين `anasabdullahme-sudo.github.io` ← انسخ **Site key** و **Secret key**.
+6. **App Check ← Apps ← Web ← reCAPTCHA**: الصق الـ **Secret key** واحفظ.
+
+### 2) عبّ الإعدادات في `shared.js`
 ```js
 export const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", storageBucket: "...", messagingSenderId: "...", appId: "..." };
-export const RECAPTCHA_SITE_KEY = "...";
+export const RECAPTCHA_SITE_KEY = "...";   // Site key
 ```
 
-### 3) ارفع الموقع + القواعد
-```bash
-npm i -g firebase-tools
-firebase login
-firebase use --add            # اختر المشروع
-firebase deploy               # يرفع الموقع + قواعد الأمان + الفهارس
-```
-- رابط المريض: `https://<project>.web.app`
-- رابط الموظف: `https://<project>.web.app/staff`
+### 3) القواعد (نسخ ولصق — بدون برامج)
+- **Firestore ← Rules**: الصق محتوى `firestore.rules` واضغط **Publish**.
+- الفهارس: أول ما تفتح لوحة الموظف وتضغط «تم الرفع» قد يطلع خطأ فيه رابط **Create index** — افتحه واضغط إنشاء (مرة وحدة)، أو أنشئها يدوي من `firestore.indexes.json`.
 
-> تقدر تستضيف على GitHub Pages بدال Firebase Hosting، بس ارفع القواعد بـ `firebase deploy --only firestore,storage` وأضف دومين GitHub في App Check.
-> عند أول نشر لـ storage.rules بيطلب منك صلاحية ربط Storage بـ Firestore — وافق.
+### 4) الموظفين والمسؤول
+1. **Authentication ← Users ← Add user** لكل موظف (إيميل + كلمة مرور) وانسخ **User UID**.
+2. **Firestore ← Start collection** اسمها `staff` ← Document ID = الـ UID ← حقل `name` (string) = اسم الموظف.
+3. للمسؤول (يقدر يمسح الصور): أضف حقل `role` (string) = `admin`.
 
-### 4) أضف الموظفين
-1. **Authentication ← Users ← Add user** (إيميل + كلمة مرور لكل موظف).
-2. انسخ **User UID**.
-3. **Firestore ← Start collection** اسمها `staff` ← Document ID = الـ UID ← حقل `name` (string) = اسم الموظف.
-
-أي حساب مو موجود في `staff` ما يقدر يدخل اللوحة ولا يشوف الصور.
-
----
+### 5) التنظيف الشهري
+المسؤول يشوف زر **«تنظيف الصور»** أعلى اللوحة ← يختار التاريخ (افتراضياً بداية الشهر) ← يشوف كم صورة وحجمها ← «امسح الصور».
+- بيانات الطلبات تبقى كاملة، وصور الطلبات اللي **في الانتظار أو معلّقة** ما تنمسح.
+- الحد المجاني لقاعدة البيانات 1 جيجا ≈ 3–4 أشهر صور بحجمكم، فالمسح الشهري يكفي وزيادة.
 
 ## كيف يتوزع الطلب على الفرع
 - الذكاء يقرأ **اسم الطبيب المطبوع** و**الطبيب اللي على الختم** كلٌّ لحاله (المريض يقدر يعدّل الاسم يدوي).

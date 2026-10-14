@@ -8,6 +8,28 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/staff/$(request.auth.uid));
     }
     function str(v, mn, mx) { return v is string && v.size() >= mn && v.size() <= mx; }
+    function isAdmin() {
+      return isStaff() && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // صور التقارير (الخطة المجانية): بيانات وصفية صغيرة + الصورة نفسها في مستند منفصل
+    match /images/{id} {
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['uid','createdAt','size'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow read, delete: if isAdmin();
+    }
+    match /imageData/{id} {
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['uid','data','createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.data is string
+        && request.resource.data.data.size() < 1000000;
+      allow read: if isStaff();
+      allow delete: if isAdmin();
+    }
 
     // قائمة الموظفين — تُضاف من الكونسول فقط
     match /staff/{uid} {
@@ -36,7 +58,8 @@ service cloud.firestore {
         && str(request.resource.data.doctorName, 2, 120)
         && request.resource.data.idNumber.matches('^[12][0-9]{9}$')
         && request.resource.data.phone.matches('^05[0-9]{8}$')
-        && request.resource.data.imagePath.matches('^uploads/' + request.auth.uid + '/[0-9]+\\.(jpg|pdf)$');
+        && (request.resource.data.imagePath.matches('^uploads/' + request.auth.uid + '/[0-9]+\\.(jpg|pdf)$')
+            || request.resource.data.imagePath.matches('^fs:[A-Za-z0-9]{20}$'));
 
       // الموظف: يغيّر الحالة + يصحّح البيانات + ينقل الفرع
       allow update: if isStaff()

@@ -2,7 +2,7 @@
    سابا — بوابة رفع الإجازات (ملف مشترك بين صفحة المريض ولوحة الموظف)
    --------------------------------------------------------------------------
    1) عبّ firebaseConfig من: Firebase Console › Project settings › Your apps
-   2) عبّ RECAPTCHA_SITE_KEY من: Firebase Console › App Check
+   2) عبّ RECAPTCHA_SITE_KEY من: google.com/recaptcha/admin (نوع v3) وسجّله في Firebase › App Check
    إذا تركت apiKey فاضي → الموقع يشتغل "وضع تجريبي" على جهازك فقط (للمعاينة).
    ========================================================================== */
 
@@ -14,7 +14,9 @@ export const firebaseConfig = {
   messagingSenderId: "",
   appId: ""
 };
-export const RECAPTCHA_SITE_KEY = "";        // reCAPTCHA Enterprise site key (مطلوب للذكاء الاصطناعي)
+export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب للذكاء الاصطناعي)
+export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
+export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
 export const AI_MODEL = "gemini-3.5-flash";  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
@@ -374,14 +376,17 @@ ${AI_KEYS.join(", ")}, document_kind, quality.`;
 /* ---------------------------- Firebase ---------------------------- */
 async function liveBackend(role) {
   const u = n => `https://www.gstatic.com/firebasejs/${FB_VERSION}/firebase-${n}.js`;
-  const [A, AU, FS, ST, AC] = await Promise.all([u("app"), u("auth"), u("firestore"), u("storage"), u("app-check")].map(x => import(x)));
+  const useStorage = IMAGE_STORE === "storage";
+  const [A, AU, FS, AC, ST] = await Promise.all([u("app"), u("auth"), u("firestore"), u("app-check"), useStorage ? u("storage") : null].map(x => x && import(x)));
   const app = A.initializeApp(firebaseConfig);
-  if (RECAPTCHA_SITE_KEY) AC.initializeAppCheck(app, { provider: new AC.ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true });
+  if (RECAPTCHA_SITE_KEY) AC.initializeAppCheck(app, {
+    provider: RECAPTCHA_PROVIDER === "enterprise" ? new AC.ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY) : new AC.ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+    isTokenAutoRefreshEnabled: true });
   const auth = AU.getAuth(app);
   const db = role === "staff"
     ? FS.initializeFirestore(app, { localCache: FS.persistentLocalCache({ tabManager: FS.persistentMultipleTabManager() }) })
     : FS.getFirestore(app);
-  const st = ST.getStorage(app);
+  const st = useStorage ? ST.getStorage(app) : null;
   const col = FS.collection(db, "requests");
   const toObj = d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now(), doneAt: x.doneAt?.toMillis?.() ?? null, heldAt: x.heldAt?.toMillis?.() ?? null, openedAt: x.openedAt?.toMillis?.() ?? null }; };
 
@@ -417,6 +422,21 @@ async function liveBackend(role) {
     async uploadImage(blob, onProgress) {
       const uid = await api.ensureAnon();
       const pdf = blob.type === "application/pdf";
+      if (!useStorage) {
+        // الخطة المجانية: الصورة مضغوطة داخل Firestore (حد المستند 1MB)
+        onProgress?.(0.2);
+        let data = "";
+        if (pdf) { data = await blobToDataURL(blob); if (data.length > 950000) throw Object.assign(new Error("pdf_too_big"), { code: "pdf_too_big" }); }
+        else for (const [side, q] of [[1600, .8], [1400, .72], [1250, .66], [1100, .6], [950, .55]]) {
+          data = await blobToDataURL(await compressImage(blob, side, q)); if (data.length < 950000) break;
+        }
+        const id = FS.doc(FS.collection(db, "images")).id;
+        const b = FS.writeBatch(db);
+        b.set(FS.doc(db, "images", id), { uid, createdAt: FS.serverTimestamp(), size: data.length });
+        b.set(FS.doc(db, "imageData", id), { uid, data, createdAt: FS.serverTimestamp() });
+        await b.commit(); onProgress?.(1);
+        return "fs:" + id;
+      }
       const path = `uploads/${uid}/${Date.now()}.${pdf ? "pdf" : "jpg"}`;
       const task = ST.uploadBytesResumable(ST.ref(st, path), blob, { contentType: pdf ? "application/pdf" : "image/jpeg" });
       await new Promise((res, rej) => task.on("state_changed", s => onProgress?.(s.bytesTransferred / s.totalBytes), rej, res));
@@ -433,7 +453,7 @@ async function liveBackend(role) {
       return AU.onAuthStateChanged(auth, async user => {
         if (!user || user.isAnonymous) return cb(null);
         const s = await FS.getDoc(FS.doc(db, "staff", user.uid)).catch(() => null);
-        cb(s?.exists() ? { uid: user.uid, email: user.email, name: s.data().name || user.email } : { uid: user.uid, email: user.email, denied: true });
+        cb(s?.exists() ? { uid: user.uid, email: user.email, name: s.data().name || user.email, role: s.data().role || "staff" } : { uid: user.uid, email: user.email, denied: true });
       });
     },
     login: (e, p) => AU.signInWithEmailAndPassword(auth, e, p),
@@ -465,7 +485,34 @@ async function liveBackend(role) {
     markHeld: (id, reason, note, by) => FS.updateDoc(FS.doc(col, id), { status: "held", holdReason: reason, holdNote: note || "", heldAt: FS.serverTimestamp(), heldBy: by }),
     unhold: id => FS.updateDoc(FS.doc(col, id), { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }),
     update: (id, patch) => FS.updateDoc(FS.doc(col, id), patch),
-    imageUrl: path => ST.getDownloadURL(ST.ref(st, path)),
+    async imageUrl(path) {
+      if (String(path).startsWith("fs:")) {
+        const d = await FS.getDoc(FS.doc(db, "imageData", path.slice(3)));
+        if (!d.exists()) throw Object.assign(new Error("image_deleted"), { code: "image_deleted" });
+        return d.data().data;
+      }
+      return ST.getDownloadURL(ST.ref(st, path));
+    },
+    /* --- تنظيف الصور الشهري (للمسؤول) --- */
+    ...(useStorage ? {} : {
+      async oldImages(cutoffMs) {
+        const active = await FS.getDocs(FS.query(col, FS.where("status", "in", ["pending", "held"])));
+        const keep = new Set(active.docs.map(d => d.data().imagePath).filter(p => String(p).startsWith("fs:")).map(p => p.slice(3)));
+        const old = await FS.getDocs(FS.query(FS.collection(db, "images"), FS.where("createdAt", "<", FS.Timestamp.fromMillis(cutoffMs))));
+        return old.docs.filter(d => !keep.has(d.id)).map(d => ({ id: d.id, size: d.data().size || 0 }));
+      },
+      async cleanupImages(cutoffMs, onProgress) {
+        const list = await api.oldImages(cutoffMs);
+        let b = FS.writeBatch(db), n = 0, done = 0;
+        for (const im of list) {
+          b.delete(FS.doc(db, "imageData", im.id)); b.delete(FS.doc(db, "images", im.id)); n += 2; done++;
+          if (n >= 400) { await b.commit(); b = FS.writeBatch(db); n = 0; onProgress?.(done / list.length); }
+        }
+        if (n) await b.commit();
+        onProgress?.(1);
+        return list.length;
+      },
+    }),
   };
   return api;
 }
