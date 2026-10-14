@@ -14,8 +14,8 @@ export const firebaseConfig = {
   messagingSenderId: "371968010939",
   appId: "1:371968010939:web:987e7a3e10debb9409979e"
 };
-export const RECAPTCHA_SITE_KEY = "";        // مفتاح reCAPTCHA (مطلوب للذكاء الاصطناعي)
-export const RECAPTCHA_PROVIDER = "v3";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
+export const RECAPTCHA_SITE_KEY = "6Lc9f-8tAAAAAPM5ed7dEHEiRDcFezL0jXDkI9gc";        // مفتاح reCAPTCHA (مطلوب للذكاء الاصطناعي)
+export const RECAPTCHA_PROVIDER = "enterprise";      // "v3" مجاني بدون فوترة | "enterprise" بعد تفعيل Blaze
 export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على الخطة المجانية | "storage" بعد تفعيل Blaze
 export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة
 export const AI_MODEL = "gemini-3.5-flash-lite";   // الأسرع (Ultra fast)
