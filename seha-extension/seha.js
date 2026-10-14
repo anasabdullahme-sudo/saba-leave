@@ -342,8 +342,9 @@
   const seenPsl = new Set((document.body.innerText.match(PSL_RE) || []));
   let newestPsl = "";
   function scanPsl() {
-    const found = document.body.innerText.match(PSL_RE) || [];
-    for (const p of found) if (!seenPsl.has(p)) { seenPsl.add(p); newestPsl = p; }
+    const txt = document.body.innerText, found = txt.match(PSL_RE) || [];
+    const onSearch = isSearchPage(norm(txt));   // جدول نتائج البحث فيه أرقام قديمة — نتجاهلها
+    for (const p of found) if (!seenPsl.has(p)) { seenPsl.add(p); if (!onSearch) newestPsl = p; }
   }
 
   // ---------- اللوحة العائمة (Shadow DOM حتى ما تتأثر بتصميم صحة) ----------
@@ -497,7 +498,7 @@
       const m = /SABA_SEHA:(\{[\s\S]*\})/.exec(t || "");
       e.preventDefault();
       if (!m) return toastLocal("هذا مو طلب من لوحة سابا");
-      try { chrome.storage.local.set({ sabaReq: JSON.parse(m[1]), sabaNavFor: "" }); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
+      try { chrome.storage.local.set({ sabaReq: JSON.parse(m[1]), sabaNavFor: "", sabaAddFor: "" }); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
     });
   }
   let tt;
@@ -512,7 +513,7 @@
   try {
     if (String(window.name).startsWith("SABA_SEHA:")) {
       const payload = JSON.parse(window.name.slice(10)); window.name = "";
-      chrome.storage.local.set({ sabaReq: payload, sabaNavFor: "" });
+      chrome.storage.local.set({ sabaReq: payload, sabaNavFor: "", sabaAddFor: "" });
     }
   } catch (e) { console.warn("saba name", e); }
 
@@ -524,7 +525,13 @@
     return all.filter(el => !all.some(o => o !== el && el.contains(o)));   // الأعمق فقط
   };
   const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el;
-  const realClick = el => { el = clickable(el); ["mousedown", "mouseup", "click"].forEach(t => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }))); };
+  const evAt = el => { const r = el.getBoundingClientRect(); return { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }; };
+  const realClick = el => { el = clickable(el); const o = evAt(el);
+    [["pointerdown", PointerEvent], ["mousedown", MouseEvent], ["pointerup", PointerEvent], ["mouseup", MouseEvent], ["click", MouseEvent]].forEach(([t, C]) => el.dispatchEvent(new C(t, o))); };
+  // قائمة «الخدمات» في صحة تنفتح بمرور الماوس (مو بالضغط)
+  const hover = el => { for (let n = el, i = 0; n && i < 4; n = n.parentElement, i++) { const o = evAt(el);
+    [["pointerover", PointerEvent], ["mouseover", MouseEvent], ["mousemove", MouseEvent]].forEach(([t, C]) => n.dispatchEvent(new C(t, o)));
+    [["pointerenter", PointerEvent], ["mouseenter", MouseEvent]].forEach(([t, C]) => n.dispatchEvent(new C(t, { ...o, bubbles: false }))); } };
   let navBusy = false, navRef = "", navTries = 0, navNext = 0, navUntil = Date.now() + 120000;
   async function openAddForm(force) {
     if (!TOP || navBusy || !req) return;
@@ -544,17 +551,18 @@
       let add = textEls("إضافة إجازة مرضية").find(visible);
       if (add) { if (force || st.sabaAddFor !== req.ref) await clickAdd(add); return; }
       // 2) من الصفحة الرئيسية: الخدمات ← الإجازات المرضية (نعيد المحاولة لين تحمّل القائمة)
-      if (!force && st.sabaNavFor === req.ref) return;
       if (!force && navTries >= 6) return;
       navTries++; navNext = Date.now() + 2500;
       let link = textEls("الإجازات المرضية").find(visible);
       if (!link) {
         const svc = await find("الخدمات", 12); if (!svc) return;
-        realClick(svc); link = await find("الإجازات المرضية", 12);
+        hover(svc); link = await find("الإجازات المرضية", 6);                       // تنفتح بالمرور
+        if (!link) { realClick(svc); hover(svc); link = await find("الإجازات المرضية", 8); }
+        if (!link) link = textEls("الإجازات المرضية")[0] || null;                   // موجودة بس مخفية → نضغطها مباشرة
       }
       if (!link) { if (navTries >= 6 || force) toastLocal("افتح: الخدمات ← الإجازات المرضية ← إضافة"); return; }
       await chrome.storage.local.set({ sabaNavFor: req.ref });
-      realClick(link);
+      hover(link); realClick(link);
       add = await find("إضافة إجازة مرضية", 60);                                  // نستنى صفحة البحث لين 15 ثانية
       if (add && (force || st.sabaAddFor !== req.ref)) await clickAdd(add);
     } finally { navBusy = false; }
