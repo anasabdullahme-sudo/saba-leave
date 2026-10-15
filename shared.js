@@ -81,6 +81,8 @@ export const DOCTORS = [
   // عيادات وطنك
   { id: "wafaa-mohamed",    branch: "watanak", ar: "وفاء محمد",    en: "Wafaa Mohamed",       alt: ["Wafa Mohammed", "Wafaa Muhammad"] },
   { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen",       alt: ["Ilham Shahin", "Elham Shahin"] },
+  // سابا البوادي (أي طبيب غير مذكور يروح للبوادي تلقائياً — هنا بس عشان يتعرّف على الاسم العربي)
+  { id: "mohamed-wali",     branch: "bawadi", ar: "محمد والي",     en: "Mohamed Wali",        alt: ["محمد والى", "Mohammed Wali", "Mohamed Waly", "Mohamed Wally", "Mohammad Wali"] },
   // سابا الحرمين
   { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara",       alt: ["Alia Alwaraa", "Aliaa Elwara"] },
   { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },

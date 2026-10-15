@@ -774,9 +774,11 @@ function renderExtHint() {
 }
 function sehaPayload(x) {
   const pick = k => x[k] || "";
+  // الطبيب: من المحفوظ، وإلا نطابق الاسم من جديد (طلبات قديمة قبل إضافة الطبيب للقائمة)
+  const doc = doctorById(x.doctorId) || matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor || null;
   return {
     v: 1, id: x.id, ref: x.ref, type: x.type, branch: x.branch, account: SEHA_ACCOUNTS[x.branch] || null,
-    fileNo: pick("fileNo"), doctorAr: doctorById(x.doctorId)?.ar || "", doctorEn: doctorById(x.doctorId)?.en || "",
+    fileNo: pick("fileNo"), doctorAr: doc?.ar || "", doctorEn: doc?.en || "",
     patientName: pick("patientName"), patientNameEn: pick("patientNameEn"), idNumber: pick("idNumber"), dob: pick("dob"), phone: pick("phone"),
     leaveStart: pick("leaveStart"), leaveEnd: pick("leaveEnd"), leaveDays: pick("leaveDays"), visitDate: pick("visitDate"),
     companionName: pick("companionName"), companionId: pick("companionId"), companionDob: pick("companionDob"), relationship: pick("relationship"),

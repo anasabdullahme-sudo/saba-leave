@@ -22,7 +22,7 @@
 
   // ---------- أدوات ----------
   const norm = s => String(s || "")
-    .replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
+    .replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/[ىیئ]/g, "ي").replace(/ک/g, "ك").replace(/ؤ/g, "و").replace(/ة/g, "ه")
     .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[*:：]/g, " ").replace(/\s*\/\s*/g, "/").replace(/\s+/g, " ").trim();
   const fmtDate = (dmy, f = DATE_FMT) => {
     const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy || ""); if (!m) return dmy || "";
@@ -258,6 +258,14 @@
         if (sc > bestScore) { best = o; bestScore = sc; tie = false; } else if (sc === bestScore && sc > 0) tie = true;
       }
       if (best && bestScore >= 2 && !tie) { setValue(sel, best.value); flash(sel); return "ok"; }
+      // احتياط: اسم عائلة مميز (مو اسم شائع) موجود في خيار واحد بس → هو الطبيب (مثل «والي/والى»)
+      const COMMON = new Set(["محمد", "احمد", "عبدالله", "عبد", "علي", "حسن", "حسين", "محمود", "ابراهيم", "عبدالرحمن", "خالد", "mohamed", "mohammed", "muhammad", "ahmed", "ahmad", "ali", "abdullah"]);
+      const rare = [...new Set(want.flat())].filter(t => t.length >= 3 && !COMMON.has(t));
+      const opts = [...sel.options].filter(o => o.value && docTokens(o.textContent).length);
+      for (const t of rare) {
+        const hits = opts.filter(o => docTokens(o.textContent).includes(t));
+        if (hits.length === 1) { setValue(sel, hits[0].value); flash(sel); return "ok"; }
+      }
       return "check";
     }
     // قائمة مخصّصة (بحث): نفتحها ونكتب اسم الطبيب، والموظف يختار
