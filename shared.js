@@ -84,7 +84,7 @@ export const DOCTORS = [
   // سابا الحرمين
   { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara",       alt: ["Alia Alwaraa", "Aliaa Elwara"] },
   { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },
-  { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
+  { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
   { id: "fatma-ibrahim",     branch: "haramain", ar: "فاطمة إبراهيم",   en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمه ابراهيم", "Fatma Ibrahim Mohamed Ibrahim", "Fatima Ibrahim", "Fatmah Ibraheem", "Fatma Ebrahim", "Fatima Mohamed Ibrahim"] },
   { id: "sara-shoreiji",    branch: "haramain", ar: "سارة الشوربجي",  en: "Sarah El-Shourbagy",  alt: ["سارة الشوريجي", "ساره الشوربجي", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara Al-Shorbagy", "Sara Shoreiji"] },
 ];
