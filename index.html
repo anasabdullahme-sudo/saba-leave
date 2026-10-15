@@ -306,10 +306,10 @@ addEventListener("popstate", e => { const sc = e.state?.screen || "sHome"; const
 if (histOK) { try { history.replaceState({ screen: "sHome" }, ""); } catch { histOK = false; } }
 document.querySelectorAll("[data-back]").forEach(b => b.onclick = back);
 
+function setType(t) { state.type = t; document.querySelectorAll(".ttl").forEach(h => h.textContent = typeName(t)); }
 $("#choices").addEventListener("click", e => {
   const c = e.target.closest(".choice"); if (!c) return;
-  state.type = c.dataset.type;
-  document.querySelectorAll(".ttl").forEach(h => h.textContent = typeName(state.type));
+  setType(c.dataset.type);
   go("sCapture");
 });
 // رابط مباشر لنوع معيّن: ?t=sick | companion | attendance (للباركود القديم أو ستاند لكل نوع)
@@ -354,11 +354,18 @@ async function onPhoto(file) {
     const r = await Promise.race([api.extract(blob, state.type), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
     if (state.blob !== myBlob) return;
     state.ai = r || {};
+    // المريض اختار نوع غلط؟ نحوّله تلقائياً لنوع التقرير (مثلاً اختار إجازة والورقة مشهد مراجعة)
+    const typeFor = { sick_leave: "sick", companion_leave: "companion", attendance: "attendance" };
+    const docType = typeFor[r?.document_kind];
+    let switched = null;
+    if (docType && docType !== state.type && r?.quality !== "not_document") {
+      switched = state.type; setType(docType); renderForm(); setLoading(true);
+    }
     fillFromAI(state.ai);
-    const kindFor = { sick: "sick_leave", companion: "companion_leave", attendance: "attendance" };
-    if (r?.document_kind && r.document_kind !== "other" && r.document_kind !== kindFor[state.type]) {
-      const nm = { sick_leave: "إجازة مرضية", companion_leave: "إجازة مرافق", attendance: "مشهد حضور" }[r.document_kind];
-      $("#note").textContent = `التقرير يبدو "${nm}" وأنت اخترت "${typeName(state.type)}". تأكد من نوع الطلب قبل الإرسال.`; $("#note").classList.add("on");
+    if (switched) {
+      $("#note").innerHTML = `حوّلنا طلبك إلى «<b>${typeName(state.type)}</b>» لأن التقرير كذا. <button type="button" id="undoType" style="all:unset;cursor:pointer;color:#0082D4;font-weight:700;text-decoration:underline">لا، اختياري «${typeName(switched)}» صحيح</button>`;
+      $("#note").classList.add("on");
+      $("#undoType").onclick = () => { setType(switched); renderForm(); fillFromAI(state.ai); $("#note").classList.remove("on"); };
     }
     if (r?.quality && r.quality !== "good") {
       const msg = { blurry: "الصورة غير واضحة. يُفضّل تعيد التصوير بإضاءة أفضل.", cropped: "جزء من الورقة خارج الصورة. صوّرها كاملة.", not_document: "ما قدرنا نتعرف على تقرير طبي في الصورة. تأكد إنك صوّرت التقرير الصحيح." }[r.quality];

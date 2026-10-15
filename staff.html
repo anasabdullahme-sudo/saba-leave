@@ -457,6 +457,7 @@ function rowHTML(x, mode) {
   const done = mode === "done", held = mode === "held";
   const dupe = mode === "pending" && S.pending.filter(y => y.idNumber === x.idNumber && y.type === x.type && (y.leaveStart || y.visitDate) === (x.leaveStart || x.visitDate)).length > 1;
   const late = mode === "pending" && Date.now() - x.createdAt > 30 * 60000;
+  const dupeOther = mode !== "done" && [...S.pending, ...S.held].some(y => y.id !== x.id && y.idNumber === x.idNumber && y.type !== x.type && Math.abs((y.createdAt || 0) - (x.createdAt || 0)) < 48 * 3600e3);
   const unknownDoc = !x.doctorId;
   const byStamp = x.stampDoctor && x.doctorId && matchDoctor(x.doctorName).doctor?.id !== x.doctorId ? doctorById(x.doctorId) : null;
   const actions = done ? `<div class="age">${esc(x.doneBy || "")}</div>`
@@ -464,7 +465,7 @@ function rowHTML(x, mode) {
     : `<div class="quick-row"><button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
   return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
-      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(x.doctorName)}</span><span>${esc(dates(x))}</span></div>
       ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
     </div>
@@ -620,6 +621,7 @@ const FIELDS = x => [
   x.reason && ["reason", "السبب"],
   ["doctorName", "الطبيب المعالج"],
   x.stampDoctor && ["stampDoctor", "ختم الطبيب"],
+  ["@type", "نوع الطلب"],
   ["@branch", "الفرع"],
   ["ref", "رقم الطلب", true, true],
   x.sehaRef && ["sehaRef", "رقم صحة (PSL)", true, true],
@@ -633,6 +635,7 @@ async function openDrawer(id, holdNow) {
   $("#dFields").innerHTML = FIELDS(x).map(f => {
     if (f.length === 1) return `<div class="sec">${f[0]}</div>`;
     const [k, label, ltr, ro] = f;
+    if (k === "@type") return `<div class="fr"><label>${label}</label><select data-k="type">${TYPES.map(t => `<option value="${t.id}" ${t.id === x.type ? "selected" : ""}>${t.ar}</option>`).join("")}</select><span></span></div>`;
     if (k === "@branch") return `<div class="fr"><label>${label}</label><select data-k="branch">${BRANCHES.map(b => `<option value="${b.id}" ${b.id === x.branch ? "selected" : ""}>${b.ar}</option>`).join("")}</select><span></span></div>`;
     return `<div class="fr"><label>${label}</label><input data-k="${k}" value="${esc(x[k])}" ${ltr ? 'class="ltr"' : ""} ${ro ? "readonly" : ""} ${DATE_KEYS.includes(k) ? 'data-date="1" inputmode="numeric" maxlength="10"' : ""}><button class="cp" data-cp="${k}" title="نسخ" aria-label="نسخ ${label}">${COPY}</button></div>`;
   }).join("");
@@ -695,10 +698,12 @@ $("#dFields").addEventListener("change", async e => {
   const k = el.dataset.k, v = el.value.trim(), id = S.openId;
   const patch = { [k]: v };
   if (k === "branch") patch.branchManual = true;
+  if (k === "type") Object.assign(patch, typePatch((S.pending.find(x => x.id === id) || S.held.find(x => x.id === id) || {}), v), { typeManual: true });
   try {
     await api.update(id, patch);
     [S.pending, S.held, S.done].forEach(l => { const r = l.find(x => x.id === id); if (r) Object.assign(r, patch); });
     if (k === "branch") { toast(`تم نقل الطلب إلى فرع ${branchName(v)}`); closeDrawer(); }
+    else if (k === "type") { toast(`تم تغيير النوع إلى ${typeName(v)}`); closeDrawer(); }
     else toast("تم حفظ التعديل");
     renderCounts(); renderPending(); renderHeld(); renderDone();
   } catch (err) { console.error(err); toast("ما تم حفظ التعديل"); }
@@ -769,14 +774,29 @@ $("#cleanGo").onclick = async () => {
 
 /* ---------- إعادة التوجيه لو تغيّر فرع ترخيص طبيب في القائمة ---------- */
 // الطلبات المنتظرة/المعلّقة تنتقل تلقائياً لفرع ترخيص طبيبها الحالي (إلا لو موظف غيّر الفرع بيده)
-const rerouted = new Set();
+// ونفس الشي للنوع: لو المريض اختار نوع غلط والتقرير نوع ثاني (حسب قراءة الصورة) نصحّحه
+const KIND_TYPE = { sick_leave: "sick", companion_leave: "companion", attendance: "attendance" };
+function typePatch(x, t) {
+  const p = { type: t };
+  if (t === "attendance" && !x.visitDate && x.leaveStart) p.visitDate = x.leaveStart;
+  if (t !== "attendance" && !x.leaveStart && x.visitDate) p.leaveStart = x.visitDate;
+  return p;
+}
+const rerouted = new Set(), retyped = new Set();
 function reroute(list) {
   for (const x of list) {
-    if (x.branchManual || rerouted.has(x.id)) continue;
-    const doc = doctorById(x.doctorId) || matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor;
-    if (!doc || doc.branch === x.branch) continue;
-    rerouted.add(x.id);
-    api.update(x.id, { branch: doc.branch }).catch(e => { console.warn("reroute", x.id, e); rerouted.delete(x.id); });
+    if (!x.branchManual && !rerouted.has(x.id)) {
+      const doc = doctorById(x.doctorId) || matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor;
+      if (doc && doc.branch !== x.branch) {
+        rerouted.add(x.id);
+        api.update(x.id, { branch: doc.branch }).catch(e => { console.warn("reroute", x.id, e); rerouted.delete(x.id); });
+      }
+    }
+    const kt = KIND_TYPE[x.docKind];
+    if (kt && kt !== x.type && !x.typeManual && x.aiQuality !== "not_document" && !retyped.has(x.id)) {
+      retyped.add(x.id);
+      api.update(x.id, typePatch(x, kt)).catch(e => console.warn("retype", x.id, e));   // لو القواعد القديمة ما تسمح، نتجاهل بهدوء
+    }
   }
 }
 

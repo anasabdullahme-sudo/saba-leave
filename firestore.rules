@@ -87,7 +87,8 @@ service cloud.firestore {
              'patientName','patientNameEn','idNumber','dob','phone',
              'leaveStart','leaveEnd','leaveDays','visitDate',
              'companionName','companionId','relationship','doctorName',
-             'fileNo','nationality','gender','reason','stampDoctor'])
+             'fileNo','nationality','gender','reason','stampDoctor','type','typeManual'])
+        && request.resource.data.type in ['sick','companion','attendance']
         && request.resource.data.status in ['pending','held','done']
         // المرفوع ما يتعلّق: من "تم الرفع" يا يبقى مرفوع (تعديل) يا يرجع "انتظار" (تراجع)
         && (resource.data.status != 'done' || request.resource.data.status in ['done','pending'])
