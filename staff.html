@@ -394,6 +394,7 @@ function start() {
     const fresh = S.pending.filter(x => added.includes(x.id));
     if (!S.firstLoad && fresh.length) notify(fresh);
     S.firstLoad = false;
+    reroute(list);
     renderCounts(); renderPending(); renderHeld(); postQueue();
     if (doneMsgQueue) handleSehaDone(doneMsgQueue);
     if (S.openId) {
@@ -765,6 +766,19 @@ $("#cleanGo").onclick = async () => {
   } catch (e) { console.error(e); $("#cleanRes").textContent = "ما تم المسح: " + (e.code || e.message); }
   finally { $("#cleanCancel").disabled = false; }
 };
+
+/* ---------- إعادة التوجيه لو تغيّر فرع ترخيص طبيب في القائمة ---------- */
+// الطلبات المنتظرة/المعلّقة تنتقل تلقائياً لفرع ترخيص طبيبها الحالي (إلا لو موظف غيّر الفرع بيده)
+const rerouted = new Set();
+function reroute(list) {
+  for (const x of list) {
+    if (x.branchManual || rerouted.has(x.id)) continue;
+    const doc = doctorById(x.doctorId) || matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor;
+    if (!doc || doc.branch === x.branch) continue;
+    rerouted.add(x.id);
+    api.update(x.id, { branch: doc.branch }).catch(e => { console.warn("reroute", x.id, e); rerouted.delete(x.id); });
+  }
+}
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null;
