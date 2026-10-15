@@ -312,6 +312,11 @@ $("#choices").addEventListener("click", e => {
   document.querySelectorAll(".ttl").forEach(h => h.textContent = typeName(state.type));
   go("sCapture");
 });
+// رابط مباشر لنوع معيّن: ?t=sick | companion | attendance (للباركود القديم أو ستاند لكل نوع)
+try {
+  const t = new URLSearchParams(location.search).get("t");
+  if (["sick", "companion", "attendance"].includes(t)) document.querySelector(`.choice[data-type="${t}"]`)?.click();
+} catch {}
 
 /* ---------- التصوير ---------- */
 $("#btnCam").onclick = () => $("#inCam").click();
