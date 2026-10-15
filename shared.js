@@ -71,7 +71,6 @@ export const DOCTORS = [
   { id: "rasha-waziri",     branch: "tala", ar: "رشا الوزيري",     en: "Rasha Al-Waziri",     alt: ["Rasha Elwaziry", "Rasha Waziry"] },
   { id: "nashwa-saqqa",     branch: "tala", ar: "نشوى السقا",      en: "Nashwa Al-Saqqa",     alt: ["نشوى عبدالكافي السقا", "Nashwa Sakka", "Nachwa Sakka", "Nashwa Elsakka"] },
   { id: "ahmed-kashaf",     branch: "tala", ar: "أحمد كشاف",       en: "Ahmed Kashaf",        alt: ["Ahmad Kashaf", "Ahmed Kashef"] },
-  { id: "sahar-mohamed",    branch: "tala", ar: "سحر محمد",        en: "Sahar Mohamed",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
   { id: "walaa-mansour",    branch: "tala", ar: "ولاء منصور",      en: "Walaa Mansour",       alt: ["Wala Mansour", "Walaa Mansor"] },
   { id: "manal-dowidar",    branch: "tala", ar: "منال دويدار",     en: "Manal Dowidar",       alt: ["Manal Dewidar", "Manal Doweidar"] },
   { id: "khaled-allam",     branch: "tala", ar: "خالد علام",       en: "Khaled Allam",        alt: ["Khalid Allam", "Khaled Alam"] },
@@ -88,6 +87,7 @@ export const DOCTORS = [
   { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },
   { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
   { id: "fatma-ibrahim",     branch: "haramain", ar: "فاطمة إبراهيم",   en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمه ابراهيم", "Fatma Ibrahim Mohamed Ibrahim", "Fatima Ibrahim", "Fatmah Ibraheem", "Fatma Ebrahim", "Fatima Mohamed Ibrahim"] },
+  { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
   { id: "sara-shoreiji",    branch: "haramain", ar: "سارة الشوربجي",  en: "Sarah El-Shourbagy",  alt: ["سارة الشوريجي", "ساره الشوربجي", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara Al-Shorbagy", "Sara Shoreiji"] },
 ];
 export const doctorById = id => DOCTORS.find(d => d.id === id);
