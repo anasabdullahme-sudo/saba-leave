@@ -1,0 +1,18 @@
+{
+  "name": "saba-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "بوت واتساب عيادات سابا — يرسل طلبات تعديل الإجازات للمرضى من لوحة الموظفين",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "firebase-admin": "^14.5.0",
+    "pino": "^10.4.0"
+  }
+}

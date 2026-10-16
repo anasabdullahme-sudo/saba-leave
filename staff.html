@@ -124,6 +124,26 @@ main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
 .row .meta .id{direction:ltr;font-variant-numeric:tabular-nums;color:var(--ink)}
 .chip{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--ice);color:var(--blue)}
 .chip.dup{background:#FDECEC;color:var(--red)}
+.chip.fix{background:#EDE9FE;color:#5B3CC4}
+.bot-pill{height:34px;display:inline-flex;align-items:center;gap:7px;padding:0 12px;border-radius:99px;border:1px solid var(--line);background:var(--white);color:var(--muted);font-size:13px;font-weight:600}
+.bot-pill i{width:8px;height:8px;border-radius:50%;background:#B8C4CF}
+.bot-pill.on i{background:var(--ok)} .bot-pill.on{color:#0B6E4F}
+.bot-pill.warn i{background:var(--amber)} .bot-pill.warn{color:#8A5A12}
+.bot-pill[disabled]{cursor:default}
+.btn-fix{background:#F3F0FF;color:#5B3CC4;border:1px solid #DDD3FB}
+.btn-fix:hover{background:#EBE5FF}
+.fx-chips{display:flex;flex-wrap:wrap;gap:8px}
+.fx-chips label{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 12px;border-radius:99px;border:1.5px solid var(--line);font-size:14px;cursor:pointer;user-select:none}
+.fx-chips input{width:auto;height:auto;accent-color:#5B3CC4}
+.fx-chips label:has(input:checked){border-color:#5B3CC4;background:#F3F0FF;color:#3F2A92}
+.modal textarea{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:14.5px;min-height:64px;resize:vertical;width:100%}
+.fx-state{border-radius:12px;padding:12px;font-size:14.5px;line-height:1.7;background:var(--ice);color:var(--navy)}
+.fx-state.ok{background:#E3F6EF;color:#0B6E4F}
+.fx-state.bad{background:#FDECEC;color:var(--red)}
+.fx-alt{display:grid;gap:8px}
+.fx-alt .btn{width:100%}
+.qr-box{display:grid;place-items:center;padding:10px;background:#fff;border:1px solid var(--line);border-radius:14px}
+.qr-box svg,.qr-box img{width:220px;height:220px}
 .chip.warn{background:#FFF3E0;color:var(--amber)}
 .age{font-size:12.5px;color:var(--muted);white-space:nowrap;text-align:left}
 .age.late{color:var(--amber);font-weight:600}
@@ -247,6 +267,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who"></span>
+      <button class="bot-pill" id="botPill" title="بوت الواتساب لطلبات التعديل"><i></i><span>واتساب</span></button>
       <button class="admin-btn" id="btnClean" hidden>تنظيف الصور</button>
       <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
       <button class="icon-btn" id="btnOut" title="تسجيل الخروج" aria-label="تسجيل الخروج"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 8l-4 4 4 4M5 12h11"/></svg></button>
@@ -303,6 +324,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
         <button class="btn btn-hold" id="dHold">تعليق</button>
         <button class="btn btn-ghost" id="dUnhold" hidden>إرجاع للانتظار</button>
       </div>
+      <button class="btn btn-fix" id="dFix" style="width:100%"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span>طلب تعديل من المريض (واتساب)</span></button>
       <p class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> لتأكيد الرفع · <kbd>Esc</kbd> للإغلاق</p>
     </div>
   </div>
@@ -326,10 +348,41 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <div class="btn-row"><button class="btn btn-danger" id="cleanGo" disabled>امسح الصور</button><button class="btn btn-ghost" id="cleanCancel">إلغاء</button></div>
   </div>
 </div>
+<div class="modal" id="fixModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="fixTtl" style="width:min(520px,100%)">
+    <h3 id="fixTtl">طلب تعديل من المريض</h3>
+    <div id="fixForm" style="display:grid;gap:12px">
+      <p id="fixWho"></p>
+      <label>وش الغلط؟</label>
+      <div class="fx-chips" id="fixFields"></div>
+      <label for="fixNote">ملاحظة للمريض (اختياري)</label>
+      <textarea id="fixNote" maxlength="250" placeholder="مثال: رقم الهوية ناقص رقم، أو الصورة مقصوصة"></textarea>
+      <div class="btn-row"><button class="btn btn-primary" id="fixSend">أرسل للمريض</button><button class="btn btn-ghost" id="fixCancel">إلغاء</button></div>
+    </div>
+    <div id="fixSent" hidden style="display:grid;gap:12px">
+      <div class="fx-state" id="fixState">…</div>
+      <div class="fx-alt" id="fixAlt" hidden>
+        <a class="btn btn-primary" id="fixWa" target="_blank" rel="noopener">افتح واتساب برسالة جاهزة</a>
+        <button class="btn btn-ghost" id="fixCopy">نسخ الرسالة</button>
+        <button class="btn btn-ghost" id="fixQrBtn">باركود — امسحه بجوال العيادة</button>
+        <div class="qr-box" id="fixQr" hidden></div>
+      </div>
+      <button class="btn btn-ghost" id="fixClose">إغلاق</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="botModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="botTtl">
+    <h3 id="botTtl">بوت الواتساب</h3>
+    <p id="botTxt"></p>
+    <div class="qr-box" id="botQr" hidden></div>
+    <div class="btn-row"><button class="btn btn-danger" id="botLogout" hidden>فك الربط</button><button class="btn btn-ghost" id="botClose">إغلاق</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS } from "./shared.js";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage } from "./shared.js";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -370,7 +423,7 @@ api.onAuth(user => {
   $("#vLogin").hidden = true; $("#vApp").hidden = false;
   $("#who").textContent = user.name;
   $("#btnClean").hidden = !(user.role === "admin" && api.cleanupImages);
-  start();
+  setTimeout(start, 0);   // بعد ما يكتمل تحميل الصفحة (بعض الدوال معرّفة تحت)
 });
 $("#loginForm").addEventListener("submit", async e => {
   e.preventDefault(); $("#loginErr").textContent = "";
@@ -384,6 +437,8 @@ $("#btnOut").onclick = () => api.logout();
 function start() {
   if (S.unsub) return;
   buildNav();
+  api.watchBot?.(st => { S.bot = st; renderBot(); });
+  api.watchAnsweredFixes?.(list => list.forEach(applyAnswered));
   let prevIds = null, doneTimer;
   S.unsub = api.watchPending((list, added) => {
     const ids = new Set(list.map(x => x.id));
@@ -465,7 +520,7 @@ function rowHTML(x, mode) {
     : `<div class="quick-row"><button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
   return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
-      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${held && x.fixToken ? '<span class="chip fix">بانتظار تعديل المريض</span>' : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(x.doctorName)}</span><span>${esc(dates(x))}</span></div>
       ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
     </div>
@@ -647,6 +702,7 @@ async function openDrawer(id, holdNow) {
   $("#sehaAcc").textContent = acc ? `الحساب: ${acc.group} ← ${acc.role}` : "حساب صحة لهذا الفرع غير محدد";
   renderExtHint();
   $("#dHold").hidden = isHeld; $("#dUnhold").hidden = !isHeld;
+  $("#dFix").hidden = isDone || !api.createFix;
   $("#dHoldInfo").hidden = !isHeld;
   if (isHeld) $("#dHoldInfo").innerHTML = `<b>معلّق: ${esc(holdName(x.holdReason))}</b>${esc(x.holdNote || "")}${x.heldBy ? ` — ${esc(x.heldBy)}` : ""}`;
   if (holdNow && !isHeld && !isDone) showHoldBox(true);
@@ -798,6 +854,99 @@ function reroute(list) {
       api.update(x.id, typePatch(x, kt)).catch(e => console.warn("retype", x.id, e));   // لو القواعد القديمة ما تسمح، نتجاهل بهدوء
     }
   }
+}
+
+/* ---------- طلبات التعديل عبر بوت الواتساب ---------- */
+const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 120000;
+const waPhone = p => { const d = String(p || "").replace(/\D/g, "").replace(/^966/, "").replace(/^0/, ""); return d.length === 9 ? "966" + d : ""; };
+function renderBot() {
+  const b = $("#botPill"), on = botOnline(), qr = S.bot?.state === "qr";
+  b.className = "bot-pill " + (on ? "on" : qr ? "warn" : "");
+  b.querySelector("span").textContent = on ? "واتساب متصل" : qr ? "واتساب يحتاج ربط" : "واتساب غير متصل";
+  if (!$("#botModal").hidden) renderBotModal();
+}
+let qrLib;
+async function qrSvg(text) {
+  qrLib ||= (await import("https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm")).default;
+  const q = qrLib(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+}
+async function renderBotModal() {
+  const st = S.bot, admin = S.me?.role === "admin";
+  const on = botOnline();
+  $("#botTxt").textContent = on ? `البوت شغال ومربوط بالرقم ${String(st.me || "").replace(/[:@].*/, "")}. طلبات التعديل تنرسل تلقائياً.`
+    : st?.state === "qr" ? (admin ? "امسح الباركود بجوال الرقم المخصص للبوت: واتساب ← الأجهزة المرتبطة ← ربط جهاز." : "البوت يحتاج ربط — كلّم المسؤول.")
+    : "البوت طافي أو السيرفر مو شغال. طلبات التعديل بتطلع لك أزرار ترسلها بنفسك.";
+  const box = $("#botQr");
+  box.hidden = !(admin && st?.state === "qr" && st.qr);
+  if (!box.hidden) { try { box.innerHTML = await qrSvg(st.qr); } catch { box.textContent = "تعذّر عرض الباركود"; } }
+  $("#botLogout").hidden = !(admin && on);
+}
+setInterval(renderBot, 30000);   // لو البوت وقف (ما وصل نبضه) يتحدّث المؤشر
+$("#botPill").onclick = () => { $("#botModal").hidden = false; renderBotModal(); };
+$("#botClose").onclick = () => { $("#botModal").hidden = true; };
+$("#botLogout").onclick = async () => { if (!confirm("فك ربط الرقم من البوت؟ بيطلع باركود جديد للربط.")) return; try { await api.botLogout(); toast("انرسل أمر فك الربط"); } catch { toast("ما قدرت أرسل الأمر"); } };
+
+let fixReq = null, fixUnsub = null, fixTimer = null;
+function openFix() {
+  const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
+  fixReq = x;
+  const phone = waPhone(x.phone);
+  $("#fixWho").innerHTML = phone ? `بنرسل للمريض <b>${esc(x.patientName)}</b> على الجوال <b dir="ltr">${esc(x.phone)}</b>` : `<b style="color:var(--red)">رقم جوال المريض غير صحيح</b> — صحّحه من خانة الجوال أول.`;
+  $("#fixFields").innerHTML = fixFieldsFor(x.type).map(f => `<label><input type="checkbox" value="${f.k}">${f.ar}</label>`).join("");
+  $("#fixNote").value = ""; $("#fixSend").disabled = !phone;
+  $("#fixForm").hidden = false; $("#fixSent").hidden = true; $("#fixModal").hidden = false;
+}
+function closeFix() { $("#fixModal").hidden = true; fixUnsub?.(); fixUnsub = null; clearTimeout(fixTimer); }
+$("#dFix").onclick = openFix;
+$("#fixCancel").onclick = closeFix; $("#fixClose").onclick = closeFix;
+$("#fixSend").onclick = async () => {
+  const x = fixReq; if (!x) return;
+  const fields = [...$("#fixFields").querySelectorAll("input:checked")].map(i => i.value);
+  if (!fields.length) return toast("اختر الخانة الغلط");
+  const note = $("#fixNote").value.trim(), by = myName();
+  const btn = $("#fixSend"); btn.disabled = true;
+  const values = {}; fields.forEach(k => { if (k !== "photo" && x[k]) values[k] = x[k]; });
+  try {
+    // نجهز المعرّف أول عشان الرابط يكون داخل الرسالة، وبعدها ننشئ الطلب كامل (البوت ما يشوف رسالة ناقصة)
+    const auto = botOnline();
+    const id = api.newFixId();
+    const message = fixMessage({ name: x.patientName, ref: x.ref, type: x.type, fields, note, link: fixLink(id) });
+    await api.createFix(x, { fields, values, note, by, message, sendStatus: auto ? "queued" : "manual" }, id);
+    Object.assign(x, { status: "held", holdReason: "data", holdNote: note || "بانتظار تعديل المريض", fixToken: id });
+    S.pending = S.pending.filter(r => r.id !== x.id); if (!S.held.some(r => r.id === x.id)) S.held.push(x);
+    closeDrawer(); renderCounts(); renderPending(); renderHeld();
+    $("#fixForm").hidden = true; $("#fixSent").hidden = false;
+    showFixSending(id, message, x, auto);
+  } catch (e) { console.error(e); toast("ما قدرت أنشئ طلب التعديل — تأكد من الاتصال"); }
+  finally { btn.disabled = false; }
+};
+function showFixSending(id, message, x, auto) {
+  const st = $("#fixState"), alt = $("#fixAlt");
+  const phone = waPhone(x.phone);
+  $("#fixWa").href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  $("#fixCopy").onclick = async () => { try { await copyText(message); toast("انسخت الرسالة"); } catch { toast("النسخ غير مسموح"); } };
+  $("#fixQrBtn").onclick = async () => { const b = $("#fixQr"); b.hidden = false; try { b.innerHTML = await qrSvg($("#fixWa").href); } catch { b.textContent = "تعذّر عرض الباركود"; } };
+  $("#fixQr").hidden = true;
+  const manual = why => { st.className = "fx-state"; st.textContent = why; alt.hidden = false; };
+  if (!auto) { manual("البوت مو متصل الحين — أرسل الرسالة بنفسك من أحد الأزرار:"); return; }
+  st.className = "fx-state"; st.textContent = "البوت يرسل الرسالة…"; alt.hidden = true;
+  fixTimer = setTimeout(() => manual("البوت تأخر في الإرسال — تقدر ترسلها بنفسك:"), 25000);
+  fixUnsub = api.watchFix(id, f => {
+    if (!f) return;
+    if (f.sendStatus === "sent") { clearTimeout(fixTimer); st.className = "fx-state ok"; st.textContent = `✓ انرسلت للمريض على واتساب. أول ما يعدّل، الطلب يرجع للانتظار لحاله.`; alt.hidden = true; }
+    if (f.sendStatus === "failed") { clearTimeout(fixTimer); manual(`ما انرسلت: ${f.sendError || "خطأ غير معروف"}. أرسلها بنفسك:`); st.className = "fx-state bad"; }
+  });
+}
+// وصل تعديل من المريض → نطبّقه على الطلب ونرجعه للانتظار (مرة وحدة حتى لو أكثر من جهاز مفتوح)
+const applying = new Set();
+async function applyAnswered(f) {
+  if (applying.has(f.id)) return; applying.add(f.id);
+  const a = f.answer || {}, patch = {};
+  for (const [k, v] of Object.entries(a)) { if (k === "note") { if (v) patch.patientNote = v; } else if (v) patch[k] = v; }
+  try {
+    const ok = await api.applyFix(f.id, patch, myName());
+    if (ok) { toast(`✎ ${f.name || "مريض"} عدّل بياناته — رجع الطلب للانتظار`); chime(); }
+  } catch (e) { console.warn("applyFix", e); applying.delete(f.id); }
 }
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */

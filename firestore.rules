@@ -36,6 +36,36 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ===== طلبات التعديل =====
+    // الموظف ينشئ الطلب، البوت (من السيرفر) يرسله واتساب، والمريض يرد من رابط سري (المعرّف العشوائي هو السر)
+    function ansOk(a) {
+      return a is map
+        && a.keys().hasOnly(['patientName','idNumber','dob','phone','leaveStart','leaveEnd','visitDate',
+                             'companionName','companionId','companionDob','relationship','imagePath','note'])
+        && optStr(a,'patientName',120) && optStr(a,'idNumber',10) && optStr(a,'dob',10) && optStr(a,'phone',10)
+        && optStr(a,'leaveStart',10) && optStr(a,'leaveEnd',10) && optStr(a,'visitDate',10)
+        && optStr(a,'companionName',120) && optStr(a,'companionId',10) && optStr(a,'companionDob',10)
+        && optStr(a,'relationship',60) && optStr(a,'note',300)
+        && (!('imagePath' in a) || a.imagePath.matches('^fs:[A-Za-z0-9]{20}$'));
+    }
+    match /fixes/{id} {
+      allow get: if request.auth != null;          // بالرابط فقط — ما يقدر أحد يسرد القائمة
+      allow list: if isStaff();
+      allow create: if isStaff() && autoId(id)
+        && request.resource.data.status == 'open' && request.resource.data.sendStatus in ['queued','manual']
+        && request.resource.data.message is string && request.resource.data.message.size() < 1500;
+      allow update: if isStaff()
+        || (request.auth != null && resource.data.status == 'open'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','answer','answeredAt'])
+            && request.resource.data.status == 'answered'
+            && request.resource.data.answeredAt == request.time
+            && ansOk(request.resource.data.answer));
+      allow delete: if false;
+    }
+    // حالة بوت الواتساب (يكتبها البوت من السيرفر) + أوامر المسؤول له
+    match /bot/status { allow read: if isStaff(); allow write: if false; }
+    match /bot/control { allow read: if isStaff(); allow write: if isAdmin(); }
+
     // قائمة الموظفين — تُضاف من الكونسول فقط
     match /staff/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
@@ -87,7 +117,8 @@ service cloud.firestore {
              'patientName','patientNameEn','idNumber','dob','phone',
              'leaveStart','leaveEnd','leaveDays','visitDate',
              'companionName','companionId','relationship','doctorName',
-             'fileNo','nationality','gender','reason','stampDoctor','type','typeManual'])
+             'fileNo','nationality','gender','reason','stampDoctor','type','typeManual',
+             'fixToken','fixAt','imagePath','patientNote'])
         && request.resource.data.type in ['sick','companion','attendance']
         && request.resource.data.status in ['pending','held','done']
         // المرفوع ما يتعلّق: من "تم الرفع" يا يبقى مرفوع (تعديل) يا يرجع "انتظار" (تراجع)

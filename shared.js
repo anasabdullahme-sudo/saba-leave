@@ -92,6 +92,38 @@ export const DOCTORS = [
 ];
 export const doctorById = id => DOCTORS.find(d => d.id === id);
 
+/* ---------- طلبات التعديل ---------- */
+// الخانات اللي يقدر الموظف يطلب من المريض يعدّلها
+export const FIX_FIELDS = [
+  { k: "patientName", ar: "الاسم" },
+  { k: "idNumber", ar: "رقم الهوية/الإقامة" },
+  { k: "dob", ar: "تاريخ الميلاد" },
+  { k: "phone", ar: "رقم الجوال" },
+  { k: "leaveStart", ar: "تاريخ بداية الإجازة", types: ["sick", "companion"] },
+  { k: "leaveEnd", ar: "تاريخ نهاية الإجازة", types: ["sick", "companion"] },
+  { k: "visitDate", ar: "تاريخ الحضور", types: ["attendance"] },
+  { k: "companionName", ar: "اسم المرافق", types: ["companion"] },
+  { k: "companionId", ar: "هوية المرافق", types: ["companion"] },
+  { k: "companionDob", ar: "تاريخ ميلاد المرافق", types: ["companion"] },
+  { k: "relationship", ar: "صلة القرابة", types: ["companion"] },
+  { k: "photo", ar: "صورة التقرير" },
+];
+export const fixFieldsFor = type => FIX_FIELDS.filter(f => !f.types || f.types.includes(type));
+export const fixLabel = k => (FIX_FIELDS.find(f => f.k === k) || {}).ar || k;
+export const fixLink = id => new URL(`./?fix=${id}`, location.href).href;
+export function fixMessage({ name, ref, type, fields, note, link }) {
+  const t = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" }[type] || "الإجازة";
+  return [
+    `السلام عليكم${name ? " " + name.split(" ")[0] : ""} 🌷`,
+    `معك عيادات سابا بخصوص طلب رفع ${t}${ref ? " رقم " + ref : ""}.`,
+    `نحتاج تصحيح: ${fields.map(fixLabel).join("، ")}`,
+    note ? `ملاحظة: ${note}` : "",
+    "",
+    "عدّل بياناتك من الرابط، ونكمل رفع طلبك على طول:",
+    link,
+  ].filter((l, i) => l || i === 4).join("\n");
+}
+
 /* ---------- تطبيع الأسماء + مطابقة الطبيب ---------- */
 const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩", FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
 export function latinDigits(s = "") {
@@ -532,6 +564,31 @@ async function liveBackend(role) {
       }
       return ST.getDownloadURL(ST.ref(st, path));
     },
+    /* --- طلبات التعديل (الموظف ← بوت الواتساب ← المريض) --- */
+    newFixId: () => FS.doc(FS.collection(db, "fixes")).id,
+    async createFix(req, data, id) {
+      const ref = id ? FS.doc(db, "fixes", id) : FS.doc(FS.collection(db, "fixes"));
+      const b = FS.writeBatch(db);
+      b.set(ref, { ...data, reqId: req.id, ref: req.ref || "", name: req.patientName || "", phone: req.phone || "", type: req.type, status: "open", createdAt: FS.serverTimestamp() });
+      b.update(FS.doc(col, req.id), { status: "held", holdReason: "data", holdNote: data.note || "بانتظار تعديل المريض", heldAt: FS.serverTimestamp(), heldBy: data.by || "", fixToken: ref.id, fixAt: FS.serverTimestamp() });
+      await b.commit(); return ref.id;
+    },
+    watchFix(id, cb) { return FS.onSnapshot(FS.doc(db, "fixes", id), d => cb(d.exists() ? { id: d.id, ...d.data() } : null), () => cb(null)); },
+    watchAnsweredFixes(cb) { return FS.onSnapshot(FS.query(FS.collection(db, "fixes"), FS.where("status", "==", "answered")), s => cb(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => console.warn("fixes", e)); },
+    applyFix: (fixId, patch, by) => FS.runTransaction(db, async tx => {
+      const fr = FS.doc(db, "fixes", fixId), f = await tx.get(fr);
+      if (!f.exists() || f.data().status !== "answered") return false;      // موظف ثاني طبّقه
+      const rr = FS.doc(col, f.data().reqId), r = await tx.get(rr);
+      if (r.exists() && r.data().status !== "done") tx.update(rr, { ...patch, status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null });
+      tx.update(fr, { status: "applied", appliedAt: FS.serverTimestamp(), appliedBy: by || "" });
+      return true;
+    }),
+    cancelFix: id => FS.updateDoc(FS.doc(db, "fixes", id), { status: "cancelled" }),
+    markFixManual: id => FS.updateDoc(FS.doc(db, "fixes", id), { sendStatus: "manual" }),
+    watchBot(cb) { return FS.onSnapshot(FS.doc(db, "bot", "status"), d => { const x = d.exists() ? d.data() : null; cb(x && { ...x, lastSeen: x.lastSeen?.toMillis?.() ?? 0 }); }, () => cb(null)); },
+    botLogout: () => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "logout", at: FS.serverTimestamp() }),
+    async getFix(id) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "fixes", id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
+    async answerFix(id, answer) { await api.ensureAnon(); await FS.updateDoc(FS.doc(db, "fixes", id), { status: "answered", answer, answeredAt: FS.serverTimestamp() }); },
     /* --- تنظيف الصور الشهري (للمسؤول) --- */
     ...(useStorage ? {} : {
       async oldImages(cutoffMs) {
@@ -561,10 +618,14 @@ function demoBackend() {
   const KEY = "saba_leave_demo_v2", bc = "BroadcastChannel" in window ? new BroadcastChannel(KEY) : null;
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; } };
   const save = list => { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { console.warn("demo storage full", e); } bc?.postMessage("x"); fire(); };
+  const FXKEY = KEY + "_fixes";
+  const loadFx = () => { try { return JSON.parse(localStorage.getItem(FXKEY)) || []; } catch { return []; } };
+  const saveFx = fx => { try { localStorage.setItem(FXKEY, JSON.stringify(fx)); } catch {} bc?.postMessage("x"); fire(); };
+  const demoBot = () => { try { return localStorage.getItem("saba_demo_bot") === "1"; } catch { return false; } };
   let listeners = [];
   const fire = () => listeners.forEach(f => f());
   bc && (bc.onmessage = fire);
-  window.addEventListener("storage", e => e.key === KEY && fire());
+  window.addEventListener("storage", e => (e.key === KEY || e.key === KEY + "_fixes") && fire());
 
   if (!load()) save(seed());
 
@@ -619,6 +680,29 @@ function demoBackend() {
     async unhold(id) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); save(l); },
     async update(id, patch) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, patch); save(l); },
     imageUrl: async path => path,
+    // طلبات التعديل (تجريبي) — لتجربة البوت: localStorage.saba_demo_bot = "1"
+    newFixId: () => Array.from({ length: 20 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 62)]).join(""),
+    async createFix(req, data, id) {
+      id ||= api.newFixId();
+      const fx = loadFx(); fx.push({ ...data, id, reqId: req.id, ref: req.ref || "", name: req.patientName || "", phone: req.phone || "", type: req.type, status: "open", createdAt: Date.now() }); saveFx(fx);
+      await api.update(req.id, { status: "held", holdReason: "data", holdNote: data.note || "بانتظار تعديل المريض", heldAt: Date.now(), heldBy: data.by || "", fixToken: id, fixAt: Date.now() });
+      if (demoBot() && data.sendStatus === "queued") setTimeout(() => { const f = loadFx(); const x = f.find(y => y.id === id); if (x) { x.sendStatus = "sent"; x.sentAt = Date.now(); saveFx(f); } }, 1200);
+      return id;
+    },
+    watchFix(id, cb) { const run = () => cb(loadFx().find(x => x.id === id) || null); listeners.push(run); run(); return () => { listeners = listeners.filter(f => f !== run); }; },
+    watchAnsweredFixes(cb) { const run = () => cb(loadFx().filter(x => x.status === "answered")); listeners.push(run); run(); return () => {}; },
+    async applyFix(fixId, patch, by) {
+      const fx = loadFx(), f = fx.find(x => x.id === fixId); if (!f || f.status !== "answered") return false;
+      const l = load(), r = l.find(x => x.id === f.reqId);
+      if (r && r.status !== "done") Object.assign(r, patch, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null });
+      Object.assign(f, { status: "applied", appliedAt: Date.now(), appliedBy: by }); localStorage.setItem(FXKEY, JSON.stringify(fx)); save(l); return true;
+    },
+    async cancelFix(id) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (f) f.status = "cancelled"; saveFx(fx); },
+    async markFixManual(id) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (f) f.sendStatus = "manual"; saveFx(fx); },
+    watchBot(cb) { const run = () => cb(demoBot() ? { state: "connected", me: "966500000000", lastSeen: Date.now() } : null); listeners.push(run); run(); return () => {}; },
+    async botLogout() {},
+    async getFix(id) { return loadFx().find(x => x.id === id) || null; },
+    async answerFix(id, answer) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (!f || f.status !== "open") throw Object.assign(new Error("closed"), { code: "permission-denied" }); Object.assign(f, { status: "answered", answer, answeredAt: Date.now() }); saveFx(fx); },
   };
   return api;
 }

@@ -250,11 +250,24 @@ form{padding:18px}
       </div>
     </div>
   </section>
+
+  <!-- ============ تعديل طلب (من رابط الواتساب) ============ -->
+  <section class="screen" id="sFix">
+    <div class="flow">
+      <div class="flow-head">
+        <div><h1>تعديل طلبك</h1><p id="fxSub">عدّل الخانات المطلوبة وأرسل</p></div>
+      </div>
+      <div class="card">
+        <div class="note" id="fxNote"></div>
+        <form id="fxForm" novalidate autocomplete="off" style="padding:18px"></form>
+      </div>
+    </div>
+  </section>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey } from "./shared.js";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel } from "./shared.js";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -312,6 +325,92 @@ $("#choices").addEventListener("click", e => {
   setType(c.dataset.type);
   go("sCapture");
 });
+/* ---------- تعديل طلب من رابط الواتساب: ?fix=المعرّف ---------- */
+const fixId = new URLSearchParams(location.search).get("fix");
+if (fixId && /^[A-Za-z0-9]{20}$/.test(fixId)) openFixPage(fixId);
+function fxEnd(title, msg, ok) {
+  $("#fxNote").classList.remove("on");
+  $("#fxForm").innerHTML = `<div class="done" style="text-align:center;padding:10px 0 4px">
+    <div class="tick" style="${ok ? "" : "background:#FDECEC;color:#E5383B"}">${ok ? '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' : '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6M12 17h.01"/></svg>'}</div>
+    <h2>${title}</h2><p>${msg}</p></div>`;
+}
+async function openFixPage(id) {
+  reset("sFix");
+  $("#fxForm").innerHTML = '<p style="text-align:center;color:var(--muted);padding:20px 0">جاري تحميل طلبك…</p>';
+  await apiReady;
+  let f = null; try { f = await api.getFix?.(id); } catch (e) { console.warn(e); }
+  if (!f) return fxEnd("الرابط غير صحيح", "تأكد إنك فتحت الرابط كامل من رسالة الواتساب، أو كلّم استقبال الفرع.");
+  if (f.status !== "open") return fxEnd("وصلنا تعديلك", "هذا الطلب تعدّل من قبل، وفريق سابا يتابعه. إذا عندك سؤال كلّم استقبال الفرع.", true);
+  $("#fxSub").textContent = `${typeName(f.type)}${f.name ? " — " + f.name : ""}`;
+  $("#fxNote").innerHTML = `<b>فريق سابا يحتاج تصحيح:</b> ${(f.fields || []).map(fixLabel).join("، ")}${f.note ? `<br>${f.note.replace(/[<>&]/g, "")}` : ""}`;
+  $("#fxNote").classList.add("on");
+  const date = { mode: "numeric", ph: "اكتب أو اختر من التقويم", max: 10, date: true, ltr: true, err: "اكتب التاريخ بالشكل 25/10/2026 أو اختره من التقويم" };
+  const idO = { req: true, mode: "numeric", max: 10, ltr: true, err: "رقم الهوية 10 أرقام ويبدأ بـ 1 أو 2" };
+  const OPT = {
+    patientName: ["اسم المريض", { req: true }], idNumber: ["رقم الهوية / الإقامة", idO], dob: ["تاريخ الميلاد", { ...date, req: true }],
+    phone: ["رقم الجوال", { req: true, mode: "tel", ph: "05xxxxxxxx", max: 14, ltr: true, err: "اكتب رقم جوال سعودي صحيح يبدأ بـ 05" }],
+    leaveStart: ["بداية الإجازة", { ...date, req: true }], leaveEnd: ["نهاية الإجازة", { ...date, req: true }], visitDate: ["تاريخ الحضور", { ...date, req: true }],
+    companionName: ["اسم المرافق", { req: true }], companionId: ["رقم هوية المرافق", idO], companionDob: ["تاريخ ميلاد المرافق", { ...date, req: true }],
+    relationship: ["صلة القرابة", { req: true, ph: "مثال: ابن" }],
+  };
+  const keys = (f.fields || []).filter(k => OPT[k]);
+  const wantPhoto = (f.fields || []).includes("photo");
+  let h = keys.map(k => F(k, OPT[k][0], OPT[k][1])).join("");
+  if (wantPhoto) h += `<div class="f" data-k="photo"><span><i class="lb">صورة التقرير من جديد <b>*</b></i></span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn btn-ghost" id="fxCam">افتح الكاميرا</button><button type="button" class="btn btn-ghost" id="fxPick">اختر من الصور</button></div>
+      <img id="fxShot" alt="" style="display:none;margin-top:10px;max-height:220px;border-radius:12px;border:1px solid var(--line)">
+      <input type="file" id="fxInCam" accept="image/*" capture="environment" hidden><input type="file" id="fxInPick" accept="image/*,application/pdf" hidden>
+      <div class="err">صوّر التقرير كامل وواضح</div></div>`;
+  h += `<label class="f"><span><i class="lb">ملاحظة لفريق سابا (اختياري)</i></span><input name="note" maxlength="250"></label>
+        <button class="btn btn-primary submit" id="fxSend" type="submit">إرسال التعديل</button>`;
+  const form = $("#fxForm"); form.innerHTML = h;
+  for (const k of keys) { const i = form.querySelector(`[name="${k}"]`); if (i && f.values?.[k]) i.value = f.values[k]; }
+  form.querySelectorAll("input[data-date]").forEach(i => { i.addEventListener("input", () => { i.value = fmtDateInput(i.value); }); attachDatePicker(i); });
+  form.querySelectorAll("input[name=idNumber],input[name=companionId]").forEach(i => i.addEventListener("input", () => { i.value = latinDigits(i.value).replace(/\D/g, ""); }));
+  form.querySelectorAll("input").forEach(i => i.addEventListener("input", () => i.closest(".f")?.classList.remove("bad")));
+  let photo = null;
+  if (wantPhoto) {
+    $("#fxCam").onclick = () => $("#fxInCam").click(); $("#fxPick").onclick = () => $("#fxInPick").click();
+    ["#fxInCam", "#fxInPick"].forEach(sel => $(sel).addEventListener("change", async e => {
+      const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+      const pdf = file.type === "application/pdf", b = pdf ? file : await compressImage(file);
+      if (!pdf && (b === file || b.type !== "image/jpeg")) return toast("ما قدرنا نفتح هالصورة. صوّرها بالكاميرا مباشرة", 4000);
+      photo = b; const im = $("#fxShot"); if (!pdf) { im.src = URL.createObjectURL(b); im.style.display = "block"; } else { im.style.display = "none"; toast("تم اختيار ملف PDF"); }
+      form.querySelector('[data-k="photo"]').classList.remove("bad");
+    }));
+  }
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = $("#fxSend"); if (btn.disabled) return;
+    const ans = {}, bad = [];
+    for (const k of keys) {
+      const i = form.querySelector(`[name="${k}"]`); let v = (i.value || "").trim();
+      if (k === "idNumber" || k === "companionId") v = latinDigits(v);
+      if (k === "phone") v = normPhone(v);
+      let ok = !!v;
+      if (ok && (k === "idNumber" || k === "companionId")) ok = validId(v);
+      if (ok && i.dataset.date) ok = validDmy(v);
+      if (ok && k === "phone") ok = validPhone(v);
+      if (ok && k === "leaveEnd" && ans.leaveStart && dmyKey(v) < dmyKey(ans.leaveStart)) ok = false;
+      i.closest(".f").classList.toggle("bad", !ok); if (!ok) bad.push(i); else ans[k] = v.slice(0, k.endsWith("Name") ? 120 : 60);
+    }
+    if (wantPhoto && !photo) { form.querySelector('[data-k="photo"]').classList.add("bad"); bad.push(form.querySelector("#fxCam")); }
+    if (bad.length) { bad[0].focus?.(); bad[0].scrollIntoView({ block: "center", behavior: "smooth" }); return toast("في خانات تحتاج تصحيح"); }
+    const note = (form.querySelector("[name=note]").value || "").trim().slice(0, 250); if (note) ans.note = note;
+    btn.disabled = true; btn.textContent = "جاري الإرسال…";
+    try {
+      if (photo) { btn.textContent = "نرفع الصورة…"; ans.imagePath = await api.uploadImage(photo); }
+      await api.answerFix(id, ans);
+      fxEnd("وصل تعديلك ✓", "شكراً لك. فريق سابا بيكمل رفع طلبك على منصة صحة الحين.", true);
+    } catch (err) {
+      console.error(err);
+      if (err?.code === "permission-denied") return fxEnd("وصلنا تعديلك", "هذا الطلب تعدّل من قبل أو انلغى. إذا عندك سؤال كلّم استقبال الفرع.", true);
+      toast(err?.code === "pdf_too_big" ? "ملف PDF كبير — صوّر التقرير بالكاميرا بدلاً منه" : "ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
+      btn.disabled = false; btn.textContent = "إرسال التعديل";
+    }
+  };
+}
+
 // رابط مباشر لنوع معيّن: ?t=sick | companion | attendance (للباركود القديم أو ستاند لكل نوع)
 try {
   const t = new URLSearchParams(location.search).get("t");
