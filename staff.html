@@ -382,7 +382,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage } from "./shared.js";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage } from "./shared.js?v=20261016";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -863,6 +863,7 @@ function renderBot() {
   const b = $("#botPill"), on = botOnline(), qr = S.bot?.state === "qr";
   b.className = "bot-pill " + (on ? "on" : qr ? "warn" : "");
   b.querySelector("span").textContent = on ? "واتساب متصل" : qr ? "واتساب يحتاج ربط" : "واتساب غير متصل";
+  if (S.me?.role === "admin" && (S.bot?.storage?.mb || 0) > 850) { b.className = "bot-pill warn"; b.querySelector("span").textContent += " · المساحة قربت تمتلي"; }
   if (!$("#botModal").hidden) renderBotModal();
 }
 let qrLib;
@@ -876,6 +877,9 @@ async function renderBotModal() {
   $("#botTxt").textContent = on ? `البوت شغال ومربوط بالرقم ${String(st.me || "").replace(/[:@].*/, "")}. طلبات التعديل تنرسل تلقائياً.`
     : st?.state === "qr" ? (admin ? "امسح الباركود بجوال الرقم المخصص للبوت: واتساب ← الأجهزة المرتبطة ← ربط جهاز." : "البوت يحتاج ربط — كلّم المسؤول.")
     : "البوت طافي أو السيرفر مو شغال. طلبات التعديل بتطلع لك أزرار ترسلها بنفسك.";
+  const sto = st?.storage;
+  if (admin && sto?.mb != null) $("#botTxt").textContent += `\nمساحة الصور: ${sto.mb} من ${sto.maxMb || 1024} ميجا (${sto.images || 0} صورة) — التنظيف تلقائي كل يوم${sto.mb > 850 ? " ⚠️ قربت تمتلي" : ""}.`;
+  $("#botTxt").style.whiteSpace = "pre-line";
   const box = $("#botQr");
   box.hidden = !(admin && st?.state === "qr" && st.qr);
   if (!box.hidden) { try { box.innerHTML = await qrSvg(st.qr); } catch { box.textContent = "تعذّر عرض الباركود"; } }

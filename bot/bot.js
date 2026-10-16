@@ -10,7 +10,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import pino from "pino";
 import fs from "node:fs";
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -123,6 +123,45 @@ async function drain() {
   finally { busy = false; if (queue.size && connected) setTimeout(drain, 1000); }
 }
 
+/* ---------- تنظيف الصور التلقائي (يومياً) ----------
+   الخطة المجانية فيها 1GB بس، والصور داخل Firestore. لو امتلت يوقف الرفع عند المرضى.
+   - نمسح صور الطلبات المنتهية الأقدم من KEEP_DAYS
+   - ولو المساحة تعدّت MAX_MB نمسح الأقدم فالأقدم لين ننزل تحت TARGET_MB
+   - ما نلمس أبداً: صور الطلبات اللي بالانتظار/معلّقة، صور التعديلات المفتوحة، وأي صورة عمرها أقل من يومين */
+const KEEP_DAYS = +process.env.IMAGE_KEEP_DAYS || 60;
+const MAX_MB = +process.env.IMAGE_MAX_MB || 700, TARGET_MB = MAX_MB - 120;
+const DAY = 864e5;
+async function cleanupImages() {
+  try {
+    const keep = new Set();
+    const addPath = p => { if (typeof p === "string" && p.startsWith("fs:")) keep.add(p.slice(3)); };
+    const active = await db.collection("requests").where("status", "in", ["pending", "held"]).select("imagePath").get();
+    active.docs.forEach(d => addPath(d.get("imagePath")));
+    const fx = await db.collection("fixes").where("status", "in", ["open", "answered"]).select("answer").get();
+    fx.docs.forEach(d => addPath(d.get("answer")?.imagePath));
+
+    const imgs = await db.collection("images").orderBy("createdAt").select("size", "createdAt").get();
+    let total = imgs.docs.reduce((s, d) => s + (d.get("size") || 0), 0);
+    const before = total, now = Date.now(), cutoff = now - KEEP_DAYS * DAY, trim = total > MAX_MB * 1e6;
+    const del = [];
+    for (const d of imgs.docs) {                                   // الأقدم أولاً
+      if (del.length >= 3000) break;                               // حد يومي (حدود الكتابة في الخطة المجانية)
+      if (keep.has(d.id)) continue;
+      const t = d.get("createdAt")?.toMillis?.() || 0;
+      if (t > now - 2 * DAY) break;
+      if (t < cutoff || (trim && total > TARGET_MB * 1e6)) { del.push(d.id); total -= d.get("size") || 0; }
+    }
+    for (let i = 0; i < del.length; i += 200) {
+      const b = db.batch();
+      for (const id of del.slice(i, i + 200)) { b.delete(db.doc(`imageData/${id}`)); b.delete(db.doc(`images/${id}`)); }
+      await b.commit();
+    }
+    const mb = Math.round(total / 1e6);
+    await setStatus({ storage: { mb, maxMb: 1024, images: imgs.size - del.length, deleted: del.length, at: TS() } });
+    log.info({ beforeMb: Math.round(before / 1e6), afterMb: mb, deleted: del.length }, "تنظيف الصور");
+  } catch (e) { log.error({ err: String(e?.message || e) }, "فشل تنظيف الصور"); }
+}
+
 /* ---------- التشغيل ---------- */
 async function main() {
   log.info({ VERSION, AUTH_DIR }, "بوت سابا يشتغل");
@@ -149,6 +188,10 @@ async function main() {
 
   // نبض كل ٣٠ ثانية عشان اللوحة تعرف إن البوت شغال
   setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 30000);
+
+  // تنظيف الصور: بعد التشغيل بدقيقتين، وبعدها كل ١٢ ساعة
+  setTimeout(cleanupImages, 2 * 60000);
+  setInterval(cleanupImages, 12 * 3600000);
 
   await connect();
 }

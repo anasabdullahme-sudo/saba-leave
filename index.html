@@ -166,9 +166,19 @@ form{padding:18px}
   .top{padding:14px 16px} main{padding:8px 16px 48px}
   .help{display:none}
 }
+#bootErr{position:fixed;left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:50;background:#fff;border:1px solid #F3C98B;border-radius:16px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,55,101,.18);color:#7A5200;font-size:14px;line-height:1.7;max-width:520px;margin:0 auto}
+#bootErr b{color:#003765;font-size:15px}
+#bootErr button{display:block;width:100%;margin-top:10px;border:0;border-radius:12px;padding:12px;background:#00A6E2;color:#fff;font:inherit;font-weight:700;cursor:pointer}
 </style>
 </head>
 <body>
+<div id="bootErr" role="alert" hidden><b id="bootTtl">الاتصال بطيء…</b><br><span id="bootMsg">انتظر شوي، أو تأكد من الإنترنت واضغط «حاول مرة ثانية».</span><button type="button" onclick="location.reload()">حاول مرة ثانية</button></div>
+<script>
+// حارس التشغيل: لو الصفحة ما جهزت خلال 15 ثانية (نت ضعيف، ملف قديم بالكاش، مانع إعلانات…) يطلع للمريض زر إعادة المحاولة بدل صفحة ما تستجيب
+window.__sabaBoot = setTimeout(function () { var e = document.getElementById("bootErr"); if (e) e.hidden = false; }, 15000);
+window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); var e = document.getElementById("bootErr"); if (!e) return; document.getElementById("bootTtl").textContent = ttl; document.getElementById("bootMsg").textContent = msg; e.hidden = false; };
+</script>
+<script nomodule>window.__sabaBootFail("متصفحك قديم", "حدّث نظام الجوال، أو افتح الرابط من متصفح Chrome أو Safari.");</script>
 <header class="top">
   <a class="brand" href="./" aria-label="سابا">
     <svg width="38" height="38" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
@@ -267,7 +277,7 @@ form{padding:18px}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel } from "./shared.js";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel } from "./shared.js?v=20261016";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -292,9 +302,11 @@ $("#choices").innerHTML = TYPES.map(t => `
 
 let api; const apiReady = backend("patient").then(a => {
   api = a; a.warmup();
+  clearTimeout(window.__sabaBoot); $("#bootErr").hidden = true;      // جهزت الصفحة
   if (a.demo || a.trial) { $("#demoPill").hidden = false; $("#demoPill").textContent = a.trial ? "نسخة تجربة" : "وضع تجريبي"; }
   return a;
 });
+apiReady.catch(e => { console.error("boot", e); window.__sabaBootFail?.("ما قدرنا نتصل بالنظام", "تأكد من الإنترنت (أو اطفي مانع الإعلانات إن وجد) واضغط «حاول مرة ثانية»."); });
 const state = { type: null, blob: null, imagePath: null, uploadP: null, ai: {}, preview: null };
 
 /* ---------- التنقل ---------- */
@@ -389,7 +401,7 @@ async function openFixPage(id) {
       if (k === "phone") v = normPhone(v);
       let ok = !!v;
       if (ok && (k === "idNumber" || k === "companionId")) ok = validId(v);
-      if (ok && i.dataset.date) ok = validDmy(v);
+      if (ok && i.dataset.date) ok = markDate(i, k, v) && validDmy(v);
       if (ok && k === "phone") ok = validPhone(v);
       if (ok && k === "leaveEnd" && ans.leaveStart && dmyKey(v) < dmyKey(ans.leaveStart)) ok = false;
       i.closest(".f").classList.toggle("bad", !ok); if (!ok) bad.push(i); else ans[k] = v.slice(0, k.endsWith("Name") ? 120 : 60);
@@ -399,13 +411,13 @@ async function openFixPage(id) {
     const note = (form.querySelector("[name=note]").value || "").trim().slice(0, 250); if (note) ans.note = note;
     btn.disabled = true; btn.textContent = "جاري الإرسال…";
     try {
-      if (photo) { btn.textContent = "نرفع الصورة…"; ans.imagePath = await api.uploadImage(photo); }
-      await api.answerFix(id, ans);
+      if (photo) { btn.textContent = "نرفع الصورة…"; ans.imagePath = await withRetry(() => api.uploadImage(photo)); }
+      await withRetry(() => api.answerFix(id, ans));
       fxEnd("وصل تعديلك ✓", "شكراً لك. فريق سابا بيكمل رفع طلبك على منصة صحة الحين.", true);
     } catch (err) {
       console.error(err);
       if (err?.code === "permission-denied") return fxEnd("وصلنا تعديلك", "هذا الطلب تعدّل من قبل أو انلغى. إذا عندك سؤال كلّم استقبال الفرع.", true);
-      toast(err?.code === "pdf_too_big" ? "ملف PDF كبير — صوّر التقرير بالكاميرا بدلاً منه" : "ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
+      showFail(err, "#fxNote");
       btn.disabled = false; btn.textContent = "إرسال التعديل";
     }
   };
@@ -422,6 +434,45 @@ $("#btnCam").onclick = () => $("#inCam").click();
 $("#btnPick").onclick = () => $("#inPick").click();
 $("#btnRetake").onclick = () => $("#inCam").click();
 ["#inCam", "#inPick"].forEach(s => $(s).addEventListener("change", e => { const f = e.target.files[0]; e.target.value = ""; if (f) onPhoto(f); }));
+
+/* ---------- فحص منطقية التواريخ (يمسك أخطاء الكتابة قبل ما توصل للموظف) ---------- */
+const TODAY = (() => { const d = new Date(); return +(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`); })();
+const THIS_YEAR = new Date().getFullYear();
+function dateProblem(k, v) {
+  if (!validDmy(v)) return "";
+  const y = +v.slice(6);
+  if (["leaveStart", "leaveEnd", "visitDate"].includes(k) && (y < THIS_YEAR - 1 || y > THIS_YEAR + 1))
+    return y < 1900 ? "اكتب التاريخ بالميلادي (مثال: 25/10/" + THIS_YEAR + ")" : "تأكد من السنة — التاريخ بعيد عن تاريخ اليوم";
+  if (["dob", "companionDob"].includes(k) && y >= 1900 && dmyKey(v) > TODAY) return "تاريخ الميلاد ما يصير بالمستقبل";
+  return "";
+}
+function markDate(i, k, v) {
+  const box = i.closest(".f"), err = box.querySelector(".err");
+  err.dataset.orig ??= err.textContent;
+  const p = dateProblem(k, v); err.textContent = p || err.dataset.orig;
+  return !p;
+}
+/* ---------- رسالة خطأ واضحة حسب السبب ---------- */
+const errMsg = err => err?.code === "pdf_too_big" ? "ملف PDF كبير — صوّر التقرير بالكاميرا بدلاً منه"
+  : err?.code === "resource-exhausted" ? "النظام عليه ضغط الحين. حاول بعد دقائق، أو كلّم استقبال الفرع."
+  : err?.code === "permission-denied" ? "النظام ما قبل الطلب. راجع البيانات وحاول مرة ثانية، ولو تكرر كلّم استقبال الفرع."
+  : "ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية";
+const TRANSIENT = ["unavailable", "deadline-exceeded", "internal", "auth/network-request-failed", "aborted"];
+async function withRetry(fn, tries = 3) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); }
+    catch (e) { if (i >= tries || !TRANSIENT.includes(e?.code)) throw e; await new Promise(r => setTimeout(r, 1500 * i)); }
+  }
+}
+let failCount = 0;
+function showFail(err, where) {
+  failCount++;
+  toast(errMsg(err), 4500);
+  if (failCount < 2) return;
+  const n = $(where); if (!n) return;
+  n.innerHTML = `ما زبط الإرسال أكثر من مرة. جرّب تبدّل بين الواي فاي وبيانات الجوال، ولو ما زبط <b>صوّر هذي الشاشة وأرسلها لاستقبال الفرع</b>.<br><small style="direction:ltr;display:inline-block;opacity:.7">${String(err?.code || err?.message || "error").replace(/[<>&]/g, "").slice(0, 60)}</small>`;
+  n.classList.add("on"); n.scrollIntoView({ block: "center", behavior: "smooth" });
+}
 
 const toast = (m, ms = 2600) => { const t = $("#toast"); t.textContent = m; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), ms); };
 
@@ -544,7 +595,7 @@ $("#form").addEventListener("submit", async e => {
     const i = $(`#form [name="${k}"]`), val = (v || "").trim();
     let ok = !i.required || !!val;
     if (ok && val && (k === "idNumber" || k === "companionId")) ok = validId(val);
-    if (ok && val && i.dataset.date) ok = validDmy(val);
+    if (ok && val && i.dataset.date) ok = markDate(i, k, val) && validDmy(val);
     if (ok && k === "phone") ok = validPhone(val);
     if (ok && k === "leaveEnd" && val && fd.leaveStart && dmyKey(val) < dmyKey(fd.leaveStart)) ok = false;
     i.closest(".f").classList.toggle("bad", !ok); if (!ok) bad.push(i);
@@ -556,7 +607,7 @@ $("#form").addEventListener("submit", async e => {
   try {
     if (!state.imagePath) {
       btn.textContent = "نكمّل رفع الصورة…";
-      try { await state.uploadP; } catch { await (state.uploadP = api.uploadImage(state.blob, p => $("#upbar").style.width = Math.round(p * 100) + "%").then(p => (state.imagePath = p))); }
+      try { await state.uploadP; } catch { await (state.uploadP = withRetry(() => api.uploadImage(state.blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")).then(p => (state.imagePath = p))); }
     }
     // الأولوية: الطبيب الموقّع بالختم ← الاسم المكتوب ← مطابقة الذكاء
     const ai = state.ai, m = matchDoctor(fd.doctorName), ms = matchDoctor(ai.stamp_doctor_name || "");
@@ -564,7 +615,7 @@ $("#form").addEventListener("submit", async e => {
     const ref = makeRef();
     const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
     slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);
-    await api.createRequest({
+    await withRetry(() => api.createRequest({
       ref, type: state.type,
       patientName: clean(fd.patientName), patientNameEn: clean(ai.patient_name_en), idNumber: latinDigits(fd.idNumber),
       dob: fd.dob, phone: normPhone(fd.phone),
@@ -575,13 +626,13 @@ $("#form").addEventListener("submit", async e => {
       imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: clean(ai.quality, 20),
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
-    });
+    }));
     clearTimeout(slow);
     $("#refTxt").textContent = ref;
     reset("sDone");
   } catch (err) {
     console.error(err);
-    toast(err?.code === "pdf_too_big" ? "ملف PDF كبير — صوّر التقرير بالكاميرا بدلاً منه" : "ما تم الإرسال. تأكد من الإنترنت وحاول مرة ثانية", 4000);
+    showFail(err, "#note");
   } finally { state.sending = false; clearTimeout(slow); btn.disabled = false; btn.textContent = "إرسال الطلب"; }
 });
 
