@@ -970,6 +970,7 @@ function sehaPayload(x) {
     leaveStart: pick("leaveStart"), leaveEnd: pick("leaveEnd"), leaveDays: pick("leaveDays"), visitDate: pick("visitDate"),
     companionName: pick("companionName"), companionId: pick("companionId"), companionDob: pick("companionDob"), relationship: pick("relationship"),
     doctorName: pick("doctorName"), stampDoctor: pick("stampDoctor"), reason: pick("reason"), nationality: pick("nationality"), gender: pick("gender"),
+    submitDate: x.createdAt ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(x.createdAt)) : "",   // يوم إرسال المراجع ← تاريخ الدخول/الخروج في صحة
     sentAt: Date.now(),
   };
 }

@@ -60,6 +60,7 @@
   const G = (k, f) => r => fmtDate(r[k], f);                    // ميلادي
   const H = (k, f) => r => fmtDate(toHijriDmy(r[k]), f);        // هجري
   const startOf = r => r.type === "attendance" ? (r.visitDate || r.leaveStart) : r.leaveStart;
+  const entryOf = r => r.submitDate || startOf(r);
   const notAtt = r => r.type === "attendance", onlyAtt = r => r.type !== "attendance", onlyComp = r => r.type !== "companion";
   const RULES = [
     // الخطوة 1
@@ -73,11 +74,12 @@
         const p = String(r.phone || "").replace(/\D/g, "").replace(/^966/, "").replace(/^0/, "");
         const has966 = /966/.test(el.parentElement?.textContent || "") || /966/.test(el.closest("div")?.parentElement?.textContent || "");
         return has966 || el.maxLength === 9 ? p : "0" + p; } },
-    { key: "leaveStart",  re: /تاريخ الدخول ميلادي/, val: r => fmtDate(startOf(r)) },
-    { key: "leaveStart",  re: /تاريخ الدخول هجري/, val: r => fmtDate(toHijriDmy(startOf(r))), hijri: true },
+    // تاريخ الدخول = يوم إرسال المراجع للطلب (احتياط: بداية الإجازة لو الطلب قديم)
+    { key: "entryDate",   re: /تاريخ الدخول ميلادي/, val: r => fmtDate(entryOf(r)) },
+    { key: "entryDate",   re: /تاريخ الدخول هجري/, val: r => fmtDate(toHijriDmy(entryOf(r))), hijri: true },
     // تاريخ الخروج = نفس تاريخ الدخول دايماً
-    { key: "exitDate",    re: /تاريخ الخروج ميلادي/, val: r => fmtDate(startOf(r)) },
-    { key: "exitDate",    re: /تاريخ الخروج هجري/, val: r => fmtDate(toHijriDmy(startOf(r))), hijri: true },
+    { key: "exitDate",    re: /تاريخ الخروج ميلادي/, val: r => fmtDate(entryOf(r)) },
+    { key: "exitDate",    re: /تاريخ الخروج هجري/, val: r => fmtDate(toHijriDmy(entryOf(r))), hijri: true },
     { key: "visitDate",   re: /^تاريخ المراجعه ميلادي|تاريخ (الزياره|الحضور)/, val: G("visitDate"), skipIf: onlyAtt },
     { key: "visitDate",   re: /^تاريخ المراجعه هجري/, val: H("visitDate"), hijri: true, skipIf: onlyAtt },
     // الخطوة 2 — التوصيات
@@ -93,7 +95,7 @@
   ];
   const FIELD_LABELS = {
     idNumber: "رقم الهوية", fileNo: "رقم الملف", dob: "تاريخ الميلاد", patientName: "اسم المريض", patientNameEn: "الاسم بالإنجليزي", phone: "الجوال",
-    leaveStart: "بداية الإجازة", exitDate: "تاريخ الخروج", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
+    leaveStart: "بداية الإجازة", entryDate: "تاريخ الدخول", exitDate: "تاريخ الخروج", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
     companionName: "اسم المرافق", companionId: "هوية المرافق", companionDob: "ميلاد المرافق", relationship: "صلة القرابة",
     doctorName: "الطبيب", doctorAr: "الطبيب المرخّص", stampDoctor: "ختم الطبيب", reason: "السبب", nationality: "الجنسية", gender: "الجنس", ref: "رقم طلب سابا",
   };
