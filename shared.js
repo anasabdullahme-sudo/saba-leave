@@ -90,7 +90,7 @@ export const DOCTORS = [
   { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
   { id: "fatma-ibrahim",     branch: "haramain", ar: "فاطمة إبراهيم",   en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمه ابراهيم", "Fatma Ibrahim Mohamed Ibrahim", "Fatima Ibrahim", "Fatmah Ibraheem", "Fatma Ebrahim", "Fatima Mohamed Ibrahim"] },
   { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
-  { id: "sara-shoreiji",    branch: "haramain", ar: "سارة الشوربجي",  en: "Sarah El-Shourbagy",  alt: ["سارة الشوريجي", "ساره الشوربجي", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara Al-Shorbagy", "Sara Shoreiji"] },
+  { id: "sara-shoreiji",     branch: "haramain", ar: "سارة الجارحي",    en: "Sara Fouad Elgarhi",  alt: ["سارة فؤاد الجارحي", "ساره فؤاد الجارحي", "سارة فؤاد", "Sara Elgarhi", "Sarah Elgarhi", "Sara El-Garhy", "Sara Elgarhy", "Sarah Fouad Elgarhy"] },
 ];
 export const doctorById = id => DOCTORS.find(d => d.id === id);
 
