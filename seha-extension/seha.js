@@ -92,6 +92,11 @@
     { key: "companionDob",  re: /ميلاد المرافق.*ميلادي|ميلاد المرافق$/, val: G("companionDob", DATE_FMT_STEP1), skipIf: onlyComp },
     { key: "companionDob",  re: /ميلاد المرافق.*هجري/, val: H("companionDob", DATE_FMT_STEP1), hijri: true, skipIf: onlyComp },
     { key: "relationship",  re: /صله القرابه|القرابه/, skipIf: onlyComp },
+    // نموذج «إجازة مرافق» في صحة: نفس العناوين تتكرر — الأولى للمريض، والثانية (تحت «طبيعة المرافق») للمرافق
+    { key: "companionId",   re: /رقم (ال)?هويه|رقم (ال)?اقامه|الهويه\/الاقامه/, not: /المريض/, nth: 1, skipIf: onlyComp },
+    { key: "companionDob",  re: /الميلاد\/?\s*ميلادي/, not: /المريض/, nth: 1, val: G("companionDob", DATE_FMT_STEP1), skipIf: onlyComp },
+    { key: "companionDob",  re: /الميلاد\/?\s*هجري/, not: /المريض/, nth: 1, val: H("companionDob", DATE_FMT_STEP1), hijri: true, skipIf: onlyComp },
+    { key: "relationship",  re: /طبيعه المرافق/, selectOnly: true, skipIf: onlyComp },
   ];
   const FIELD_LABELS = {
     idNumber: "رقم الهوية", fileNo: "رقم الملف", dob: "تاريخ الميلاد", patientName: "اسم المريض", patientNameEn: "الاسم بالإنجليزي", phone: "الجوال",
@@ -194,9 +199,17 @@
   function fillPass(req, labs, report, hijriPass, explicit) {
     for (const rule of RULES) {
       if (!!rule.hijri !== hijriPass || rule.skipIf?.(req)) continue;
-      const lab = labs.find(x => rule.re.test(x.t) && !(rule.not && rule.not.test(x.t)));
-      const c = (lab && controlFor(lab.el)) || controlByHint(rule.re, rule.not);
+      let c = null;
+      if (rule.nth) {                                    // الخانة رقم n من الخانات اللي لها نفس العنوان (بترتيب الصفحة)
+        const ctrls = [];
+        for (const x of labs) if (rule.re.test(x.t) && !(rule.not && rule.not.test(x.t))) { const cc = controlFor(x.el); if (cc && !ctrls.includes(cc)) ctrls.push(cc); }
+        c = ctrls[rule.nth] || null;
+      } else {
+        const lab = labs.find(x => rule.re.test(x.t) && !(rule.not && rule.not.test(x.t)));
+        c = (lab && controlFor(lab.el)) || controlByHint(rule.re, rule.not);
+      }
       if (!c || c.disabled) continue;
+      if (rule.selectOnly && !(c instanceof HTMLSelectElement)) continue;   // «طبيعة المرافق» قائمة اختيار بس — ما نكتب في خانة نص بالغلط
       const val = rule.val ? rule.val(req, c) : String(req[rule.key] || "");
       if (!val) continue;
       if (c.value) { if (!hijriPass) report[rule.key] = report[rule.key] || "ok"; continue; } // ما نكتب فوق شي موجود
