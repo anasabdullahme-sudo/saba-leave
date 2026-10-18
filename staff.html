@@ -942,14 +942,17 @@ $("#botDocs").onclick = async () => {
   $("#botModal").hidden = true; $("#docModal").hidden = false;
   $("#docList").innerHTML = '<p style="color:var(--muted)">جاري التحميل…</p>';
   let ph = {}; try { ph = await api.getDoctorPhones(); } catch (err) { console.warn(err); }
+  docExtra = Object.fromEntries(Object.entries(ph).filter(([k]) => !doctorById(k)));   // أطباء البوادي غير المسجّلين (بالاسم) — نحافظ عليهم
   $("#docList").innerHTML = BRANCHES.map(b => {
     const ds = DOCTORS.filter(d => d.branch === b.id); if (!ds.length) return "";
-    return `<div class="g">${esc(b.ar || branchName(b.id))}</div>` + ds.map(d => `<label><span>د. ${esc(d.ar)}</span><input data-doc="${esc(d.id)}" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" value="${esc(ph[d.id] || "")}"></label>`).join("");
+    const extra = b.id === "bawadi" ? Object.entries(docExtra).map(([k, v]) => `<label><span>${esc(k.split("|")[0])} <small style="color:var(--muted)">(بالاسم)</small></span><input value="${esc(v)}" disabled></label>`).join("") : "";
+    return `<div class="g">${esc(b.ar || branchName(b.id))}</div>` + extra + ds.map(d => `<label><span>د. ${esc(d.ar)}</span><input data-doc="${esc(d.id)}" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" value="${esc(ph[d.id] || "")}"></label>`).join("");
   }).join("");
 };
+let docExtra = {};
 $("#docClose").onclick = () => { $("#docModal").hidden = true; };
 $("#docSave").onclick = async () => {
-  const phones = {}, names = {}; let bad = 0;
+  const phones = { ...docExtra }, names = {}; let bad = 0;
   $("#docList").querySelectorAll("input[data-doc]").forEach(i => {
     let p = i.value.replace(/[٠-٩]/g, c => "٠١٢٣٤٥٦٧٨٩".indexOf(c)).replace(/\D/g, "").replace(/^00966|^966/, "");
     if (p.length === 9 && p.startsWith("5")) p = "0" + p;

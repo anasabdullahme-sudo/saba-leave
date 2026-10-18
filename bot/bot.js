@@ -188,9 +188,24 @@ async function seedDoctors() {
   try {
     const seed = JSON.parse(raw), ref = db.doc("bot/doctors"), cur = (await ref.get()).get("phones") || {};
     const add = {};
-    for (const [id, ph] of Object.entries(seed)) { const p = normPhone(ph); if (/^05\d{8}$/.test(p) && !cur[id]) add[id] = p; }
+    for (const [id, ph] of Object.entries(seed)) { const p = normPhone(ph); if (/^05\d{8}$/.test(p) && cur[id] !== p) add[id] = p; }
     if (Object.keys(add).length) { await ref.set({ phones: add, at: TS() }, { merge: true }); log.info({ n: Object.keys(add).length }, "أرقام الأطباء من DOCTOR_PHONES"); }
   } catch (e) { log.warn({ err: String(e?.message || e) }, "DOCTOR_PHONES مو JSON صحيح"); }
+}
+// رقم طبيب الطلب: بالمعرّف (الأطباء المسجّلين)، وإلا بالاسم الأول لأطباء البوادي غير المسجّلين
+// (مفاتيح الاسم بالشكل "حسام|hussam|hossam")
+const normAr = s => String(s || "").toLowerCase().replace(/[\u064B-\u0652]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/\s+/g, " ");
+function doctorPhoneFor(r) {
+  const byId = normPhone(doctorPhones[r.doctorId] || "");
+  if (byId) return byId;
+  if (r.branch !== "bawadi") return "";
+  const hay = " " + normAr(`${r.doctorName || ""} ${r.stampDoctor || ""}`).replace(/[^a-z\u0600-\u06FF ]/g, " ") + " ";
+  for (const [k, ph] of Object.entries(doctorPhones)) {
+    if (!k.includes("|") && !/[\u0600-\u06FF]/.test(k)) continue;           // مفتاح معرّف عادي
+    const hit = k.split("|").map(normAr).filter(Boolean).some(n => hay.includes(" " + n + " ") || hay.includes(" " + n.replace(/ /g, "") + " "));
+    if (hit) return normPhone(ph);
+  }
+  return "";
 }
 function watchDoctors() {
   seedDoctors();
@@ -248,7 +263,7 @@ async function onIncoming(m) {
 
   if (r.status === "done") {
     let reminded = false;
-    const dp = normPhone(doctorPhones[r.doctorId] || "");
+    const dp = doctorPhoneFor(r);
     if (/^05\d{8}$/.test(dp) && now - ms(r.doctorRemindedAt) > 12 * 3600e3) {
       try {
         const [w] = await sock.onWhatsApp("966" + dp.slice(1));
