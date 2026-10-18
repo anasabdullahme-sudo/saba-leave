@@ -308,7 +308,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey } from "./shared.js?v=20261018e";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits } from "./shared.js?v=20261018f";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -645,7 +645,9 @@ $("#form").addEventListener("submit", async e => {
     }
     // الأولوية: الطبيب الموقّع بالختم ← الاسم المكتوب ← مطابقة الذكاء
     const ai = state.ai, m = matchDoctor(fd.doctorName), ms = matchDoctor(ai.stamp_doctor_name || "");
-    const doc = ms.doctor || doctorById(ai.stamp_doctor_id) || m.doctor || doctorById(ai.doctor_id) || null;
+    // اقتراح الذكاء ما ينقبل إلا إذا يتوافق مع الاسم المكتوب/الختم (يمنع خلط حسام ↔ حسين)
+    const doc = [ms.doctor, doctorById(ai.stamp_doctor_id), m.doctor, doctorById(ai.doctor_id)].filter(Boolean)
+      .find(d => doctorFits(d, fd.doctorName, ai.stamp_doctor_name)) || null;
     const ref = makeRef();
     const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
     slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);

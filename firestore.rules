@@ -131,7 +131,7 @@ service cloud.firestore {
              'holdReason','holdNote','heldAt','heldBy','companionDob','openedBy','openedAt','sehaRef',
              'patientName','patientNameEn','idNumber','dob','phone',
              'leaveStart','leaveEnd','leaveDays','visitDate',
-             'companionName','companionId','relationship','doctorName',
+             'companionName','companionId','relationship','doctorName','doctorId',
              'fileNo','nationality','gender','reason','stampDoctor','type','typeManual',
              'fixToken','fixAt','imagePath','patientNote'])
         && request.resource.data.type in ['sick','companion','attendance']

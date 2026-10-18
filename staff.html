@@ -397,7 +397,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields } from "./shared.js?v=20261018e";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits } from "./shared.js?v=20261018f";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -546,8 +546,8 @@ function rowHTML(x, mode) {
   const dupe = mode === "pending" && S.pending.filter(y => y.idNumber === x.idNumber && y.type === x.type && (y.leaveStart || y.visitDate) === (x.leaveStart || x.visitDate)).length > 1;
   const late = mode === "pending" && Date.now() - x.createdAt > 30 * 60000;
   const dupeOther = mode !== "done" && [...S.pending, ...S.held].some(y => y.id !== x.id && y.idNumber === x.idNumber && y.type !== x.type && Math.abs((y.createdAt || 0) - (x.createdAt || 0)) < 48 * 3600e3);
-  const unknownDoc = !x.doctorId;
-  const byStamp = x.stampDoctor && x.doctorId && matchDoctor(x.doctorName).doctor?.id !== x.doctorId ? doctorById(x.doctorId) : null;
+  const rd = reqDoctor(x), unknownDoc = !rd;
+  const byStamp = x.stampDoctor && rd && matchDoctor(x.doctorName).doctor?.id !== rd.id ? rd : null;
   const actions = done ? `<div class="age">${esc(x.doneBy || "")}</div>`
     : held ? `<div class="quick-row"><button class="quick ghost" data-unhold="${esc(x.id)}">إرجاع</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`
     : `<div class="quick-row"><button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
@@ -783,7 +783,7 @@ async function openDrawer(id, holdNow) {
 }
 function fillDrawerMeta(x) {
   $("#dName").textContent = x.patientName;
-  const d = doctorById(x.doctorId);
+  const d = reqDoctor(x);
   $("#dMeta").textContent = `${typeName(x.type)} — وصل ${timeAgo(x.createdAt)}${d ? "" : " — الطبيب غير مدرج (تحقق من الفرع)"}`;
 }
 function closeDrawer() {
@@ -893,13 +893,25 @@ function typePatch(x, t) {
   return p;
 }
 const rerouted = new Set(), retyped = new Set();
+// طبيب الطلب: المحفوظ إذا يطابق الاسم المكتوب/الختم، وإلا نطابق من الأسماء نفسها
+const refixed = new Set();
+function reqDoctor(x) {
+  const byId = doctorById(x.doctorId);
+  if (byId && doctorFits(byId, x.doctorName, x.stampDoctor)) return byId;
+  return matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor || null;
+}
 function reroute(list) {
   for (const x of list) {
     if (!x.branchManual && !rerouted.has(x.id)) {
-      const doc = doctorById(x.doctorId) || matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor;
+      const doc = reqDoctor(x);
       if (doc && doc.branch !== x.branch) {
         rerouted.add(x.id);
         api.update(x.id, { branch: doc.branch }).catch(e => { console.warn("reroute", x.id, e); rerouted.delete(x.id); });
+      }
+      // رقم الطبيب المحفوظ غلط (ما يطابق الاسم المكتوب) → نصلحه عشان تذكير الاعتماد يروح للطبيب الصح
+      if (doc && x.doctorId && doc.id !== x.doctorId && !refixed.has(x.id)) {
+        refixed.add(x.id);
+        api.update(x.id, { doctorId: doc.id }).catch(() => {});   // يحتاج قواعد الحماية الجديدة — وإلا نتجاهل
       }
     }
     const kt = KIND_TYPE[x.docKind];
@@ -1054,7 +1066,7 @@ function renderExtHint() {
 function sehaPayload(x) {
   const pick = k => x[k] || "";
   // الطبيب: من المحفوظ، وإلا نطابق الاسم من جديد (طلبات قديمة قبل إضافة الطبيب للقائمة)
-  const doc = doctorById(x.doctorId) || matchDoctor(x.stampDoctor || "").doctor || matchDoctor(x.doctorName || "").doctor || null;
+  const doc = reqDoctor(x);
   return {
     v: 1, id: x.id, ref: x.ref, type: x.type, branch: x.branch, account: SEHA_ACCOUNTS[x.branch] || null,
     fileNo: pick("fileNo"), doctorAr: doc?.ar || "", doctorEn: doc?.en || "",

@@ -82,6 +82,7 @@ export const DOCTORS = [
   { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen",       alt: ["Ilham Shahin", "Elham Shahin"] },
   // سابا البوادي (أي طبيب غير مذكور يروح للبوادي تلقائياً — هنا بس عشان يتعرّف على الاسم العربي)
   { id: "ikramy-sharkawy",  branch: "bawadi", ar: "إكرامي الشرقاوي", en: "Ekramy Elsharkawy",   alt: ["اكرامي الشرقاوي", "إكرامي عبدالسلام الشرقاوي", "Ikramy Elsharkawy", "Ekramy El-Sharkawy", "Ekramy Abdelsalam Elsharkawy", "Abdelsalam Al sharqawy"] },
+  { id: "hussam-hameed",    branch: "bawadi", ar: "حسام الدين حميد", en: "Hussam Alden Hameed", alt: ["حسام الدين محمد", "حسام حميد", "Hussam Aldin Hameed", "Hussam Aldin Mohammed", "Hussam Eldin Hamid", "Hossam Eldin Hamid", "Hossam Aldin Mohamed"] },
   { id: "mohamed-wali",     branch: "bawadi", ar: "محمد والي",     en: "Mohamed Wali",        alt: ["محمد والى", "Mohammed Wali", "Mohamed Waly", "Mohamed Wally", "Mohammad Wali"] },
   // سابا الحرمين
   { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara",       alt: ["Alia Alwaraa", "Aliaa Elwara", "علياء الوريث", "Aliya Alwareeth", "Alyaa Alwareeth"] },
@@ -173,6 +174,18 @@ export function matchDoctor(input) {
     if (sameFirst.length === 1) return { doctor: best, branch: best.branch };
   }
   return { doctor: null, branch: DEFAULT_BRANCH };
+}
+
+/** هل الطبيب (من رقم تعرّف الذكاء أو المحفوظ) يتوافق مع الأسماء المكتوبة فعلاً؟ يمنع «حسام» يصير «حسين» */
+export function doctorFits(doc, ...names) {
+  const ns = names.map(n => String(n || "")).filter(n => normName(n));
+  if (!doc || !ns.length) return true;                       // ما فيه اسم مكتوب نقارن فيه
+  if (ns.some(n => matchDoctor(n).doctor?.id === doc.id)) return true;
+  const toks = ns.flatMap(n => normName(n).split(" ")).filter(t => t.length > 1);
+  return [doc.ar, doc.en, ...(doc.alt || [])].some(v => {
+    const f = normName(v).split(" ")[0];
+    return toks.some(t => t === f || (t.length > 3 && f.length > 3 && lev(t, f) <= 1));
+  });
 }
 
 /* ---------- أدوات عامة ---------- */
