@@ -462,7 +462,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
-  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [], showFields = false, fixOpen = false, sehaAlert = null;
+  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [], showFields = false, fixOpen = false, sehaAlert = null, fxType = null, fxChecked = [], fxNoteVal = "";
   const FIX_FIELDS = [
     { k: "patientName", ar: "الاسم" }, { k: "idNumber", ar: "الهوية" }, { k: "dob", ar: "الميلاد" }, { k: "phone", ar: "الجوال" },
     { k: "leaveStart", ar: "بداية الإجازة", types: ["sick", "companion"] }, { k: "leaveEnd", ar: "نهاية الإجازة", types: ["sick", "companion"] },
@@ -535,7 +535,9 @@
       "fileNo", "doctorAr", "doctorName", "stampDoctor", "ref"].filter(k => req[k]);
     const okN = keys.filter(k => lastReport[k] === "ok").length;
     const alertHtml = sehaAlert ? `<div class="acc wrong" style="font-weight:600">⚠ صحة أضافت خانة جديدة: ${esc(sehaAlert.labels.join("، "))}<br><span style="font-weight:400">اضغط «تقرير فني» وأرسله لـ Claude عشان أحدّث الإضافة.</span> <button class="lnk" id="alertOk">تمام</button></div>` : "";
-    const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(req.type));
+    if (!fxType) fxType = req.type;
+    const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(fxType));
+    const need = fxType === req.type ? [] : fxType === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : fxType === "attendance" ? ["visitDate"] : req.type === "attendance" ? ["leaveStart", "leaveEnd"] : [];
     b.innerHTML = `
       <div class="card">
         <div class="nm">${esc(req.patientName)}</div>
@@ -545,9 +547,12 @@
       <div class="acc ${acc.state}">${accTxt}</div>
       <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button></div>
       <div class="links"><label class="tg" style="font-size:12px"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية</label><button class="lnk" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق الطلب</button><button class="lnk" id="diag">تقرير فني</button></div>
-      ${fixOpen ? `<div class="fxbox" id="fxbox"><b style="font-size:13px">وش الغلط؟ (البوت يرسل للمريض واتساب)</b>
-          <div class="chips">${fxFields.map(f => `<label><input type="checkbox" value="${f.k}">${f.ar}</label>`).join("")}</div>
-          <textarea id="fxNote" maxlength="200" placeholder="ملاحظة للمريض (اختياري)"></textarea>
+      ${fixOpen ? `<div class="fxbox" id="fxbox"><b style="font-size:13px">نوع الطلب الصحيح</b>
+          <div class="chips" id="fxTypes">${["sick", "companion", "attendance"].map(t => `<label><input type="radio" name="fxt" value="${t}" ${t === fxType ? "checked" : ""}>${TYPE_AR[t]}</label>`).join("")}</div>
+          ${fxType !== req.type ? `<div class="tiny" style="color:#5B3CC4">بيتحوّل إلى «${TYPE_AR[fxType]}» بعد ما يكمّل المريض البيانات</div>` : ""}
+          <b style="font-size:13px">وش الغلط أو الناقص؟ (البوت يرسل للمريض واتساب)</b>
+          <div class="chips">${fxFields.map(f => `<label><input type="checkbox" value="${f.k}" ${need.includes(f.k) || fxChecked.includes(f.k) ? "checked" : ""}>${f.ar}</label>`).join("")}</div>
+          <textarea id="fxNote" maxlength="200" placeholder="ملاحظة للمريض (اختياري)">${esc(fxNoteVal)}</textarea>
           <div class="row"><button class="btn fx" id="fxSend" style="background:#5B3CC4;color:#fff">أرسل للمريض</button><button class="btn sec" id="fxCancel">إلغاء</button></div></div>` : ""}
       <details class="data" id="data" ${showFields ? "open" : ""}><summary>البيانات (${keys.length})${okN ? ` — ✓ ${okN} تعبّت` : ""}</summary>
       <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div></details>
@@ -557,16 +562,17 @@
     foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة سابا</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
     $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
     const ao = $("#alertOk"); if (ao) ao.onclick = () => { sehaAlert = null; chrome.storage.local.remove("sabaAlert"); render(); };
-    const fo = $("#fxOpen"); if (fo) fo.onclick = () => { fixOpen = true; render(); };
+    const fo = $("#fxOpen"); if (fo) fo.onclick = () => { fixOpen = true; fxType = req.type; fxChecked = []; fxNoteVal = ""; render(); };
     if (fixOpen) {
       setTimeout(() => $("#fxSend")?.scrollIntoView({ block: "nearest" }), 30);
-      $("#fxCancel").onclick = () => { fixOpen = false; render(); };
+      $("#fxTypes").onchange = e => { fxNoteVal = $("#fxNote").value; fxChecked = [...root.querySelectorAll("#fxbox .chips:not(#fxTypes) input:checked")].map(i => i.value); fxType = e.target.value; render(); };
+      $("#fxCancel").onclick = () => { fixOpen = false; fxType = null; fxChecked = []; render(); };
       $("#fxSend").onclick = async () => {
-        const fields = [...root.querySelectorAll("#fxbox input:checked")].map(i => i.value);
+        const fields = [...root.querySelectorAll("#fxbox .chips:not(#fxTypes) input:checked")].map(i => i.value);
         if (!fields.length) return toastLocal("اختر الخانة الغلط");
         const btn = $("#fxSend"); btn.disabled = true; btn.textContent = "يرسل…";
         const at = Date.now(), r0 = req;
-        await chrome.storage.local.set({ sabaFixReq: { id: req.id, ref: req.ref, fields, note: $("#fxNote").value.trim(), at } });
+        await chrome.storage.local.set({ sabaFixReq: { id: req.id, ref: req.ref, fields, newType: fxType !== req.type ? fxType : "", note: $("#fxNote").value.trim(), at } });
         const res = await new Promise(resolve => {
           const tm = setTimeout(() => { chrome.storage.onChanged.removeListener(l); resolve(null); }, 9000);
           const l = (ch, area) => { const v = ch.sabaFixRes?.newValue; if (area === "local" && v && v.at === at) { clearTimeout(tm); chrome.storage.onChanged.removeListener(l); resolve(v); } };

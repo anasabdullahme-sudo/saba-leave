@@ -111,19 +111,29 @@ export const FIX_FIELDS = [
   { k: "photo", ar: "صورة التقرير" },
 ];
 export const fixFieldsFor = type => FIX_FIELDS.filter(f => !f.types || f.types.includes(type));
+/** لما الموظف يغيّر نوع الطلب (مثلاً مرضية ← مرافق): الخانات اللي لازم المريض يكمّلها للنوع الجديد */
+export function typeSwitchFields(from, to) {
+  if (!to || to === from) return [];
+  if (to === "companion") return ["companionName", "companionId", "companionDob", "relationship"];
+  if (to === "attendance") return ["visitDate"];
+  if (to === "sick" && from === "attendance") return ["leaveStart", "leaveEnd"];
+  return [];
+}
 export const fixLabel = k => (FIX_FIELDS.find(f => f.k === k) || {}).ar || k;
 export const fixLink = id => new URL(`./?fix=${id}`, location.href).href;
-export function fixMessage({ name, ref, type, fields, note, link }) {
-  const t = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" }[type] || "الإجازة";
+export function fixMessage({ name, ref, type, newType, fields, note, link }) {
+  const TN = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
+  const t = TN[type] || "الإجازة", changed = newType && newType !== type;
   return [
     `السلام عليكم${name ? " " + name.split(" ")[0] : ""} 🌷`,
     `معك عيادات سابا بخصوص طلب رفع ${t}${ref ? " رقم " + ref : ""}.`,
+    changed ? `طلبك لازم يكون «${TN[newType]}» بدل «${t}»، ونحتاج تكمّل البيانات الناقصة.` : "",
     `نحتاج تصحيح: ${fields.map(fixLabel).join("، ")}`,
     note ? `ملاحظة: ${note}` : "",
     "",
     "عدّل بياناتك من الرابط، ونكمل رفع طلبك على طول:",
     link,
-  ].filter((l, i) => l || i === 4).join("\n");
+  ].filter((l, i, arr) => l || i === arr.length - 3).join("\n");
 }
 
 /* ---------- تطبيع الأسماء + مطابقة الطبيب ---------- */

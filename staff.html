@@ -363,7 +363,10 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <h3 id="fixTtl">طلب تعديل من المريض</h3>
     <div id="fixForm" style="display:grid;gap:12px">
       <p id="fixWho"></p>
-      <label>وش الغلط؟</label>
+      <label>نوع الطلب الصحيح</label>
+      <div class="fx-chips" id="fixType"></div>
+      <div class="fx-state" id="fixTypeNote" hidden></div>
+      <label>وش الغلط أو الناقص؟</label>
       <div class="fx-chips" id="fixFields"></div>
       <label for="fixNote">ملاحظة للمريض (اختياري)</label>
       <textarea id="fixNote" maxlength="250" placeholder="مثال: رقم الهوية ناقص رقم، أو الصورة مقصوصة"></textarea>
@@ -401,7 +404,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits } from "./shared.js?v=20261018g";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields } from "./shared.js?v=20261018h";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1028,12 +1031,23 @@ $("#docSave").onclick = async () => {
 };
 
 let fixReq = null, fixUnsub = null, fixTimer = null;
+let fixType = null;
+function renderFixFields(keep) {
+  const x = fixReq, need = typeSwitchFields(x.type, fixType);
+  const prev = new Set(keep ? [...$("#fixFields").querySelectorAll("input:checked")].map(i => i.value) : []);
+  $("#fixFields").innerHTML = fixFieldsFor(fixType).map(f => `<label><input type="checkbox" value="${f.k}" ${prev.has(f.k) || need.includes(f.k) ? "checked" : ""}>${f.ar}</label>`).join("");
+  const changed = fixType !== x.type;
+  $("#fixTypeNote").hidden = !changed;
+  if (changed) $("#fixTypeNote").textContent = `الطلب بيتحوّل من «${typeName(x.type)}» إلى «${typeName(fixType)}» بعد ما يكمّل المريض البيانات${need.length ? " — اخترت لك الخانات الناقصة" : ""}.`;
+}
 function openFix() {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
-  fixReq = x;
+  fixReq = x; fixType = x.type;
+  $("#fixType").innerHTML = TYPES.map(t => `<label><input type="radio" name="fixType" value="${t.id}" ${t.id === x.type ? "checked" : ""}>${t.ar}</label>`).join("");
+  $("#fixType").onchange = e => { fixType = e.target.value; renderFixFields(true); };
   const phone = waPhone(x.phone);
   $("#fixWho").innerHTML = phone ? `بنرسل للمريض <b>${esc(x.patientName)}</b> على الجوال <b dir="ltr">${esc(x.phone)}</b>` : `<b style="color:var(--red)">رقم جوال المريض غير صحيح</b> — صحّحه من خانة الجوال أول.`;
-  $("#fixFields").innerHTML = fixFieldsFor(x.type).map(f => `<label><input type="checkbox" value="${f.k}">${f.ar}</label>`).join("");
+  renderFixFields(false);
   $("#fixNote").value = ""; $("#fixSend").disabled = !phone;
   $("#fixForm").hidden = false; $("#fixSent").hidden = true; $("#fixModal").hidden = false;
 }
@@ -1043,7 +1057,8 @@ $("#fixCancel").onclick = closeFix; $("#fixClose").onclick = closeFix;
 $("#fixSend").onclick = async () => {
   const x = fixReq; if (!x) return;
   const fields = [...$("#fixFields").querySelectorAll("input:checked")].map(i => i.value);
-  if (!fields.length) return toast("اختر الخانة الغلط");
+  const newType = fixType && fixType !== x.type ? fixType : null;
+  if (!fields.length) return toast("اختر الخانة الغلط أو الناقصة");
   const note = $("#fixNote").value.trim(), by = myName();
   const btn = $("#fixSend"); btn.disabled = true;
   const values = {}; fields.forEach(k => { if (k !== "photo" && x[k]) values[k] = x[k]; });
@@ -1051,8 +1066,8 @@ $("#fixSend").onclick = async () => {
     // نجهز المعرّف أول عشان الرابط يكون داخل الرسالة، وبعدها ننشئ الطلب كامل (البوت ما يشوف رسالة ناقصة)
     const auto = botOnline();
     const id = api.newFixId();
-    const message = fixMessage({ name: x.patientName, ref: x.ref, type: x.type, fields, note, link: fixLink(id) });
-    await api.createFix(x, { fields, values, note, by, message, sendStatus: auto ? "queued" : "manual" }, id);
+    const message = fixMessage({ name: x.patientName, ref: x.ref, type: x.type, newType, fields, note, link: fixLink(id) });
+    await api.createFix(x, { fields, values, note, by, message, sendStatus: auto ? "queued" : "manual", ...(newType ? { newType, ctx: fixCtx(x) } : {}) }, id);
     Object.assign(x, { status: "held", holdReason: "data", holdNote: note || "بانتظار تعديل المريض", fixToken: id });
     S.pending = S.pending.filter(r => r.id !== x.id); if (!S.held.some(r => r.id === x.id)) S.held.push(x);
     closeDrawer(); renderCounts(); renderPending(); renderHeld();
@@ -1084,26 +1099,30 @@ async function applyAnswered(f) {
   if (applying.has(f.id)) return; applying.add(f.id);
   const a = f.answer || {}, patch = {};
   for (const [k, v] of Object.entries(a)) { if (k === "note") { if (v) patch.patientNote = v; } else if (v) patch[k] = v; }
+  if (f.newType && ["sick", "companion", "attendance"].includes(f.newType)) { patch.type = f.newType; patch.typeManual = true; }   // يتحوّل لمكانه الصحيح
   try {
     const ok = await api.applyFix(f.id, patch, myName());
     if (ok) { toast(`✎ ${f.name || "مريض"} عدّل بياناته — رجع الطلب للانتظار`); chime(); }
   } catch (e) { console.warn("applyFix", e); applying.delete(f.id); }
 }
 
+// بيانات المريض الموجودة (تظهر له في صفحة التعديل لما يتغيّر نوع الطلب — يشوفها ويكمّل الناقص بس)
+const fixCtx = x => Object.fromEntries(["patientName", "idNumber", "dob", "leaveStart", "leaveEnd", "visitDate"].filter(k => x[k]).map(k => [k, String(x[k]).slice(0, 120)]));
 // طلب تعديل جاي من لوحة الإضافة داخل صحة → ننشئه هنا والبوت يرسله
 async function handleExtFix(m) {
   const reply = r => window.postMessage({ type: "SABA_FIX_RES", at: m.at, ...r }, location.origin);
   const x = S.pending.find(r => r.id === m.id) || S.held.find(r => r.id === m.id);
   if (!x) return reply({ ok: false, msg: "الطلب مو موجود بالانتظار (يمكن انرفع أو انحذف)" });
   if (!waPhone(x.phone)) return reply({ ok: false, msg: "رقم جوال المريض غير صحيح — صحّحه من اللوحة" });
-  const fields = (Array.isArray(m.fields) ? m.fields : []).filter(k => fixFieldsFor(x.type).some(f => f.k === k));
+  const newType = ["sick", "companion", "attendance"].includes(m.newType) && m.newType !== x.type ? m.newType : null;
+  const fields = (Array.isArray(m.fields) ? m.fields : []).filter(k => fixFieldsFor(newType || x.type).some(f => f.k === k));
   if (!fields.length) return reply({ ok: false, msg: "اختر الخانة الغلط" });
   const note = String(m.note || "").slice(0, 200), by = myName();
   const values = {}; fields.forEach(k => { if (k !== "photo" && x[k]) values[k] = x[k]; });
   try {
     const auto = botOnline(), id = api.newFixId();
-    const message = fixMessage({ name: x.patientName, ref: x.ref, type: x.type, fields, note, link: fixLink(id) });
-    await api.createFix(x, { fields, values, note, by, message, sendStatus: auto ? "queued" : "manual" }, id);
+    const message = fixMessage({ name: x.patientName, ref: x.ref, type: x.type, newType, fields, note, link: fixLink(id) });
+    await api.createFix(x, { fields, values, note, by, message, sendStatus: auto ? "queued" : "manual", ...(newType ? { newType, ctx: fixCtx(x) } : {}) }, id);
     Object.assign(x, { status: "held", holdReason: "data", holdNote: note || "بانتظار تعديل المريض", fixToken: id });
     S.pending = S.pending.filter(r => r.id !== x.id); if (!S.held.some(r => r.id === x.id)) S.held.push(x);
     if (S.openId === x.id) closeDrawer();
