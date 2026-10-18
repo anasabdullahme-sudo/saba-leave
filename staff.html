@@ -1134,9 +1134,16 @@ async function handleExtFix(m) {
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null;
+const EXT_LATEST = "1.3.2", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
+const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
+let extWarned = false;
 function renderExtHint() {
   $("#sehaTxt").textContent = extVersion ? "افتح صحة وعبّي تلقائياً" : "افتح منصة صحة للرفع";
-  $("#extHint").innerHTML = extVersion ? "<b>✓</b> إضافة التعبئة شغالة" : "ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً";
+  const old = extVersion && verLt(extVersion, EXT_LATEST);
+  $("#extHint").innerHTML = !extVersion ? `ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً — <a href="${EXT_ZIP}" download>نزّلها من هنا</a>`
+    : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — <a href="${EXT_ZIP}" download>نزّل النسخة ${EXT_LATEST}</a> واستبدل ملفاتها، وبعدها ↻ في chrome://extensions`
+    : "<b>✓</b> إضافة التعبئة شغالة";
+  if (old && !extWarned) { extWarned = true; toast(`إضافة صحة في هالجهاز قديمة (${extVersion}) — نزّل ${EXT_LATEST} من رابط تحت زر صحة`); }
 }
 function sehaPayload(x) {
   const pick = k => x[k] || "";
