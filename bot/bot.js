@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.4.1";
+const VERSION = "1.5.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -330,6 +330,32 @@ async function onIncoming(m) {
   return reply(jid, `⏳ ${hi}، طلبك ${r.ref || ""} وصلنا وهو بالانتظار عند فريق سابا لرفعه على منصة صحة.\nنبّهنا الفريق باستفسارك 🙏${tail}`);
 }
 
+/* ---------- تطبيق تعديل المريض فوراً (بدون ما ننتظر لوحة موظف مفتوحة) ----------
+   المريض يرسل التعديل ← الطلب يطلع من «معلّق» ويرجع «في الانتظار» بالبيانات الجديدة
+   ولو الموظف غيّر النوع (مثلاً مرضية ← مرافق) يروح لعمود النوع الصحيح */
+const TYPES_OK = ["sick", "companion", "attendance"];
+function startFixApplier() {
+  db.collection("fixes").where("status", "==", "answered").onSnapshot(s => {
+    for (const d of s.docs) applyFix(d.ref).catch(e => log.warn({ id: d.id, err: String(e?.message || e) }, "تطبيق التعديل"));
+  }, e => log.error({ err: String(e?.message || e) }, "fixes answered listener"));
+}
+async function applyFix(fref) {
+  const res = await db.runTransaction(async tx => {
+    const f = await tx.get(fref);
+    if (!f.exists || f.get("status") !== "answered") return null;
+    const rref = db.doc(`requests/${f.get("reqId")}`), r = await tx.get(rref);
+    const a = f.get("answer") || {}, patch = {};
+    for (const [k, v] of Object.entries(a)) { if (k === "note") { if (v) patch.patientNote = String(v).slice(0, 300); } else if (v) patch[k] = v; }
+    const nt = f.get("newType");
+    if (TYPES_OK.includes(nt)) { patch.type = nt; patch.typeManual = true; }
+    if (r.exists && r.get("status") !== "done")
+      tx.update(rref, { ...patch, status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null });
+    tx.update(fref, { status: "applied", appliedAt: TS(), appliedBy: "تلقائي" });
+    return { name: f.get("name"), type: patch.type || "" };
+  });
+  if (res) log.info(res, "تطبّق تعديل المريض");
+}
+
 /* ---------- تنظيف الصور التلقائي (يومياً) ----------
    الخطة المجانية فيها 1GB بس، والصور داخل Firestore. لو امتلت يوقف الرفع عند المرضى.
    - نمسح صور الطلبات المنتهية الأقدم من KEEP_DAYS
@@ -416,6 +442,7 @@ async function main() {
 
   startTrackSync();
   watchDoctors();
+  startFixApplier();
 
   // تنظيف الصور: بعد التشغيل بدقيقتين، وبعدها كل ١٢ ساعة
   setTimeout(cleanupImages, 2 * 60000);

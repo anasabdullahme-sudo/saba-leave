@@ -315,6 +315,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     </div>
     <div class="fields" id="dFields"></div>
     <div class="hold-banner" id="dHoldInfo" hidden></div>
+    <div class="hold-banner" id="dFixInfo" hidden style="background:#F3EEFF;color:#4B2FA8"></div>
     <div class="open-banner" id="dOpenInfo" hidden></div>
     <div class="panel-f">
       <div class="hold-box" id="holdBox" hidden>
@@ -467,7 +468,7 @@ function start() {
     }
     S.bot = st; renderBot();
   });
-  api.watchAnsweredFixes?.(list => list.forEach(applyAnswered));
+  api.watchAnsweredFixes?.(list => { S.answered = new Map(list.map(f => [f.reqId, f])); list.forEach(applyAnswered); renderHeld(); });
   let prevIds = null, doneTimer;
   S.unsub = api.watchPending((list, added) => {
     const ids = new Set(list.map(x => x.id));
@@ -560,7 +561,7 @@ function rowHTML(x, mode) {
     : `<div class="quick-row"><button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
   return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
-      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq" title="${esc(x.inquiryText || "")}">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}${x.inquiryText && !/^SB-?\w{5}$/i.test(x.inquiryText.trim()) ? `: «${esc(x.inquiryText.slice(0, 50))}${x.inquiryText.length > 50 ? "…" : ""}»` : ""}</span>` : ""}${held && x.fixToken ? '<span class="chip fix">بانتظار تعديل المريض</span>' : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq" title="${esc(x.inquiryText || "")}">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}${x.inquiryText && !/^SB-?\w{5}$/i.test(x.inquiryText.trim()) ? `: «${esc(x.inquiryText.slice(0, 50))}${x.inquiryText.length > 50 ? "…" : ""}»` : ""}</span>` : ""}${held && x.fixToken ? (S.answered?.has(x.id) ? '<span class="chip fix">✓ المريض عدّل — يتطبّق…</span>' : '<span class="chip fix">بانتظار تعديل المريض</span>') : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(x.doctorName)}</span><span>${esc(dates(x))}</span></div>
       ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
     </div>
@@ -795,6 +796,7 @@ async function openDrawer(id, holdNow) {
   $("#dFix").hidden = isDone || !api.createFix;
   $("#dHoldInfo").hidden = !isHeld;
   if (isHeld) $("#dHoldInfo").innerHTML = `<b>معلّق: ${esc(holdName(x.holdReason))}</b>${esc(x.holdNote || "")}${x.heldBy ? ` — ${esc(x.heldBy)}` : ""}`;
+  showFixInfo(isHeld ? x : null);
   if (holdNow && !isHeld && !isDone) showHoldBox(true);
   const other = !isDone && openByOther(x);
   $("#dOpenInfo").hidden = !other;
@@ -1093,17 +1095,33 @@ function showFixSending(id, message, x, auto) {
     if (f.sendStatus === "failed") { clearTimeout(fixTimer); manual(`ما انرسلت: ${f.sendError || "خطأ غير معروف"}. أرسلها بنفسك:`); st.className = "fx-state bad"; }
   });
 }
+// حالة طلب التعديل داخل تفاصيل الطلب المعلّق + زر تطبيق يدوي لو ما تطبّق لحاله
+async function showFixInfo(x) {
+  const box = $("#dFixInfo"); box.hidden = true;
+  if (!x?.fixToken || !api.getFix) return;
+  let f = null; try { f = await api.getFix(x.fixToken); } catch (e) { console.warn(e); }
+  if (S.openId !== x.id || !f) return;
+  const ST = { open: "بانتظار المريض يعدّل من الرابط", answered: "✓ المريض أرسل التعديل", applied: "✓ التعديل تطبّق", cancelled: "انلغى" };
+  const SEND = { queued: "في طابور البوت", sending: "البوت يرسل…", sent: "انرسلت واتساب ✓", failed: "ما انرسلت ✗", manual: "إرسال يدوي" };
+  box.innerHTML = `<b>طلب التعديل:</b> ${ST[f.status] || f.status} · ${SEND[f.sendStatus] || f.sendStatus || ""}${f.newType ? ` · يتحوّل إلى «${esc(typeName(f.newType))}»` : ""}${f.status === "answered" ? ` <button class="btn btn-primary" id="dApplyFix" style="height:34px;margin-top:6px">طبّق تعديل المريض الحين</button>` : ""}`;
+  box.hidden = false;
+  const b = $("#dApplyFix"); if (b) b.onclick = () => { applying.delete(f.id); applyAnswered(f, true); };
+}
 // وصل تعديل من المريض → نطبّقه على الطلب ونرجعه للانتظار (مرة وحدة حتى لو أكثر من جهاز مفتوح)
 const applying = new Set();
-async function applyAnswered(f) {
+async function applyAnswered(f, loud) {
   if (applying.has(f.id)) return; applying.add(f.id);
   const a = f.answer || {}, patch = {};
   for (const [k, v] of Object.entries(a)) { if (k === "note") { if (v) patch.patientNote = v; } else if (v) patch[k] = v; }
   if (f.newType && ["sick", "companion", "attendance"].includes(f.newType)) { patch.type = f.newType; patch.typeManual = true; }   // يتحوّل لمكانه الصحيح
   try {
     const ok = await api.applyFix(f.id, patch, myName());
-    if (ok) { toast(`✎ ${f.name || "مريض"} عدّل بياناته — رجع الطلب للانتظار`); chime(); }
-  } catch (e) { console.warn("applyFix", e); applying.delete(f.id); }
+    if (ok) { toast(`✎ ${f.name || "مريض"} عدّل بياناته — رجع الطلب للانتظار${patch.type ? ` في «${typeName(patch.type)}»` : ""}`); chime(); }
+    else if (loud) toast("هذا التعديل تطبّق من قبل");
+  } catch (e) {
+    console.warn("applyFix", e); applying.delete(f.id);
+    toast(`ما قدرت أطبّق تعديل ${f.name || "المريض"}: ${e?.code || e?.message || "خطأ"} — أرسل لي صورة`);
+  }
 }
 
 // بيانات المريض الموجودة (تظهر له في صفحة التعديل لما يتغيّر نوع الطلب — يشوفها ويكمّل الناقص بس)
