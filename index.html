@@ -166,6 +166,17 @@ form{padding:18px}
   .top{padding:14px 16px} main{padding:8px 16px 48px}
   .help{display:none}
 }
+.track-link{display:flex;align-items:center;justify-content:center;gap:8px;margin:18px auto 0;padding:14px 18px;border-radius:16px;background:var(--white);border:1px dashed var(--line);color:var(--navy);font-size:15px;width:100%;max-width:620px;cursor:pointer}
+.track-link b{color:var(--blue)}
+.tr-item{border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-top:12px;display:grid;gap:6px}
+.tr-item .st{display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px}
+.tr-item .st.ok{color:#0E9F6E}.tr-item .st.wait{color:#B07400}.tr-item .st.fix{color:#5B3CC4}
+.tr-item .meta{color:var(--muted);font-size:13.5px;line-height:1.7}
+.tr-item .meta .ltr{direction:ltr;display:inline-block}
+.tr-item .act{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.tr-item .act a,.wa-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:12px;font-weight:600;font-size:15px;text-decoration:none}
+.wa-btn{background:#25D366;color:#fff;height:52px;width:100%;max-width:340px;font-size:16px;margin-top:10px}
+.tr-empty{margin-top:14px;padding:14px;border-radius:14px;background:#FFF7E8;color:#7A5200;line-height:1.7;font-size:14.5px}
 #bootErr{position:fixed;left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:50;background:#fff;border:1px solid #F3C98B;border-radius:16px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,55,101,.18);color:#7A5200;font-size:14px;line-height:1.7;max-width:520px;margin:0 auto}
 #bootErr b{color:#003765;font-size:15px}
 #bootErr button{display:block;width:100%;margin-top:10px;border:0;border-radius:12px;padding:12px;background:#00A6E2;color:#fff;font:inherit;font-weight:700;cursor:pointer}
@@ -200,6 +211,25 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
       <span><i>1</i>اختر نوع الطلب</span>
       <span><i>2</i>صوّر التقرير</span>
       <span><i>3</i>راجع بياناتك وأرسل</span>
+    </div>
+    <button class="track-link" id="btnTrack" type="button">📋 أرسلت طلب قبل؟ <b>تابع حالة طلبك</b></button>
+  </section>
+
+  <!-- ============ تابع طلبك ============ -->
+  <section class="screen" id="sTrack">
+    <div class="flow">
+      <div class="flow-head">
+        <button class="back" data-back aria-label="رجوع"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        <div><h1>تابع طلبك</h1><p>اكتب رقم هويتك والجوال اللي أرسلت فيه الطلب</p></div>
+      </div>
+      <div class="card" style="padding:18px">
+        <form id="trForm" novalidate autocomplete="off">
+          <label class="f"><span><i class="lb">رقم الهوية / الإقامة</i></span><input name="tid" class="ltr" inputmode="numeric" maxlength="10"><div class="err">رقم الهوية 10 أرقام ويبدأ بـ 1 أو 2</div></label>
+          <label class="f"><span><i class="lb">رقم الجوال</i></span><input name="tphone" class="ltr" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx"><div class="err">اكتب رقم جوال سعودي صحيح يبدأ بـ 05</div></label>
+          <button class="btn btn-primary submit" id="trBtn" type="submit">اعرض حالة طلبي</button>
+        </form>
+        <div id="trRes"></div>
+      </div>
     </div>
   </section>
 
@@ -256,7 +286,8 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
         <h2>وصل طلبك</h2>
         <p>طلبك الحين عند فريق سابا، ويتم رفعه على منصة صحة في أقرب وقت.<br>احتفظ برقم الطلب للمتابعة مع الاستقبال.</p>
         <div class="ref"><span id="refTxt"></span><button id="btnCopyRef">نسخ</button></div>
-        <div style="margin-top:28px"><button class="btn btn-ghost" id="btnNew">طلب جديد</button></div>
+        <div id="doneWa"></div>
+        <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn btn-ghost" id="btnDoneTrack">تابع طلبك</button><button class="btn btn-ghost" id="btnNew">طلب جديد</button></div>
       </div>
     </div>
   </section>
@@ -277,7 +308,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey } from "./shared.js?v=20261018";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey } from "./shared.js?v=20261018b";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -632,7 +663,8 @@ $("#form").addEventListener("submit", async e => {
     }, key));
     clearTimeout(slow);
     $("#refTxt").textContent = ref;
-    setDone(false); reset("sDone");
+    rememberMe(latinDigits(fd.idNumber), normPhone(fd.phone));
+    setDone(false); reset("sDone"); showDoneWa(ref);
   } catch (err) {
     if (err?.code === "duplicate") return showDuplicate();
     console.error(err);
@@ -645,8 +677,78 @@ $("#btnCopyRef").onclick = async () => {
   try { await navigator.clipboard.writeText(t); } catch { const a = document.createElement("textarea"); a.value = t; document.body.append(a); a.select(); document.execCommand("copy"); a.remove(); }
   toast("تم نسخ رقم الطلب");
 };
+/* ---------- «تابع طلبك» ---------- */
+const WA_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .1-1.3c0-.1-.2-.2-.4-.3z"/></svg>';
+let botWaP = null;
+const botWa = () => (botWaP ||= apiReady.then(a => a.getBotWa?.() || "").catch(() => ""));
+const waLink = (wa, ref) => `https://wa.me/${wa}?text=${encodeURIComponent(`السلام عليكم، أبي أستفسر عن إجازتي\nرقم الطلب: ${ref}`)}`;
+const LS_ME = "saba_me";
+const rememberMe = (id, phone) => { try { localStorage.setItem(LS_ME, JSON.stringify({ id, phone })); } catch {} };
+const lastMe = () => { try { return JSON.parse(localStorage.getItem(LS_ME)) || {}; } catch { return {}; } };
+const fmtDay = ms => ms ? new Intl.DateTimeFormat("ar-SA-u-ca-gregory-nu-latn", { day: "numeric", month: "long", timeZone: "Asia/Riyadh" }).format(new Date(ms)) : "";
+
+function openTrack(auto) {
+  const me = lastMe(), f = $("#trForm");
+  if (me.id && !f.tid.value) f.tid.value = me.id;
+  if (me.phone && !f.tphone.value) f.tphone.value = me.phone;
+  $("#trRes").innerHTML = "";
+  go("sTrack");
+  if (auto && f.tid.value && f.tphone.value) (f.requestSubmit ? f.requestSubmit() : f.dispatchEvent(new Event("submit", { cancelable: true })));
+}
+$("#btnTrack").onclick = () => openTrack(false);
+$("#btnDoneTrack").onclick = () => openTrack(true);
+$("#trForm").tid.addEventListener("input", e => { e.target.value = latinDigits(e.target.value).replace(/\D/g, ""); });
+$("#trForm").querySelectorAll("input").forEach(i => i.addEventListener("input", () => i.closest(".f").classList.remove("bad")));
+$("#trForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target, id = latinDigits(f.tid.value.trim()), phone = normPhone(f.tphone.value);
+  f.tid.closest(".f").classList.toggle("bad", !validId(id));
+  f.tphone.closest(".f").classList.toggle("bad", !validPhone(phone));
+  if (!validId(id) || !validPhone(phone)) return;
+  const btn = $("#trBtn"); if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = "نبحث عن طلبك…"; $("#trRes").innerHTML = "";
+  try {
+    await apiReady;
+    const items = await withRetry(async () => api.getTrack(await trackKey(id, phone)));
+    rememberMe(id, phone);
+    const list = Object.values(items || {}).filter(x => x.state !== "dup").sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    if (!list.length) {
+      $("#trRes").innerHTML = `<div class="tr-empty">ما لقينا طلب بهذي البيانات.<br>• تأكد إن رقم الهوية والجوال نفس اللي كتبتها في الطلب.<br>• إذا أرسلت الطلب قبل دقائق، انتظر شوي وحاول مرة ثانية.<br>• إذا ما زال ما يطلع، كلّم استقبال الفرع.</div>`;
+      return;
+    }
+    const wa = await botWa();
+    $("#trRes").innerHTML = list.map(x => {
+      const dates = x.type === "attendance" ? (x.visitDate || x.leaveStart) : [x.leaveStart, x.leaveEnd].filter(Boolean).join(" ← ");
+      let st, cls, extra = "";
+      if (x.state === "done") { st = "✅ تم الرفع على منصة صحة"; cls = "ok"; extra = `تقدر تشوفها من تطبيق <b>صحتي</b> ← الإجازات المرضية. إذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب.`; }
+      else if (x.state === "held" && x.fix) { st = "✏️ يحتاج تعديل بسيط منك"; cls = "fix"; extra = "فريق سابا يحتاج تصحيح بعض البيانات قبل الرفع."; }
+      else if (x.state === "held") { st = "⏳ قيد المراجعة"; cls = "wait"; extra = "فريق سابا يراجع طلبك."; }
+      else { st = "⏳ بالانتظار"; cls = "wait"; extra = "وصلنا طلبك، وبيرفعه فريق سابا على منصة صحة."; }
+      const acts = [
+        x.state === "held" && x.fix ? `<a class="btn-primary" style="background:var(--blue);color:#fff" href="./?fix=${encodeURIComponent(x.fix)}">عدّل طلبك الحين</a>` : "",
+        wa && x.ref ? `<a href="${waLink(wa, x.ref)}" target="_blank" rel="noopener" style="background:#25D366;color:#fff">${WA_ICON} استفسر واتساب</a>` : "",
+      ].join("");
+      return `<div class="tr-item"><div class="st ${cls}">${st}</div>
+        <div class="meta">${typeName(x.type)}${dates ? ` · <span class="ltr">${dates.replace(/[<>&]/g, "")}</span>` : ""}<br>رقم الطلب: <span class="ltr">${String(x.ref || "").replace(/[<>&]/g, "")}</span>${x.createdAt ? ` · أرسلته ${fmtDay(x.createdAt)}` : ""}${x.state === "done" && x.doneAt ? ` · انرفع ${fmtDay(x.doneAt)}` : ""}<br>${extra}</div>
+        ${acts ? `<div class="act">${acts}</div>` : ""}</div>`;
+    }).join("");
+  } catch (err) {
+    console.error(err);
+    $("#trRes").innerHTML = `<div class="tr-empty">ما قدرنا نجيب حالة طلبك الحين. تأكد من الإنترنت وحاول مرة ثانية.</div>`;
+  } finally { btn.disabled = false; btn.textContent = "اعرض حالة طلبي"; }
+});
+// رابط مباشر: ?track
+if (new URLSearchParams(location.search).has("track")) openTrack(true);
+
+// زر «استفسر واتساب» في صفحة «وصل طلبك»
+async function showDoneWa(ref) {
+  $("#doneWa").innerHTML = "";
+  const wa = await botWa(); if (!wa || !ref) return;
+  $("#doneWa").innerHTML = `<a class="wa-btn" href="${waLink(wa, ref)}" target="_blank" rel="noopener">${WA_ICON} استفسر عن طلبك واتساب</a><p style="margin:8px 0 0;font-size:13px;color:var(--muted)">احفظ الرقم، وأرسل له متى ما بغيت تعرف حالة طلبك.</p>`;
+}
 const DONE_TXT = { h: $("#sDone h2").textContent, p: $("#sDone p").innerHTML };
 function setDone(dup) {
+  $("#doneWa").innerHTML = "";
   $("#sDone h2").textContent = dup ? "طلبك وصلنا من قبل" : DONE_TXT.h;
   $("#sDone p").innerHTML = dup ? "نفس هذا الطلب (نفس الهوية وتواريخ الإجازة) أرسلته قبل، وهو عند فريق سابا.<br>ما تحتاج ترسله مرة ثانية. إذا عندك استفسار كلّم استقبال الفرع." : DONE_TXT.p;
   $("#sDone .ref").style.display = dup ? "none" : "";

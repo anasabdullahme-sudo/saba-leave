@@ -125,6 +125,12 @@ main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
 .chip{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--ice);color:var(--blue)}
 .chip.dup{background:#FDECEC;color:var(--red)}
 .chip.fix{background:#EDE9FE;color:#5B3CC4}
+.chip.inq{background:#FFE6C7;color:#A84600}
+.docph{max-height:52vh;overflow:auto;display:grid;gap:6px}
+.docph .g{font-size:12px;font-weight:700;color:var(--muted);margin-top:6px}
+.docph label{display:flex;align-items:center;gap:8px;font-size:14px}
+.docph label span{flex:1}
+.docph input{width:150px;direction:ltr;text-align:left;border:1.5px solid var(--line);border-radius:10px;padding:7px 9px;font:inherit}
 .bot-pill{height:34px;display:inline-flex;align-items:center;gap:7px;padding:0 12px;border-radius:99px;border:1px solid var(--line);background:var(--white);color:var(--muted);font-size:13px;font-weight:600}
 .bot-pill i{width:8px;height:8px;border-radius:50%;background:#B8C4CF}
 .bot-pill.on i{background:var(--ok)} .bot-pill.on{color:#0B6E4F}
@@ -376,13 +382,21 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <h3 id="botTtl">بوت الواتساب</h3>
     <p id="botTxt"></p>
     <div class="qr-box" id="botQr" hidden></div>
-    <div class="btn-row"><button class="btn btn-danger" id="botLogout" hidden>فك الربط</button><button class="btn btn-ghost" id="botClose">إغلاق</button></div>
+    <div class="btn-row"><button class="btn btn-ghost" id="botDocs" hidden>أرقام الأطباء</button><button class="btn btn-danger" id="botLogout" hidden>فك الربط</button><button class="btn btn-ghost" id="botClose">إغلاق</button></div>
+  </div>
+</div>
+<div class="modal" id="docModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="docTtl">
+    <h3 id="docTtl">أرقام جوال الأطباء</h3>
+    <p style="margin:0;color:var(--muted);font-size:13.5px;line-height:1.7">لما المراجع يستفسر عن إجازة <b>تم رفعها</b>، البوت يرسل تذكير لطبيبها يعتمدها (مرة كل 12 ساعة بالكثير). اللي ما له رقم ما ينرسل له شي.</p>
+    <div class="docph" id="docList"></div>
+    <div class="btn-row"><button class="btn btn-primary" id="docSave">حفظ</button><button class="btn btn-ghost" id="docClose">إلغاء</button></div>
   </div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields } from "./shared.js?v=20261018";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields } from "./shared.js?v=20261018b";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -448,6 +462,16 @@ function start() {
     S.held = list.filter(x => x.status === "held");
     const fresh = S.pending.filter(x => added.includes(x.id));
     if (!S.firstLoad && fresh.length) notify(fresh);
+    // استفسار جديد من مراجع (عن طريق واتساب البوت) → تنبيه
+    S.inq ||= new Map();
+    for (const x of list) {
+      const seen = S.inq.get(x.id);
+      if (!S.firstLoad && x.inquiryAt && x.inquiryAt !== seen && (seen !== undefined || Date.now() - x.inquiryAt < 120000)) {
+        chime(); toast(`📩 ${x.patientName} يستفسر عن طلبه — ${branchName(x.branch)} · ${typeName(x.type)}`);
+        if (document.hidden && "Notification" in window && Notification.permission === "granted") new Notification("مراجع يستفسر — سابا", { body: `${x.patientName} — ${branchName(x.branch)}`, tag: "saba-inq" });
+      }
+      S.inq.set(x.id, x.inquiryAt || null);
+    }
     S.firstLoad = false;
     reroute(list);
     archiveExactDupes(list);
@@ -521,7 +545,7 @@ function rowHTML(x, mode) {
     : `<div class="quick-row"><button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
   return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
-      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${held && x.fixToken ? '<span class="chip fix">بانتظار تعديل المريض</span>' : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}</span>` : ""}${held && x.fixToken ? '<span class="chip fix">بانتظار تعديل المريض</span>' : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip">بختم د. ${esc(byStamp.ar)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(x.doctorName)}</span><span>${esc(dates(x))}</span></div>
       ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
     </div>
@@ -532,13 +556,15 @@ function rowHTML(x, mode) {
   </div>`;
 }
 function renderPending() {
-  const list = S.pending.filter(x => x.branch === S.branch && x.type === S.type && match(x));
+  // اللي يستفسر عنه المراجع يطلع فوق (تذكير)، والباقي بالأقدم أولاً
+  const list = S.pending.filter(x => x.branch === S.branch && x.type === S.type && match(x))
+    .sort((a, b) => (b.inquiryAt ? 1 : 0) - (a.inquiryAt ? 1 : 0) || (a.inquiryAt && b.inquiryAt ? b.inquiryAt - a.inquiryAt : 0) || a.createdAt - b.createdAt);
   $("#cPending").textContent = list.length;
   $("#lPending").innerHTML = list.length ? list.map(x => rowHTML(x, "pending")).join("")
     : `<div class="empty"><b>${S.q ? "لا نتائج مطابقة" : "لا يوجد طلبات بانتظار الرفع"}</b>${S.q ? "جرّب اسم أو رقم مختلف" : "الطلبات الجديدة تظهر هنا مباشرة"}</div>`;
 }
 function renderHeld() {
-  const list = S.held.filter(x => x.branch === S.branch && x.type === S.type && match(x)).sort((a, b) => (a.heldAt || 0) - (b.heldAt || 0));
+  const list = S.held.filter(x => x.branch === S.branch && x.type === S.type && match(x)).sort((a, b) => (b.inquiryAt ? 1 : 0) - (a.inquiryAt ? 1 : 0) || (a.heldAt || 0) - (b.heldAt || 0));
   $("#cHeld").textContent = list.length;
   $("#lHeld").innerHTML = list.length ? list.map(x => rowHTML(x, "held")).join("")
     : `<div class="empty"><b>لا يوجد طلبات معلّقة</b>علّق أي طلب فيه مشكلة ترخيص أو خطأ في البيانات</div>`;
@@ -904,11 +930,38 @@ async function renderBotModal() {
   box.hidden = !(admin && st?.state === "qr" && st.qr);
   if (!box.hidden) { try { box.innerHTML = await qrSvg(st.qr); } catch { box.textContent = "تعذّر عرض الباركود"; } }
   $("#botLogout").hidden = !(admin && on);
+  $("#botDocs").hidden = !(admin && api.saveDoctorPhones);
 }
 setInterval(renderBot, 30000);   // لو البوت وقف (ما وصل نبضه) يتحدّث المؤشر
 $("#botPill").onclick = () => { $("#botModal").hidden = false; renderBotModal(); };
 $("#botClose").onclick = () => { $("#botModal").hidden = true; };
 $("#botLogout").onclick = async () => { if (!confirm("فك ربط الرقم من البوت؟ بيطلع باركود جديد للربط.")) return; try { await api.botLogout(); toast("انرسل أمر فك الربط"); } catch { toast("ما قدرت أرسل الأمر"); } };
+
+/* ---------- أرقام الأطباء (تذكير الاعتماد) — للمسؤول ---------- */
+$("#botDocs").onclick = async () => {
+  $("#botModal").hidden = true; $("#docModal").hidden = false;
+  $("#docList").innerHTML = '<p style="color:var(--muted)">جاري التحميل…</p>';
+  let ph = {}; try { ph = await api.getDoctorPhones(); } catch (err) { console.warn(err); }
+  $("#docList").innerHTML = BRANCHES.map(b => {
+    const ds = DOCTORS.filter(d => d.branch === b.id); if (!ds.length) return "";
+    return `<div class="g">${esc(b.ar || branchName(b.id))}</div>` + ds.map(d => `<label><span>د. ${esc(d.ar)}</span><input data-doc="${esc(d.id)}" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" value="${esc(ph[d.id] || "")}"></label>`).join("");
+  }).join("");
+};
+$("#docClose").onclick = () => { $("#docModal").hidden = true; };
+$("#docSave").onclick = async () => {
+  const phones = {}, names = {}; let bad = 0;
+  $("#docList").querySelectorAll("input[data-doc]").forEach(i => {
+    let p = i.value.replace(/[٠-٩]/g, c => "٠١٢٣٤٥٦٧٨٩".indexOf(c)).replace(/\D/g, "").replace(/^00966|^966/, "");
+    if (p.length === 9 && p.startsWith("5")) p = "0" + p;
+    i.style.borderColor = "";
+    if (!p) return;
+    if (!/^05\d{8}$/.test(p)) { bad++; i.style.borderColor = "#E5383B"; return; }
+    phones[i.dataset.doc] = p; names[i.dataset.doc] = doctorById(i.dataset.doc)?.ar || "";
+  });
+  if (bad) return toast("في أرقام غير صحيحة (لازم تبدأ بـ 05)");
+  try { await api.saveDoctorPhones(phones, names); toast(`انحفظت أرقام ${Object.keys(phones).length} طبيب`); $("#docModal").hidden = true; }
+  catch (err) { console.error(err); toast("ما انحفظت — تأكد إن قواعد الحماية الجديدة منشورة"); }
+};
 
 let fixReq = null, fixUnsub = null, fixTimer = null;
 function openFix() {

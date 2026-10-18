@@ -71,6 +71,12 @@ service cloud.firestore {
         && request.resource.data.at == request.time;
       allow delete: if isAdmin();
     }
+    // «تابع طلبك»: حالة طلبات المراجع (يكتبها البوت من السيرفر) — تنقرأ بالبصمة فقط (الهوية + الجوال)
+    match /track/{id} { allow get: if request.auth != null; allow list, write: if false; }
+    // رقم البوت (لزر «استفسر واتساب» عند المراجع)
+    match /public/{doc} { allow get: if true; allow list, write: if false; }
+    // أرقام الأطباء (تذكير الاعتماد) — المسؤول يضيفها من اللوحة
+    match /bot/doctors { allow read: if isStaff(); allow write: if isAdmin(); }
     // حالة بوت الواتساب (يكتبها البوت من السيرفر) + أوامر المسؤول له
     match /bot/status { allow read: if isStaff(); allow write: if false; }
     match /bot/control { allow read: if isStaff(); allow write: if isAdmin(); }

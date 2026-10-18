@@ -6,11 +6,12 @@
    ========================================================================== */
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } from "baileys";
 import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import pino from "pino";
 import fs from "node:fs";
+import crypto from "node:crypto";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -46,6 +47,10 @@ async function connect() {
     markOnlineOnConnect: false, syncFullHistory: false,
   });
   sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("messages.upsert", ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const m of messages || []) onIncoming(m).catch(e => log.warn({ err: String(e?.message || e) }, "رسالة واردة"));
+  });
   sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
       connected = false;
@@ -55,6 +60,8 @@ async function connect() {
     if (connection === "open") {
       connected = true; me = sock.user?.id || "";
       await setStatus({ state: "connected", qr: null, me });
+      // رقم البوت للعامة (زر «استفسر واتساب» في صفحة المراجع)
+      db.doc("public/bot").set({ wa: String(me).split(/[:@]/)[0], at: TS() }).catch(() => {});
       log.info({ me }, "واتساب متصل");
       drain();
     }
@@ -63,6 +70,7 @@ async function connect() {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
         log.warn("انفك الربط — بنطلع باركود جديد");
+        db.doc("public/bot").set({ wa: "", at: TS() }).catch(() => {});
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         await setStatus({ state: "qr", qr: null, me: "" });
         setTimeout(connect, 1500);
@@ -121,6 +129,154 @@ async function drain() {
     }
   } catch (e) { log.error({ e }, "drain"); }
   finally { busy = false; if (queue.size && connected) setTimeout(drain, 1000); }
+}
+
+/* ==========================================================================
+   متابعة الطلبات + استفسارات المراجعين
+   - track/{بصمة الهوية+الجوال}: حالة طلبات المراجع (صفحة «تابع طلبك» تقراها بالبصمة فقط)
+   - المراجع يرسل رقم طلبه (أو هويته) للبوت ← يرد عليه بالحالة، ويطلع تنبيه «يستفسر» للموظفين
+   - لو الإجازة «تم الرفع» ← تذكير للطبيب يعتمدها (مرة كل 12 ساعة بالكثير)
+   ========================================================================== */
+const SITE_URL = (process.env.SITE_URL || "https://anasabdullahme-sudo.github.io/saba-leave/").replace(/\/*$/, "/");
+const TRACK_DAYS = +process.env.TRACK_DAYS || 45;
+const latin = s => String(s || "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+const normPhone = p => { let d = latin(p).replace(/\D/g, ""); if (d.startsWith("00966")) d = d.slice(5); if (d.startsWith("966")) d = d.slice(3); if (d.length === 9 && d.startsWith("5")) d = "0" + d; return d; };
+const trackKey = (id, phone) => crypto.createHash("sha256").update(`saba-track|${latin(id).replace(/\D/g, "")}|${normPhone(phone)}`).digest("hex").slice(0, 20);
+const ms = t => t?.toMillis?.() || 0;
+const isDupe = r => r.status === "done" && /^مكرر تلقائياً/.test(r.doneBy || "");
+const TYPE_AR = { sick: "إجازتك المرضية", companion: "إجازة المرافق", attendance: "مشهد المراجعة" };
+const TYPE_SHORT = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد مراجعة" };
+
+/* ---------- مزامنة صفحة «تابع طلبك» ---------- */
+const trackCache = new Map();          // reqId → { key, json }
+function trackItem(r) {
+  return {
+    ref: r.ref || "", type: r.type || "", state: isDupe(r) ? "dup" : (r.status || "pending"),
+    hold: r.status === "held" ? (r.holdReason || "") : "", fix: r.status === "held" && r.fixToken ? r.fixToken : "",
+    leaveStart: r.leaveStart || "", leaveEnd: r.leaveEnd || "", visitDate: r.visitDate || "",
+    createdAt: ms(r.createdAt), doneAt: ms(r.doneAt),
+  };
+}
+function startTrackSync() {
+  const since = Timestamp.fromMillis(Date.now() - TRACK_DAYS * DAY);
+  let chain = Promise.resolve();
+  db.collection("requests").where("createdAt", ">=", since).onSnapshot(s => {
+    const changes = s.docChanges().filter(c => c.type !== "removed");
+    chain = chain.then(async () => {
+      for (const ch of changes) {
+        const r = ch.doc.data(), id = ch.doc.id;
+        if (!r.idNumber || !r.phone) continue;
+        const key = trackKey(r.idNumber, r.phone), item = trackItem(r), json = JSON.stringify(item), prev = trackCache.get(id);
+        if (prev && prev.key === key && prev.json === json) continue;
+        trackCache.set(id, { key, json });
+        try {
+          const b = db.batch();
+          b.set(db.doc(`track/${key}`), { items: { [id]: item }, at: TS() }, { merge: true });
+          if (prev && prev.key !== key) b.set(db.doc(`track/${prev.key}`), { items: { [id]: FieldValue.delete() } }, { merge: true });
+          await b.commit();
+        } catch (e) { log.warn({ id, err: String(e?.message || e) }, "track"); }
+      }
+    });
+  }, e => log.error({ err: String(e?.message || e) }, "track listener"));
+}
+
+/* ---------- أرقام الأطباء (يضيفها المسؤول من لوحة الموظفين) ---------- */
+let doctorPhones = {}, doctorNames = {};
+// تعبئة أولية من متغير بيئة في Railway (DOCTOR_PHONES = {"ahmed-kashaf":"05…"}) — ما يكتب فوق رقم موجود
+async function seedDoctors() {
+  const raw = process.env.DOCTOR_PHONES || ""; if (!raw.trim()) return;
+  try {
+    const seed = JSON.parse(raw), ref = db.doc("bot/doctors"), cur = (await ref.get()).get("phones") || {};
+    const add = {};
+    for (const [id, ph] of Object.entries(seed)) { const p = normPhone(ph); if (/^05\d{8}$/.test(p) && !cur[id]) add[id] = p; }
+    if (Object.keys(add).length) { await ref.set({ phones: add, at: TS() }, { merge: true }); log.info({ n: Object.keys(add).length }, "أرقام الأطباء من DOCTOR_PHONES"); }
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "DOCTOR_PHONES مو JSON صحيح"); }
+}
+function watchDoctors() {
+  seedDoctors();
+  db.doc("bot/doctors").onSnapshot(d => { doctorPhones = d.get("phones") || {}; doctorNames = d.get("names") || {}; },
+    e => log.warn({ err: String(e?.message || e) }, "doctors listener"));
+}
+
+/* ---------- الرسائل الواردة ---------- */
+const lastReply = new Map();           // jid → وقت آخر رد (يمنع الإزعاج والحلقات)
+async function reply(jid, text) {
+  if (!connected || !sock) return;
+  await sock.sendMessage(jid, { text });
+  lastReply.set(jid, Date.now());
+}
+async function findByRef(ref) {
+  const s = await db.collection("requests").where("ref", "==", ref).limit(1).get();
+  return s.docs[0] || null;
+}
+async function onIncoming(m) {
+  const jid = m.key?.remoteJid || "";
+  if (m.key?.fromMe || !jid || jid.endsWith("@g.us") || jid.includes("broadcast") || jid.endsWith("@newsletter")) return;
+  const msg = m.message || {};
+  const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
+  const now = Date.now();
+  if (now - (lastReply.get(jid) || 0) < 20000) return;                 // رد واحد كل 20 ثانية لنفس الشخص
+  const senderPhone = normPhone(String(jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "")).split(/[:@]/)[0]);
+  const t = latin(text).toUpperCase();
+
+  let doc = null;
+  const refM = t.match(/SB-?\s?([A-Z0-9]{5})\b/);
+  if (refM) doc = await findByRef("SB-" + refM[1]);
+  else {
+    const idM = t.match(/\b[12]\d{9}\b/);
+    if (idM && senderPhone) {                                           // بالهوية: لازم يكون نفس جوال الطلب (خصوصية)
+      const s = await db.collection("requests").where("idNumber", "==", idM[0]).get();
+      doc = s.docs.filter(d => normPhone(d.get("phone")) === senderPhone).sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
+    }
+  }
+  if (!doc) {
+    if (now - (lastReply.get(jid + "#help") || 0) < 6 * 3600e3) return;   // رسالة المساعدة مرة كل 6 ساعات
+    lastReply.set(jid + "#help", now);
+    return reply(jid, `أهلاً 👋 هذا الرقم الآلي لمتابعة طلبات الإجازات في عيادات سابا.\n\nأرسل *رقم طلبك* (يبدأ بـ SB-) وأعطيك حالته فوراً.\n\nأو تابع طلبك من هنا:\n${SITE_URL}?track`);
+  }
+
+  let r = doc.data();
+  if (isDupe(r)) {                                                      // طلب مكرر → نرد بحالة الأصلي
+    const o = (r.doneBy || "").match(/SB-[A-Z0-9]{5}/);
+    const od = o && await findByRef(o[0]);
+    if (od) { doc = od; r = od.data(); }
+  }
+  const name = String(r.patientName || "").trim().split(/\s+/)[0] || "";
+  const hi = name ? `أهلاً ${name}` : "أهلاً";
+  const kind = TYPE_AR[r.type] || "طلبك";
+  const tail = `\n\nتابع طلبك: ${SITE_URL}?track`;
+
+  if (r.status === "done") {
+    let reminded = false;
+    const dp = normPhone(doctorPhones[r.doctorId] || "");
+    if (/^05\d{8}$/.test(dp) && now - ms(r.doctorRemindedAt) > 12 * 3600e3) {
+      try {
+        const [w] = await sock.onWhatsApp("966" + dp.slice(1));
+        if (w?.exists) {
+          const dates = r.type === "attendance" ? (r.visitDate || r.leaveStart) : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
+          await sock.sendMessage(w.jid, { text: `🔔 تذكير من عيادات سابا\n\nالمراجع/ة: *${r.patientName || ""}*\nالنوع: ${TYPE_SHORT[r.type] || ""}\nالتاريخ: ${dates || "—"}${r.sehaRef ? `\nرقم صحة: ${r.sehaRef}` : ""}\n\nالإجازة مرفوعة على منصة صحة، والمراجع يستفسر عنها. نأمل اعتمادها 🙏` });
+          await doc.ref.update({ doctorRemindedAt: TS(), doctorRemindCount: FieldValue.increment(1) });
+          reminded = true;
+          log.info({ ref: r.ref, doctor: r.doctorId }, "تذكير للطبيب");
+        }
+      } catch (e) { log.warn({ err: String(e?.message || e) }, "تذكير الطبيب"); }
+    } else if (now - ms(r.doctorRemindedAt) <= 12 * 3600e3) reminded = true;
+    await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1) }).catch(() => {});
+    return reply(jid, `✅ ${hi}، تم رفع ${kind} على منصة صحة${r.sehaRef ? ` (رقم ${r.sehaRef})` : ""}.\n\nتقدر تشوفها من تطبيق *صحتي* ← الإجازات المرضية.${reminded ? "\nإذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب — وأرسلنا له تذكير 👍" : "\nإذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب، وعادةً ما تتأخر."}${tail}`);
+  }
+
+  // بالانتظار أو معلّق → تنبيه للموظفين في اللوحة
+  await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1) });
+  log.info({ ref: r.ref }, "استفسار مراجع");
+  if (r.status === "held" && r.fixToken) {
+    const f = await db.doc(`fixes/${r.fixToken}`).get();
+    if (f.exists && f.get("status") === "open")
+      return reply(jid, `✏️ ${hi}، ${kind} تحتاج تعديل بسيط قبل ما نرفعها.\n\nافتح الرابط وعدّل البيانات المطلوبة:\n${SITE_URL}?fix=${r.fixToken}`);
+    return reply(jid, `⏳ ${hi}، وصلنا تعديلك وفريق سابا يكمل رفع ${kind} الحين. نبّهناهم باستفسارك 🙏${tail}`);
+  }
+  if (r.status === "held")
+    return reply(jid, `⏳ ${hi}، ${kind} قيد المراجعة عند فريق سابا، ونبّهناهم باستفسارك 🙏${tail}`);
+  return reply(jid, `⏳ ${hi}، طلبك ${r.ref || ""} وصلنا وهو بالانتظار عند فريق سابا لرفعه على منصة صحة.\nنبّهنا الفريق باستفسارك 🙏${tail}`);
 }
 
 /* ---------- تنظيف الصور التلقائي (يومياً) ----------
@@ -188,6 +344,9 @@ async function main() {
 
   // نبض كل ٣٠ ثانية عشان اللوحة تعرف إن البوت شغال
   setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 30000);
+
+  startTrackSync();
+  watchDoctors();
 
   // تنظيف الصور: بعد التشغيل بدقيقتين، وبعدها كل ١٢ ساعة
   setTimeout(cleanupImages, 2 * 60000);

@@ -234,6 +234,11 @@ export async function dupKey(r) {
     return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
   } catch { return ""; }
 }
+/* ---------- «تابع طلبك»: بصمة (الهوية + الجوال) — نفس اللي يحسبها البوت ---------- */
+export async function trackKey(id, phone) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`saba-track|${latinDigits(id || "").replace(/\D/g, "")}|${normPhone(phone || "")}`));
+  return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 export const makeRef = () => {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return "SB-" + Array.from(crypto.getRandomValues(new Uint8Array(5)), x => a[x % a.length]).join("");
@@ -436,7 +441,7 @@ async function liveBackend(role) {
     : FS.getFirestore(app);
   const st = useStorage ? ST.getStorage(app) : null;
   const col = FS.collection(db, "requests");
-  const toObj = d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now(), doneAt: x.doneAt?.toMillis?.() ?? null, heldAt: x.heldAt?.toMillis?.() ?? null, openedAt: x.openedAt?.toMillis?.() ?? null }; };
+  const toObj = d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now(), doneAt: x.doneAt?.toMillis?.() ?? null, heldAt: x.heldAt?.toMillis?.() ?? null, openedAt: x.openedAt?.toMillis?.() ?? null, inquiryAt: x.inquiryAt?.toMillis?.() ?? null, doctorRemindedAt: x.doctorRemindedAt?.toMillis?.() ?? null }; };
 
   const models = {};
   let AIref = null, aiInst = null, aiCfg = null;
@@ -614,6 +619,11 @@ async function liveBackend(role) {
     markFixManual: id => FS.updateDoc(FS.doc(db, "fixes", id), { sendStatus: "manual" }),
     watchBot(cb) { return FS.onSnapshot(FS.doc(db, "bot", "status"), d => { const x = d.exists() ? d.data() : null; cb(x && { ...x, lastSeen: x.lastSeen?.toMillis?.() ?? 0 }); }, () => cb(null)); },
     botLogout: () => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "logout", at: FS.serverTimestamp() }),
+    async getDoctorPhones() { const d = await FS.getDoc(FS.doc(db, "bot", "doctors")); return d.exists() ? (d.data().phones || {}) : {}; },
+    saveDoctorPhones: (phones, names) => FS.setDoc(FS.doc(db, "bot", "doctors"), { phones, names, at: FS.serverTimestamp() }),
+    /* --- المراجع: متابعة الطلب + رقم البوت --- */
+    async getTrack(key) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "track", key)); return d.exists() ? (d.data().items || {}) : null; },
+    async getBotWa() { try { const d = await FS.getDoc(FS.doc(db, "public", "bot")); return d.exists() ? String(d.data().wa || "") : ""; } catch { return ""; } },
     async getFix(id) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "fixes", id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
     async answerFix(id, answer) { await api.ensureAnon(); await FS.updateDoc(FS.doc(db, "fixes", id), { status: "answered", answer, answeredAt: FS.serverTimestamp() }); },
     /* --- تنظيف الصور الشهري (للمسؤول) --- */
@@ -732,6 +742,15 @@ function demoBackend() {
     async markFixManual(id) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (f) f.sendStatus = "manual"; saveFx(fx); },
     watchBot(cb) { const run = () => cb(demoBot() ? { state: "connected", me: "966500000000", lastSeen: Date.now() } : null); listeners.push(run); run(); return () => {}; },
     async botLogout() {},
+    async getDoctorPhones() { try { return JSON.parse(localStorage.getItem(KEY + "_docph") || "{}"); } catch { return {}; } },
+    async saveDoctorPhones(phones) { localStorage.setItem(KEY + "_docph", JSON.stringify(phones)); },
+    async getTrack(key) {
+      const items = {};
+      for (const r of load() || []) if (await trackKey(r.idNumber, r.phone) === key)
+        items[r.id] = { ref: r.ref, type: r.type, state: r.status === "done" && /^مكرر تلقائياً/.test(r.doneBy || "") ? "dup" : r.status, hold: r.status === "held" ? r.holdReason || "" : "", fix: r.status === "held" && r.fixToken ? r.fixToken : "", leaveStart: r.leaveStart || "", leaveEnd: r.leaveEnd || "", visitDate: r.visitDate || "", createdAt: r.createdAt, doneAt: r.doneAt || 0 };
+      return Object.keys(items).length ? items : null;
+    },
+    async getBotWa() { return demoBot() ? "966500000000" : ""; },
     async getFix(id) { return loadFx().find(x => x.id === id) || null; },
     async answerFix(id, answer) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (!f || f.status !== "open") throw Object.assign(new Error("closed"), { code: "permission-denied" }); Object.assign(f, { status: "answered", answer, answeredAt: Date.now() }); saveFx(fx); },
   };
