@@ -1122,9 +1122,10 @@ function renderExtHint() {
 function sehaPayload(x) {
   const pick = k => x[k] || "";
   // الطبيب: من المحفوظ، وإلا نطابق الاسم من جديد (طلبات قديمة قبل إضافة الطبيب للقائمة)
-  const doc = reqDoctor(x);
+  const doc = reqDoctor(x), br = (!x.branchManual && doc?.branch) || x.branch;
   return {
-    v: 1, id: x.id, ref: x.ref, type: x.type, branch: x.branch, account: SEHA_ACCOUNTS[x.branch] || null,
+    // حساب صحة يتبع فرع الطبيب الفعلي (حتى لو الطلب لسى ما انتقل) — إلا إذا الموظف حدد الفرع يدوياً
+    v: 1, id: x.id, ref: x.ref, type: x.type, branch: br, account: SEHA_ACCOUNTS[br] || null,
     fileNo: pick("fileNo"), doctorAr: doc?.ar || "", doctorEn: doc?.en || "",
     patientName: pick("patientName"), patientNameEn: pick("patientNameEn"), idNumber: pick("idNumber"), dob: pick("dob"), phone: pick("phone"),
     leaveStart: pick("leaveStart"), leaveEnd: pick("leaveEnd"), leaveDays: pick("leaveDays"), visitDate: pick("visitDate"),
