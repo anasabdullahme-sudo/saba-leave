@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -349,9 +349,27 @@ async function main() {
   // أوامر المسؤول من اللوحة (فك الربط)
   const started = Date.now();
   controlRef.onSnapshot(async d => {
-    if (!d.exists || d.get("cmd") !== "logout") return;
-    const at = d.get("at")?.toMillis?.() || 0;
+    if (!d.exists) return;
+    const cmd = d.get("cmd"), at = d.get("at")?.toMillis?.() || 0;
     if (at < started - 5000) { await controlRef.delete().catch(() => {}); return; }
+    if (cmd === "test") {                                  // رسالة تجربة لطبيب (من لوحة الموظفين)
+      await controlRef.delete().catch(() => {});
+      const p = normPhone(d.get("phone"));
+      try {
+        if (!connected || !sock) throw new Error("البوت مو متصل بواتساب");
+        if (!/^05\d{8}$/.test(p)) throw new Error("رقم غير صحيح");
+        const [w] = await sock.onWhatsApp("966" + p.slice(1));
+        if (!w?.exists) throw new Error("الرقم ما عليه واتساب");
+        await sock.sendMessage(w.jid, { text: `🔔 تذكير من عيادات سابا\n\nالمراجع/ة: *مراجع تجريبي*\nالنوع: إجازة مرضية\nالتاريخ: ${new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Riyadh" })}\n\nالإجازة مرفوعة على منصة صحة، والمراجع يستفسر عنها. نأمل اعتمادها 🙏\n\n(هذي رسالة تجربة — تجاهلها)` });
+        await setStatus({ lastTest: { phone: p, ok: true, err: "", at: TS() } });
+        log.info({ to: p }, "رسالة تجربة انرسلت");
+      } catch (e) {
+        await setStatus({ lastTest: { phone: p, ok: false, err: String(e?.message || e).slice(0, 120), at: TS() } });
+        log.warn({ to: p, err: String(e?.message || e) }, "رسالة تجربة فشلت");
+      }
+      return;
+    }
+    if (cmd !== "logout") return;
     log.warn("المسؤول طلب فك الربط");
     await controlRef.delete().catch(() => {});
     try { await sock?.logout(); } catch { /* connection.update يتكفل بالباقي */ }

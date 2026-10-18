@@ -389,6 +389,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
   <div class="box" role="dialog" aria-modal="true" aria-labelledby="docTtl">
     <h3 id="docTtl">أرقام جوال الأطباء</h3>
     <p style="margin:0;color:var(--muted);font-size:13.5px;line-height:1.7">لما المراجع يستفسر عن إجازة <b>تم رفعها</b>، البوت يرسل تذكير لطبيبها يعتمدها (مرة كل 12 ساعة بالكثير). اللي ما له رقم ما ينرسل له شي.</p>
+    <div style="display:flex;gap:8px;align-items:center;background:var(--ice);padding:10px;border-radius:12px"><span style="font-size:13.5px;flex:1">جرّب رسالة التذكير على رقم:</span><input id="docTestPh" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" style="width:130px;direction:ltr;text-align:left;border:1.5px solid var(--line);border-radius:10px;padding:7px 9px;font:inherit"><button class="btn btn-ghost" id="docTest" style="height:38px;padding:0 12px">أرسل تجربة</button></div>
     <div class="docph" id="docList"></div>
     <div class="btn-row"><button class="btn btn-primary" id="docSave">حفظ</button><button class="btn btn-ghost" id="docClose">إلغاء</button></div>
   </div>
@@ -396,7 +397,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields } from "./shared.js?v=20261018d";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields } from "./shared.js?v=20261018e";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -451,7 +452,14 @@ $("#btnOut").onclick = () => api.logout();
 function start() {
   if (S.unsub) return;
   buildNav();
-  api.watchBot?.(st => { S.bot = st; renderBot(); });
+  api.watchBot?.(st => {
+    const t = st?.lastTest;
+    if (testWait && t?.at && t.at > testWait - 60000 && t.at !== S.bot?.lastTest?.at) {
+      testWait = 0;
+      toast(t.ok ? `✓ وصلت رسالة التجربة لـ ${t.phone}` : `✗ ما انرسلت: ${t.err || "خطأ"}`);
+    }
+    S.bot = st; renderBot();
+  });
   api.watchAnsweredFixes?.(list => list.forEach(applyAnswered));
   let prevIds = null, doneTimer;
   S.unsub = api.watchPending((list, added) => {
@@ -944,12 +952,20 @@ $("#botDocs").onclick = async () => {
   let ph = {}; try { ph = await api.getDoctorPhones(); } catch (err) { console.warn(err); }
   docExtra = Object.fromEntries(Object.entries(ph).filter(([k]) => !doctorById(k)));   // أطباء البوادي غير المسجّلين (بالاسم) — نحافظ عليهم
   $("#docList").innerHTML = BRANCHES.map(b => {
-    const ds = DOCTORS.filter(d => d.branch === b.id); if (!ds.length) return "";
+    const ds = DOCTORS.filter((d, i) => d.branch === b.id && DOCTORS.findIndex(x => x.id === d.id) === i); if (!ds.length) return "";
     const extra = b.id === "bawadi" ? Object.entries(docExtra).map(([k, v]) => `<label><span>${esc(k.split("|")[0])} <small style="color:var(--muted)">(بالاسم)</small></span><input value="${esc(v)}" disabled></label>`).join("") : "";
     return `<div class="g">${esc(b.ar || branchName(b.id))}</div>` + extra + ds.map(d => `<label><span>د. ${esc(d.ar)}</span><input data-doc="${esc(d.id)}" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" value="${esc(ph[d.id] || "")}"></label>`).join("");
   }).join("");
 };
-let docExtra = {};
+let docExtra = {}, testWait = 0;
+$("#docTest").onclick = async () => {
+  let p = $("#docTestPh").value.replace(/[٠-٩]/g, c => "٠١٢٣٤٥٦٧٨٩".indexOf(c)).replace(/\D/g, "").replace(/^00966|^966/, "");
+  if (p.length === 9 && p.startsWith("5")) p = "0" + p;
+  if (!/^05\d{8}$/.test(p)) return toast("اكتب رقم صحيح يبدأ بـ 05");
+  if (!botOnline()) return toast("البوت مو متصل بواتساب — ما يقدر يرسل");
+  try { testWait = Date.now(); await api.botTest(p); toast("انرسل الأمر للبوت… انتظر ثواني"); }
+  catch (err) { console.error(err); toast("ما قدرت أرسل الأمر (تأكد إنك مسؤول)"); }
+};
 $("#docClose").onclick = () => { $("#docModal").hidden = true; };
 $("#docSave").onclick = async () => {
   const phones = { ...docExtra }, names = {}; let bad = 0;

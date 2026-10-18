@@ -618,9 +618,10 @@ async function liveBackend(role) {
     }),
     cancelFix: id => FS.updateDoc(FS.doc(db, "fixes", id), { status: "cancelled" }),
     markFixManual: id => FS.updateDoc(FS.doc(db, "fixes", id), { sendStatus: "manual" }),
-    watchBot(cb) { return FS.onSnapshot(FS.doc(db, "bot", "status"), d => { const x = d.exists() ? d.data() : null; cb(x && { ...x, lastSeen: x.lastSeen?.toMillis?.() ?? 0 }); }, () => cb(null)); },
+    watchBot(cb) { return FS.onSnapshot(FS.doc(db, "bot", "status"), d => { const x = d.exists() ? d.data() : null; cb(x && { ...x, lastSeen: x.lastSeen?.toMillis?.() ?? 0, lastTest: x.lastTest ? { ...x.lastTest, at: x.lastTest.at?.toMillis?.() ?? 0 } : null }); }, () => cb(null)); },
     botLogout: () => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "logout", at: FS.serverTimestamp() }),
     async getDoctorPhones() { const d = await FS.getDoc(FS.doc(db, "bot", "doctors")); return d.exists() ? (d.data().phones || {}) : {}; },
+    botTest: phone => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "test", phone, at: FS.serverTimestamp() }),
     saveDoctorPhones: (phones, names) => FS.setDoc(FS.doc(db, "bot", "doctors"), { phones, names, at: FS.serverTimestamp() }),
     /* --- المراجع: متابعة الطلب + رقم البوت --- */
     async getTrack(key) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "track", key)); return d.exists() ? (d.data().items || {}) : null; },
@@ -741,10 +742,11 @@ function demoBackend() {
     },
     async cancelFix(id) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (f) f.status = "cancelled"; saveFx(fx); },
     async markFixManual(id) { const fx = loadFx(); const f = fx.find(x => x.id === id); if (f) f.sendStatus = "manual"; saveFx(fx); },
-    watchBot(cb) { const run = () => cb(demoBot() ? { state: "connected", me: "966500000000", lastSeen: Date.now() } : null); listeners.push(run); run(); return () => {}; },
+    watchBot(cb) { const run = () => cb(demoBot() ? { state: "connected", me: "966500000000", lastSeen: Date.now(), lastTest: api._lastTest || null } : { lastTest: api._lastTest || null }); listeners.push(run); run(); return () => {}; },
     async botLogout() {},
     async getDoctorPhones() { try { return JSON.parse(localStorage.getItem(KEY + "_docph") || "{}"); } catch { return {}; } },
     async saveDoctorPhones(phones) { localStorage.setItem(KEY + "_docph", JSON.stringify(phones)); },
+    async botTest(phone) { api._lastTest = { phone, ok: demoBot(), err: demoBot() ? "" : "البوت مو متصل بواتساب", at: Date.now() }; fire(); },
     async getTrack(key) {
       const items = {};
       for (const r of load() || []) if (await trackKey(r.idNumber, r.phone) === key)
