@@ -388,6 +388,7 @@
     .pri{background:linear-gradient(180deg,#1495E4,#0082D4);color:#fff}
     .sec{background:#F5FBFE;color:#0082D4;border:1px solid #DCEBF4}
     .ok2{background:#0E9F6E;color:#fff}
+    #done{position:sticky;bottom:-12px;z-index:2;box-shadow:0 -10px 0 #fff,0 6px 16px -6px rgba(14,159,110,.55)}
     .btn:focus-visible{outline:3px solid #00A6E2;outline-offset:2px}
     .tg{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#5B7690}
     .fl{display:grid;gap:2px}
@@ -484,10 +485,10 @@
       : acc.state === "wrong" ? `⚠ أنت في حساب ثاني — الطلب لـ <b>${esc(accLabel(req.account))}</b> <button class="btn sec" id="swAcc" style="height:30px;line-height:30px;font-size:12px;margin-top:6px;display:block">بدّل الحساب</button>`
       : acc.state === "picker" ? `اختر الحساب المحدد: <b>${esc(req.account.group)}</b> ← ${esc(req.account.role)}`
       : `الحساب المطلوب: <b>${esc(req.account.group)}</b> ← ${esc(req.account.role)}`;
-    const keys = ["idNumber", "dob", "patientName", "patientNameEn", "phone",
+    const keys = ["idNumber", "dob", "patientName", "phone",
       ...(req.type === "attendance" ? ["visitDate"] : ["leaveStart", "leaveEnd", "leaveDays"]),
       ...(req.type === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : []),
-      "fileNo", "doctorAr", "doctorName", "stampDoctor", "reason", "nationality", "ref"].filter(k => req[k]);
+      "fileNo", "doctorAr", "doctorName", "stampDoctor", "ref"].filter(k => req[k]);
     b.innerHTML = `
       <div class="card">
         <div class="nm">${esc(req.patientName)}</div>
@@ -499,7 +500,6 @@
       <label class="tg"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية لما تظهر خانات جديدة</label>
       <div class="note">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div>
-      <div><div class="lbl">رقم الإجازة في صحة (PSL…)</div><input class="psl" id="psl" placeholder="PSL…" value="${esc(newestPsl)}"></div>
       <button class="btn ok2" id="done">تم الرفع — حدّث لوحة سابا</button>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     $("#fill").onclick = async () => {
@@ -521,7 +521,7 @@
     };
     $("#closeReq").onclick = () => chrome.storage.local.remove("sabaReq");
     $("#done").onclick = () => {
-      const psl = $("#psl").value.trim();
+      const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
       doneIds = [...doneIds, req.id].slice(-300);
       chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() }, sabaDoneIds: doneIds }, () => {
         chrome.storage.local.remove("sabaReq");
