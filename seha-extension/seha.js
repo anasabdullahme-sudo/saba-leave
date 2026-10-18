@@ -15,7 +15,7 @@
   const DATE_FMT_STEP1 = "DD/MM/YYYY";     // الخطوة 1: 28/05/1999
   const TYPE_LABEL = {                      // نوع الإجازة في صحة لكل نوع طلب في سابا
     sick: "إجازة مرضية اعتيادية",
-    companion: "إجازة مرافق",
+    companion: "إجازة مرضية اعتيادية/إجازة مرافق",   // (مو «إجازة مرافق» لحالها)
     attendance: "مشهد مراجعة",
   };
   const ID_TYPE = { "1": "مواطن", "2": "مقيم" };
@@ -97,6 +97,14 @@
     { key: "companionDob",  re: /الميلاد\/?\s*ميلادي/, not: /المريض/, nth: 1, val: G("companionDob", DATE_FMT_STEP1), skipIf: onlyComp },
     { key: "companionDob",  re: /الميلاد\/?\s*هجري/, not: /المريض/, nth: 1, val: H("companionDob", DATE_FMT_STEP1), hijri: true, skipIf: onlyComp },
     { key: "relationship",  re: /طبيعه المرافق/, selectOnly: true, skipIf: onlyComp },
+    // الصفحة الثانية في «مرضية اعتيادية/مرافق»: قسم المرافقة بعد التوصيات (نفس العناوين مرة ثانية)
+    { key: "leaveDays",     re: /مرافقه لمده/, skipIf: onlyComp },
+    { key: "leaveStart",    re: /^من تاريخ ميلادي/, nth: 1, val: G("leaveStart"), skipIf: onlyComp },
+    { key: "leaveStart",    re: /^من تاريخ هجري/, nth: 1, val: H("leaveStart"), hijri: true, skipIf: onlyComp },
+    { key: "phone",         re: /^رقم الجوال/, nth: 1, skipIf: onlyComp, val: (r, el) => {
+        const p = String(r.phone || "").replace(/\D/g, "").replace(/^966/, "").replace(/^0/, "");
+        const has966 = /966/.test(el.parentElement?.textContent || "") || /966/.test(el.closest("div")?.parentElement?.textContent || "");
+        return has966 || el.maxLength === 9 ? p : "0" + p; } },
   ];
   const FIELD_LABELS = {
     idNumber: "رقم الهوية", fileNo: "رقم الملف", dob: "تاريخ الميلاد", patientName: "اسم المريض", patientNameEn: "الاسم بالإنجليزي", phone: "الجوال",
