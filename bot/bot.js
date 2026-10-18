@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.4.0";
+const VERSION = "1.4.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -146,6 +146,7 @@ const trackKey = (id, phone) => crypto.createHash("sha256").update(`saba-track|$
 const ms = t => t?.toMillis?.() || 0;
 const isDupe = r => r.status === "done" && /^مكرر تلقائياً/.test(r.doneBy || "");
 const TYPE_AR = { sick: "إجازتك المرضية", companion: "إجازة المرافق", attendance: "مشهد المراجعة" };
+const FIELD_AR = { patientName: "الاسم", idNumber: "رقم الهوية", dob: "تاريخ الميلاد", phone: "رقم الجوال", leaveStart: "بداية الإجازة", leaveEnd: "نهاية الإجازة", visitDate: "تاريخ الحضور", companionName: "اسم المرافق", companionId: "هوية المرافق", companionDob: "ميلاد المرافق", relationship: "صلة القرابة", photo: "صورة التقرير" };
 const TYPE_SHORT = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد مراجعة" };
 
 /* ---------- مزامنة صفحة «تابع طلبك» ---------- */
@@ -241,10 +242,13 @@ async function onIncoming(m) {
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
   const now = Date.now();
   if (now - (lastReply.get(jid) || 0) < 20000) return;                 // رد واحد كل 20 ثانية لنفس الشخص
-  const senderPhone = normPhone(String(jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "")).split(/[:@]/)[0]);
+  let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
+  if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
+  const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
   const t = latin(text).toUpperCase();
   const recentOut = Math.max(lastOut.get(jid) || 0, senderPhone ? lastOut.get(senderPhone) || 0 : 0);
-  if (normMsg(text).length <= 30 && PLEASANT.test(normMsg(text)) && now - recentOut < 48 * 3600e3) return;   // «وعليكم السلام / تمام / شكراً» بعد رسالتنا → بدون رد
+  const pleasant = normMsg(text).length <= 30 && PLEASANT.test(normMsg(text));     // «وعليكم السلام / تمام / شكراً»
+  const afterUs = now - recentOut < 48 * 3600e3;
 
   let doc = null;
   const refM = t.match(/SB-?\s?([A-Z0-9]{5})\b/);
@@ -262,6 +266,7 @@ async function onIncoming(m) {
     doc = s.docs.sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
   }
   if (!doc) {
+    if (pleasant && afterUs) return;
     if (now - (lastReply.get(jid + "#help") || 0) < 6 * 3600e3) return;   // رسالة المساعدة مرة كل 6 ساعات
     lastReply.set(jid + "#help", now);
     return reply(jid, `أهلاً 👋 هذا الرقم الآلي لمتابعة طلبات الإجازات في عيادات سابا.\n\nأرسل *رقم طلبك* (يبدأ بـ SB-) وأعطيك حالته فوراً.\n\nأو تابع طلبك من هنا:\n${SITE_URL}?track`);
@@ -277,6 +282,20 @@ async function onIncoming(m) {
   const hi = name ? `أهلاً ${name}` : "أهلاً";
   const kind = TYPE_AR[r.type] || "طلبك";
   const tail = `\n\nتابع طلبك: ${SITE_URL}?track`;
+
+  // عنده تعديل مفتوح؟ أي رد منه (حتى «وعليكم السلام») → نذكّره يعدّل من الرابط
+  if (r.status === "held" && r.fixToken) {
+    const f = await db.doc(`fixes/${r.fixToken}`).get();
+    if (f.exists && f.get("status") === "open") {
+      if (!pleasant) await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: text.slice(0, 160) }).catch(() => {});
+      const nk = jid + "#fix" + r.fixToken;
+      if (pleasant && now - (lastReply.get(nk) || 0) < 6 * 3600e3) return;     // ذكّرناه قبل شوي — «تمام» ثانية ما تحتاج رد
+      lastReply.set(nk, now);
+      const flds = (f.get("fields") || []).map(k => FIELD_AR[k] || k).join("، ");
+      return reply(jid, `${/سلام/.test(text) ? "وعليكم السلام ورحمة الله 🌷\n" : ""}${hi}، باقي خطوة بسيطة عشان نرفع ${kind}:\nنحتاج تعدّل${flds ? ` (${flds})` : " بياناتك"} من هالرابط 👇\n${SITE_URL}?fix=${r.fixToken}\n\nأول ما ترسل التعديل نكمل الرفع على طول.`, senderPhone);
+    }
+  }
+  if (pleasant && afterUs) return;                                      // سلام/شكر بعد رسالتنا وما عنده شي مطلوب → بدون رد
 
   if (r.status === "done") {
     let reminded = false;
