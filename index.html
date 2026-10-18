@@ -308,7 +308,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits } from "./shared.js?v=20261018i";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits } from "./shared.js?v=20261018j";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -520,7 +520,7 @@ async function onPhoto(file) {
   const blob = isPdf ? file : await compressImage(file);
   // صيغة ما يفتحها المتصفح (مثل HEIC أو ملف مو صورة) → نوقف هنا بدل ما يفشل الإرسال آخر شي
   if (!isPdf && (blob === file || blob.type !== "image/jpeg")) return toast("ما قدرنا نفتح هالصورة. صوّر التقرير بالكاميرا مباشرة، أو اختر صورة JPG", 4500);
-  state.blob = blob; state.imagePath = null; state.ai = {};
+  state.blob = blob; state.imagePath = null; state.ai = {}; state.notLeave = false; $("#note").style.cssText = "";
   state.preview = isPdf ? "" : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(""); fr.readAsDataURL(blob); });
   $("#shotImg").src = state.preview || "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0b2b47"/><text x="200" y="110" fill="#7FD0F0" font-size="22" text-anchor="middle" font-family="sans-serif">PDF</text></svg>');
   await apiReady;
@@ -555,6 +555,15 @@ async function onPhoto(file) {
       $("#note").classList.add("on");
       $("#undoType").onclick = () => { setType(switched); renderForm(); fillFromAI(state.ai); $("#note").classList.remove("on"); };
     }
+    // مو تقرير إجازة (وصفة علاج، تحليل، فاتورة…) → ما نقبله
+    state.notLeave = r?.document_kind === "other" || r?.quality === "not_document";
+    if (state.notLeave) {
+      $("#note").innerHTML = `<b>هذي مو ورقة إجازة</b> (مثل وصفة العلاج أو التحاليل). صوّر <b>تقرير الإجازة المرضية</b> (أو المشهد) اللي عليه ختم الطبيب، من زر «إعادة التصوير».`;
+      $("#note").style.cssText = "background:#FDECEC;color:#B4232A"; $("#note").classList.add("on");
+      setStatus("هذي مو ورقة إجازة — صوّر التقرير الصحيح", "warn");
+      return;
+    }
+    $("#note").style.cssText = "";
     if (r?.quality && r.quality !== "good") {
       const msg = { blurry: "الصورة غير واضحة. يُفضّل تعيد التصوير بإضاءة أفضل.", cropped: "جزء من الورقة خارج الصورة. صوّرها كاملة.", not_document: "ما قدرنا نتعرف على تقرير طبي في الصورة. تأكد إنك صوّرت التقرير الصحيح." }[r.quality];
       $("#note").textContent = msg; $("#note").classList.add("on");
@@ -627,6 +636,7 @@ function fillFromAI(r) {
 $("#form").addEventListener("submit", async e => {
   e.preventDefault();
   if (state.sending) return;                     // يمنع الإرسال المكرر (ضغطتين أو Enter)
+  if (state.notLeave) { $("#note").scrollIntoView({ block: "center", behavior: "smooth" }); return toast("هذي مو ورقة إجازة — صوّر تقرير الإجازة من «إعادة التصوير»", 4000); }
   const fd = Object.fromEntries(new FormData($("#form")));
   const bad = [];
   for (const [k, v] of Object.entries(fd)) {

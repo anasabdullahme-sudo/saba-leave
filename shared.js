@@ -327,7 +327,7 @@ OUTPUT RULES:
 - stamp_doctor_name: the name on the stamp, or "" if no stamp/unreadable.
 - doctor_id: match the printed physician to the list below (any spelling, ignore titles like Dr./د./استشاري). stamp_doctor_id: same for the stamp. Use "" when no clear match — a shared first name alone is NOT a match.
 ${list}
-- document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise.
+- document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise — IMPORTANT: a drug prescription (Drug Prescription / وصفة طبية / وصفة علاجية, a list of medicines with dosage), lab or radiology results, an invoice/receipt, an appointment card, a referral, or any medical report that does NOT grant leave days is "other", even if it shows the patient and doctor details.
 - For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
 - For attendance: visit_date = the visit date.
 - quality: "good", "blurry" (text hard to read), "cropped" (key fields cut off), or "not_document".`;
