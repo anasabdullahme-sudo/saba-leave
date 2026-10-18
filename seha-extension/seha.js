@@ -60,7 +60,9 @@
   const G = (k, f) => r => fmtDate(r[k], f);                    // ميلادي
   const H = (k, f) => r => fmtDate(toHijriDmy(r[k]), f);        // هجري
   const startOf = r => r.type === "attendance" ? (r.visitDate || r.leaveStart) : r.leaveStart;
-  const entryOf = r => r.submitDate || startOf(r);
+  // تاريخ الدخول/الخروج: لو رفع الطلب بنفس يوم الإجازة أو بعدها → يوم الإجازة نفسه، ولو رفعه قبلها → يوم الرفع
+  const dkey = d => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ""); return m ? +(m[3] + m[2] + m[1]) : 0; };
+  const entryOf = r => { const st = startOf(r), sub = r.submitDate; if (!sub || !dkey(sub)) return st; if (!dkey(st)) return sub; return dkey(sub) >= dkey(st) ? st : sub; };
   const notAtt = r => r.type === "attendance", onlyAtt = r => r.type !== "attendance", onlyComp = r => r.type !== "companion";
   const RULES = [
     // الخطوة 1
