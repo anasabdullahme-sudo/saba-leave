@@ -369,12 +369,26 @@
   <style>
     :host{all:initial}
     *{box-sizing:border-box;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif}
-    .p{direction:rtl;width:340px;max-height:78vh;display:flex;flex-direction:column;background:#fff;color:#0B2B47;border:1px solid #DCEBF4;border-radius:18px;box-shadow:0 18px 50px -12px rgba(0,55,101,.35);overflow:hidden}
-    .h{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#003765;color:#fff;cursor:pointer;user-select:none}
+    .p{direction:rtl;width:310px;max-height:72vh;display:flex;flex-direction:column;background:#fff;color:#0B2B47;border:1px solid #DCEBF4;border-radius:18px;box-shadow:0 18px 50px -12px rgba(0,55,101,.35);overflow:hidden}
+    .h{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#003765;color:#fff;cursor:grab;user-select:none;touch-action:none}
+    .h.drag{cursor:grabbing}
+    .h .grip{opacity:.55;font-size:13px;letter-spacing:-2px}
     .h b{font-size:14px;flex:1}
     .h .dot{width:9px;height:9px;border-radius:50%;background:#7FD0F0}
     .h button{all:unset;cursor:pointer;color:#BFE6F7;font-size:18px;line-height:1;padding:0 4px}
-    .b{padding:12px;overflow:auto;display:grid;gap:10px}
+    .b{padding:10px;overflow:auto;display:grid;gap:8px}
+    .ft{display:grid;gap:6px;padding:8px 10px 10px;border-top:1px solid #DCEBF4;background:#fff}
+    .min .ft{display:none}
+    .links{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px}
+    .lnk{all:unset;cursor:pointer;color:#0082D4}
+    .lnk:hover{text-decoration:underline}
+    .fx{background:#F6F1FF;color:#5B3CC4;border:1px solid #E3D8FF}
+    .fxbox{border:1px solid #E3D8FF;background:#FBF9FF;border-radius:12px;padding:10px;display:grid;gap:8px}
+    .fxbox .chips{display:flex;flex-wrap:wrap;gap:6px}
+    .fxbox label{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;border:1px solid #DCEBF4;background:#fff;border-radius:999px;padding:4px 9px;cursor:pointer}
+    .fxbox textarea{border-style:solid;border-color:#DCEBF4;min-height:38px}
+    details.data summary{font-size:13px;color:#0B2B47;font-weight:600;padding:4px 0}
+    .card{padding:8px 10px}
     .card{border:1px solid #DCEBF4;border-radius:12px;padding:10px}
     .nm{font-weight:700;font-size:15px}
     .meta{font-size:12.5px;color:#5B7690;margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 10px}
@@ -388,7 +402,7 @@
     .pri{background:linear-gradient(180deg,#1495E4,#0082D4);color:#fff}
     .sec{background:#F5FBFE;color:#0082D4;border:1px solid #DCEBF4}
     .ok2{background:#0E9F6E;color:#fff}
-    #done{position:sticky;bottom:-12px;z-index:2;box-shadow:0 -10px 0 #fff,0 6px 16px -6px rgba(14,159,110,.55)}
+    #done{box-shadow:0 6px 16px -6px rgba(14,159,110,.55)}
     .btn:focus-visible{outline:3px solid #00A6E2;outline-offset:2px}
     .tg{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#5B7690}
     .fl{display:grid;gap:2px}
@@ -420,14 +434,23 @@
     .note{font-size:12px;color:#8A5A12;background:#FFF7EA;border-radius:8px;padding:6px 8px}
   </style>
   <div class="p" id="p">
-    <div class="h" id="hd"><span class="dot"></span><b>سابا ← صحة<span class="cnt" id="cnt" hidden></span></b><button id="min" title="تصغير">–</button></div>
+    <div class="h" id="hd" title="اسحب لتحريك اللوحة — اضغط للتصغير"><span class="grip">⋮⋮</span><span class="dot"></span><b>سابا ← صحة<span class="cnt" id="cnt" hidden></span></b><button id="min" title="تصغير">–</button></div>
     <div class="b" id="body"></div>
+    <div class="ft" id="foot" hidden></div>
   </div>`;
   const $ = s => root.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
-  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [];
+  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [], showFields = false, fixOpen = false;
+  const FIX_FIELDS = [
+    { k: "patientName", ar: "الاسم" }, { k: "idNumber", ar: "الهوية" }, { k: "dob", ar: "الميلاد" }, { k: "phone", ar: "الجوال" },
+    { k: "leaveStart", ar: "بداية الإجازة", types: ["sick", "companion"] }, { k: "leaveEnd", ar: "نهاية الإجازة", types: ["sick", "companion"] },
+    { k: "visitDate", ar: "تاريخ الحضور", types: ["attendance"] },
+    { k: "companionName", ar: "اسم المرافق", types: ["companion"] }, { k: "companionId", ar: "هوية المرافق", types: ["companion"] },
+    { k: "companionDob", ar: "ميلاد المرافق", types: ["companion"] }, { k: "relationship", ar: "القرابة", types: ["companion"] },
+    { k: "photo", ar: "صورة التقرير" },
+  ];
   // الطلب «نشط» لما يكون انرسل من لوحة سابا قريب — غير كذا الإضافة ما تتحرك لحالها (عشان لو دخلت صحة بس تتأكد من سكليف)
   const reqAge = () => req ? Date.now() - (req.sentAt || 0) : Infinity;
   const navActive = () => !!req && reqAge() < 5 * 60000;
@@ -464,6 +487,7 @@
     const b = $("#body");
     updateCount();
     if (!req) {
+      $("#foot").hidden = true; fixOpen = false;
       const cur = norm(currentAccountText()), pend = pendingQ();
       const here = q => q.account && cur && cur.includes(norm(q.account.key));
       pend.sort((a, b) => here(b) - here(a));
@@ -489,19 +513,51 @@
       ...(req.type === "attendance" ? ["visitDate"] : ["leaveStart", "leaveEnd", "leaveDays"]),
       ...(req.type === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : []),
       "fileNo", "doctorAr", "doctorName", "stampDoctor", "ref"].filter(k => req[k]);
+    const okN = keys.filter(k => lastReport[k] === "ok").length;
+    const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(req.type));
     b.innerHTML = `
       <div class="card">
         <div class="nm">${esc(req.patientName)}</div>
-        <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>نوع صحة: ${esc(TYPE_LABEL[req.type] || "")}</span></div>
+        <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>${esc(req.ref || "")}</span></div>
       </div>
       <div class="acc ${acc.state}">${accTxt}</div>
-      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button><button class="btn sec" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق</button></div>
-      <button class="btn sec" id="diag" style="flex:none;height:30px;line-height:30px;font-size:12px">نسخ تقرير فني (لو ما تعبّت الخانات)</button>
-      <label class="tg"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية لما تظهر خانات جديدة</label>
-      <div class="note">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
-      <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div>
-      <button class="btn ok2" id="done">تم الرفع — حدّث لوحة سابا</button>
+      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button></div>
+      <div class="links"><label class="tg" style="font-size:12px"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية</label><button class="lnk" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق الطلب</button><button class="lnk" id="diag">تقرير فني</button></div>
+      ${fixOpen ? `<div class="fxbox" id="fxbox"><b style="font-size:13px">وش الغلط؟ (البوت يرسل للمريض واتساب)</b>
+          <div class="chips">${fxFields.map(f => `<label><input type="checkbox" value="${f.k}">${f.ar}</label>`).join("")}</div>
+          <textarea id="fxNote" maxlength="200" placeholder="ملاحظة للمريض (اختياري)"></textarea>
+          <div class="row"><button class="btn fx" id="fxSend" style="background:#5B3CC4;color:#fff">أرسل للمريض</button><button class="btn sec" id="fxCancel">إلغاء</button></div></div>` : ""}
+      <details class="data" id="data" ${showFields ? "open" : ""}><summary>البيانات (${keys.length})${okN ? ` — ✓ ${okN} تعبّت` : ""}</summary>
+      <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div></details>
+      <div class="tiny">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
+    const foot = $("#foot"); foot.hidden = false;
+    foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة سابا</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
+    $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
+    const fo = $("#fxOpen"); if (fo) fo.onclick = () => { fixOpen = true; render(); };
+    if (fixOpen) {
+      setTimeout(() => $("#fxSend")?.scrollIntoView({ block: "nearest" }), 30);
+      $("#fxCancel").onclick = () => { fixOpen = false; render(); };
+      $("#fxSend").onclick = async () => {
+        const fields = [...root.querySelectorAll("#fxbox input:checked")].map(i => i.value);
+        if (!fields.length) return toastLocal("اختر الخانة الغلط");
+        const btn = $("#fxSend"); btn.disabled = true; btn.textContent = "يرسل…";
+        const at = Date.now(), r0 = req;
+        await chrome.storage.local.set({ sabaFixReq: { id: req.id, ref: req.ref, fields, note: $("#fxNote").value.trim(), at } });
+        const res = await new Promise(resolve => {
+          const tm = setTimeout(() => { chrome.storage.onChanged.removeListener(l); resolve(null); }, 9000);
+          const l = (ch, area) => { const v = ch.sabaFixRes?.newValue; if (area === "local" && v && v.at === at) { clearTimeout(tm); chrome.storage.onChanged.removeListener(l); resolve(v); } };
+          chrome.storage.onChanged.addListener(l);
+        });
+        if (!res) { btn.disabled = false; btn.textContent = "أرسل للمريض"; return toastLocal("لوحة سابا لازم تكون مفتوحة في تبويب ثاني"); }
+        if (!res.ok) { btn.disabled = false; btn.textContent = "أرسل للمريض"; return toastLocal(res.msg || "ما انرسل"); }
+        fixOpen = false;
+        toastLocal(res.auto ? "✓ البوت بيرسل للمريض — الطلب صار «معلّق»" : "البوت مو متصل — أرسلها من لوحة سابا");
+        if (!res.auto && res.wa) window.open(res.wa, "_blank");
+        doneIds = [...doneIds, r0.id].slice(-300);
+        chrome.storage.local.set({ sabaDoneIds: doneIds }, () => chrome.storage.local.remove("sabaReq"));
+      };
+    }
     $("#fill").onclick = async () => {
       if (isSearchPage(norm(deepText()))) { openAddForm(true); return; }
       const r = fill(req, { explicit: true });
@@ -556,7 +612,25 @@
     let t = $("#t"); if (!t) { t = document.createElement("div"); t.id = "t"; t.style.cssText = "position:absolute;bottom:100%;left:0;margin-bottom:8px;background:#003765;color:#fff;padding:8px 12px;border-radius:10px;font-size:13px;direction:rtl;white-space:nowrap"; $("#p").parentNode.append(t); }
     t.textContent = msg; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 2200);
   }
-  $("#hd").onclick = () => { setMin(!minimized); if (!minimized) render(); };
+  // سحب اللوحة من رأسها لأي مكان (وتنحفظ)، والضغط بدون سحب = تصغير/تكبير
+  const clampPos = (x, y) => [Math.max(4, Math.min(innerWidth - 60, x)), Math.max(4, Math.min(innerHeight - 40, y))];
+  function placeAt(x, y) { [x, y] = clampPos(x, y); host.style.left = x + "px"; host.style.top = y + "px"; host.style.bottom = "auto"; }
+  {
+    const hd = $("#hd"); let st = null;
+    hd.addEventListener("pointerdown", e => { if (e.button !== 0) return; const r = host.getBoundingClientRect(); st = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false }; hd.setPointerCapture(e.pointerId); });
+    hd.addEventListener("pointermove", e => {
+      if (!st) return; const dx = e.clientX - st.x, dy = e.clientY - st.y;
+      if (!st.moved && Math.hypot(dx, dy) < 5) return;
+      st.moved = true; hd.classList.add("drag"); placeAt(st.l + dx, st.t + dy);
+    });
+    hd.addEventListener("pointerup", () => {
+      if (!st) return; const moved = st.moved; st = null; hd.classList.remove("drag");
+      if (moved) { const r = host.getBoundingClientRect(); chrome.storage.local.set({ sabaPos: { x: r.left, y: r.top } }); return; }
+      setMin(!minimized); if (!minimized) render();
+    });
+    hd.addEventListener("dblclick", () => { host.style.left = "16px"; host.style.top = "auto"; host.style.bottom = "16px"; chrome.storage.local.remove("sabaPos"); });
+    addEventListener("resize", () => { if (host.style.top && host.style.top !== "auto") placeAt(parseFloat(host.style.left), parseFloat(host.style.top)); });
+  }
 
   // ---------- استلام الطلب عن طريق اسم النافذة (احتياط لو الجسر ما اشتغل) ----------
   try {
@@ -622,8 +696,9 @@
   setInterval(() => { if (TOP && auto && navActive() && !document.hidden) openAddForm(); }, 2000);
 
   // ---------- تشغيل ----------
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaDoneIds"], d => {
-    req = d.sabaReq || null; auto = d.sabaAuto !== false;
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaDoneIds", "sabaPos", "sabaShowFields"], d => {
+    req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields;
+    if (TOP && d.sabaPos) placeAt(d.sabaPos.x, d.sabaPos.y);
     queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; doneIds = d.sabaDoneIds || [];
     if (req && !fillActive()) { req = null; if (TOP) chrome.storage.local.remove("sabaReq"); }   // طلب قديم → نتجاهله
     setMin(!req);                                                                             // بدون طلب: اللوحة مصغّرة وما تزعج
@@ -639,7 +714,7 @@
     if (ch.sabaQueue) { queue = ch.sabaQueue.newValue?.items || []; queueAt = ch.sabaQueue.newValue?.at || 0; if (!req && !minimized) render(); else updateCount(); }
     if (ch.sabaDoneIds) doneIds = ch.sabaDoneIds.newValue || [];
     if (ch.sabaReq) {
-      req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = "";
+      req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
       if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
       else { setMin(!pendingQ().length); render(); }                    // بعد «تم الرفع»: قائمة الطلبات التالية، أو تتصغّر لو ما فيه
     }

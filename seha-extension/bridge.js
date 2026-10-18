@@ -29,6 +29,24 @@
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaDone?.newValue) forwardDone(); });
 
+  // طلب تعديل من داخل صحة → لوحة سابا (تبويب واحد بس يتكفّل فيه)
+  const TAB = Math.random().toString(36).slice(2);
+  chrome.storage.onChanged.addListener(async (ch, area) => {
+    const fr = area === "local" && ch.sabaFixReq?.newValue; if (!fr || !isBoard()) return;
+    const { sabaFixClaim: c } = await chrome.storage.local.get("sabaFixClaim");
+    if (c && c.at === fr.at) return;                                   // تبويب ثاني أخذه
+    await chrome.storage.local.set({ sabaFixClaim: { at: fr.at, tab: TAB } });
+    await new Promise(r => setTimeout(r, 120));
+    const { sabaFixClaim: c2 } = await chrome.storage.local.get("sabaFixClaim");
+    if (c2?.tab !== TAB) return;
+    post({ type: "SABA_FIX_REQ", ...fr });
+  });
+  window.addEventListener("message", e => {
+    if (e.source !== window || e.data?.type !== "SABA_FIX_RES") return;
+    const { type, ...res } = e.data;
+    chrome.storage.local.set({ sabaFixRes: res }); chrome.storage.local.remove("sabaFixReq");
+  });
+
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce); else announce();
   setTimeout(announce, 1500);
 })();

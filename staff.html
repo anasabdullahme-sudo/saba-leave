@@ -1090,6 +1090,29 @@ async function applyAnswered(f) {
   } catch (e) { console.warn("applyFix", e); applying.delete(f.id); }
 }
 
+// طلب تعديل جاي من لوحة الإضافة داخل صحة → ننشئه هنا والبوت يرسله
+async function handleExtFix(m) {
+  const reply = r => window.postMessage({ type: "SABA_FIX_RES", at: m.at, ...r }, location.origin);
+  const x = S.pending.find(r => r.id === m.id) || S.held.find(r => r.id === m.id);
+  if (!x) return reply({ ok: false, msg: "الطلب مو موجود بالانتظار (يمكن انرفع أو انحذف)" });
+  if (!waPhone(x.phone)) return reply({ ok: false, msg: "رقم جوال المريض غير صحيح — صحّحه من اللوحة" });
+  const fields = (Array.isArray(m.fields) ? m.fields : []).filter(k => fixFieldsFor(x.type).some(f => f.k === k));
+  if (!fields.length) return reply({ ok: false, msg: "اختر الخانة الغلط" });
+  const note = String(m.note || "").slice(0, 200), by = myName();
+  const values = {}; fields.forEach(k => { if (k !== "photo" && x[k]) values[k] = x[k]; });
+  try {
+    const auto = botOnline(), id = api.newFixId();
+    const message = fixMessage({ name: x.patientName, ref: x.ref, type: x.type, fields, note, link: fixLink(id) });
+    await api.createFix(x, { fields, values, note, by, message, sendStatus: auto ? "queued" : "manual" }, id);
+    Object.assign(x, { status: "held", holdReason: "data", holdNote: note || "بانتظار تعديل المريض", fixToken: id });
+    S.pending = S.pending.filter(r => r.id !== x.id); if (!S.held.some(r => r.id === x.id)) S.held.push(x);
+    if (S.openId === x.id) closeDrawer();
+    renderCounts(); renderPending(); renderHeld(); postQueue();
+    toast(`✎ طلب تعديل لـ ${x.patientName} (من صحة)${auto ? " — البوت يرسله" : " — البوت مو متصل، أرسله يدوي من «معلّق»"}`);
+    reply({ ok: true, auto, wa: auto ? "" : `https://wa.me/${waPhone(x.phone)}?text=${encodeURIComponent(message)}` });
+  } catch (e) { console.error(e); reply({ ok: false, msg: "ما قدرت أنشئ طلب التعديل — تأكد من الاتصال" }); }
+}
+
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null;
 function renderExtHint() {
@@ -1132,6 +1155,7 @@ addEventListener("message", async e => {
   if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; renderExtHint(); postQueue(); }
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
+  if (m.type === "SABA_FIX_REQ") handleExtFix(m);
 });
 let doneMsgQueue = null;
 async function handleSehaDone(m) {
