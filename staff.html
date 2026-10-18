@@ -401,7 +401,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits } from "./shared.js?v=20261018f";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits } from "./shared.js?v=20261018g";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -421,7 +421,7 @@ const S = {
 };
 if (!BRANCHES.some(b => b.id === S.branch)) S.branch = BRANCHES[0].id;
 
-$("#sehaTop").href = SEHA_URL; $("#sehaDrawer").href = SEHA_URL;
+$("#sehaTop").href = SEHA_URL; $("#sehaDrawer").href = SEHA_URL; $("#sehaTop").target = "saba_seha";
 const api = await backend("staff");
 if (api.demo || api.trial) { $("#demoPill").hidden = false; $("#demoPill").textContent = api.trial ? "نسخة تجربة" : "وضع تجريبي"; }
 if (api.trial) $("#btnOut").hidden = true;
@@ -1145,9 +1145,17 @@ function postQueue() {
 $("#sehaDrawer").addEventListener("click", e => {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
   const payload = sehaPayload(x);
-  // احتياط: نمرر الطلب عن طريق اسم النافذة الجديدة (يوصل للإضافة حتى لو الجسر ما اشتغل)
-  try { const w = window.open(SEHA_URL, "SABA_SEHA:" + JSON.stringify(payload)); if (w) e.preventDefault(); } catch {}
+  e.preventDefault();
   window.postMessage({ type: "SABA_SEHA_FILL", payload }, location.origin);
+  if (extVersion) {
+    // تبويب صحة واحد نعيد استخدامه: لو مفتوح ننتقل له بدون إعادة تحميل (الإضافة تفتح النموذج لحالها)
+    let w = null; try { w = window.open("", "saba_seha"); } catch {}
+    if (w) { let blank = false; try { blank = w.location.href === "about:blank"; } catch { /* تبويب صحة موجود */ } if (blank) w.location.href = SEHA_URL; try { w.focus(); } catch {} }
+    else window.open(SEHA_URL, "_blank");
+  } else {
+    // بدون الإضافة الجديدة: نمرر الطلب في اسم النافذة (احتياط)
+    try { window.open(SEHA_URL, "SABA_SEHA:" + JSON.stringify(payload)); } catch {}
+  }
   copyText("SABA_SEHA:" + JSON.stringify(payload)).catch(() => {}); // احتياط: لصق يدوي داخل الإضافة
 });
 addEventListener("message", async e => {
@@ -1157,6 +1165,7 @@ addEventListener("message", async e => {
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
+  if (m.type === "SABA_SEHA_ALERT") { chime(); toast(`⚠ صحة غيّرت شي في النموذج: ${(m.labels || []).join("، ") || "خانات ما تتعبّى"} — من قائمة الإضافة اضغط «تقرير فني» وأرسله لـ Claude`, "تمام", () => {}); }
 });
 let doneMsgQueue = null;
 async function handleSehaDone(m) {

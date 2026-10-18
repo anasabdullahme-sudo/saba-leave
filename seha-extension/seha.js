@@ -207,6 +207,26 @@
       if (!hijriPass) report[rule.key] = norm(c.value) === norm(val) ? "ok" : "check";
     }
   }
+  // ---------- مراقبة تحديثات صحة: خانة إلزامية جديدة ما نعرفها → تنبيه ----------
+  // أول 3 أيام نتعلّم الخانات الموجودة بهدوء، وبعدها أي خانة إلزامية جديدة تطلع تنبيه (مرة وحدة لكل خانة)
+  const HANDLED = [/نوع الاجازه/, /نوع الهويه/, /الطبيب|الممارس/, /الجنس|الجنسيه|التشخيص|الملاحظات|سبب/];
+  let healthAt = 0;
+  async function healthCheck() {
+    if (Date.now() - healthAt < 15000) return; healthAt = Date.now();
+    if (!isFormPage(norm(deepText()))) return;
+    const reqLabs = labelCandidates().filter(x => /\*/.test(x.el.textContent || "") && x.t.length > 2 && x.t.length < 45).map(x => x.t);
+    const labs = [...new Set(reqLabs)];
+    if (!labs.length) return;
+    const { sabaKnown: k } = await chrome.storage.local.get("sabaKnown");
+    const known = k || { since: Date.now(), list: [] };
+    const fresh = labs.filter(t => !known.list.includes(t));
+    if (!fresh.length && k) return;
+    const learning = Date.now() - known.since < 3 * 86400000;
+    const unknown = fresh.filter(t => !RULES.some(r => r.re.test(t)) && !HANDLED.some(re => re.test(t)));
+    known.list = [...new Set([...known.list, ...fresh])].slice(-300);
+    await chrome.storage.local.set({ sabaKnown: known });
+    if (!learning && unknown.length) chrome.storage.local.set({ sabaAlert: { at: Date.now(), labels: unknown.slice(0, 5), url: location.href.slice(0, 120) } });
+  }
   // صفحة البحث (فيها زر «إضافة إجازة مرضية») مو النموذج — ما نعبّي فيها شي
   const isSearchPage = t => /بحث عن اجازه مرضيه|نتائج البحث/.test(t);
   const isFormPage = t => !isSearchPage(t) && (/نوع الاجازه/.test(t) || /معلومات مقدم طلب|التوصيات/.test(t));
@@ -442,7 +462,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
-  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [], showFields = false, fixOpen = false;
+  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [], showFields = false, fixOpen = false, sehaAlert = null;
   const FIX_FIELDS = [
     { k: "patientName", ar: "الاسم" }, { k: "idNumber", ar: "الهوية" }, { k: "dob", ar: "الميلاد" }, { k: "phone", ar: "الجوال" },
     { k: "leaveStart", ar: "بداية الإجازة", types: ["sick", "companion"] }, { k: "leaveEnd", ar: "نهاية الإجازة", types: ["sick", "companion"] },
@@ -514,12 +534,14 @@
       ...(req.type === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : []),
       "fileNo", "doctorAr", "doctorName", "stampDoctor", "ref"].filter(k => req[k]);
     const okN = keys.filter(k => lastReport[k] === "ok").length;
+    const alertHtml = sehaAlert ? `<div class="acc wrong" style="font-weight:600">⚠ صحة أضافت خانة جديدة: ${esc(sehaAlert.labels.join("، "))}<br><span style="font-weight:400">اضغط «تقرير فني» وأرسله لـ Claude عشان أحدّث الإضافة.</span> <button class="lnk" id="alertOk">تمام</button></div>` : "";
     const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(req.type));
     b.innerHTML = `
       <div class="card">
         <div class="nm">${esc(req.patientName)}</div>
         <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>${esc(req.ref || "")}</span></div>
       </div>
+      ${alertHtml}
       <div class="acc ${acc.state}">${accTxt}</div>
       <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button></div>
       <div class="links"><label class="tg" style="font-size:12px"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية</label><button class="lnk" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق الطلب</button><button class="lnk" id="diag">تقرير فني</button></div>
@@ -534,6 +556,7 @@
     const foot = $("#foot"); foot.hidden = false;
     foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة سابا</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
     $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
+    const ao = $("#alertOk"); if (ao) ao.onclick = () => { sehaAlert = null; chrome.storage.local.remove("sabaAlert"); render(); };
     const fo = $("#fxOpen"); if (fo) fo.onclick = () => { fixOpen = true; render(); };
     if (fixOpen) {
       setTimeout(() => $("#fxSend")?.scrollIntoView({ block: "nearest" }), 30);
@@ -696,8 +719,8 @@
   setInterval(() => { if (TOP && auto && navActive() && !document.hidden) openAddForm(); }, 2000);
 
   // ---------- تشغيل ----------
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaDoneIds", "sabaPos", "sabaShowFields"], d => {
-    req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields;
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaDoneIds", "sabaPos", "sabaShowFields", "sabaAlert"], d => {
+    req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
     if (TOP && d.sabaPos) placeAt(d.sabaPos.x, d.sabaPos.y);
     queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; doneIds = d.sabaDoneIds || [];
     if (req && !fillActive()) { req = null; if (TOP) chrome.storage.local.remove("sabaReq"); }   // طلب قديم → نتجاهله
@@ -711,6 +734,7 @@
     if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
+    if (ch.sabaAlert && TOP) { sehaAlert = ch.sabaAlert.newValue || null; if (sehaAlert) { setMin(false); toastLocal("⚠ صحة أضافت خانة جديدة"); } render(); }
     if (ch.sabaQueue) { queue = ch.sabaQueue.newValue?.items || []; queueAt = ch.sabaQueue.newValue?.at || 0; if (!req && !minimized) render(); else updateCount(); }
     if (ch.sabaDoneIds) doneIds = ch.sabaDoneIds.newValue || [];
     if (ch.sabaReq) {
@@ -727,7 +751,7 @@
     if (muts.every(m => host.contains(m.target) || m.target === host)) return;
     clearTimeout(deb);
     deb = setTimeout(() => {
-      scanPsl();
+      scanPsl(); healthCheck();
       if (auto && fillActive()) { fill(req); updateDots(); if (navActive()) openAddForm(); }
       const pslIn = $("#psl"); if (pslIn && newestPsl && !pslIn.value) pslIn.value = newestPsl;
       const acc = $(".acc"); if (req && acc) { const st = accountState(req).state; if (!acc.classList.contains(st)) render(); }

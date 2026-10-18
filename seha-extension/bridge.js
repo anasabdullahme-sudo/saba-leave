@@ -28,6 +28,7 @@
   });
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaDone?.newValue) forwardDone(); });
+  chrome.storage.onChanged.addListener((ch, area) => { const a = area === "local" && ch.sabaAlert?.newValue; if (a && isBoard()) post({ type: "SABA_SEHA_ALERT", labels: a.labels || [], at: a.at }); });
 
   // طلب تعديل من داخل صحة → لوحة سابا (تبويب واحد بس يتكفّل فيه)
   const TAB = Math.random().toString(36).slice(2);

@@ -23,7 +23,7 @@ export const AI_MODEL = "gemini-3.5-flash-lite";   // الأسرع (Ultra fast)
 export const AI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
 export const AI_HEDGE_MS = 6000;  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
-export const SEHA_URL = "https://www.seha.sa/#/Account/Login"; // رابط منصة صحة في لوحة الموظف
+export const SEHA_URL = "https://www.seha.sa/";   // الصفحة الرئيسية (مو صفحة الدخول — فتحها وأنت داخل كان يطلّع الموظف)
 
 export const DEMO = !firebaseConfig.apiKey;
 // الوضع التجريبي مسموح فقط على جهازك أو داخل Claude — على الموقع الحقيقي بدون إعدادات يتوقف بدل ما يحفظ في المتصفح
