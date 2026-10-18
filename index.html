@@ -546,7 +546,7 @@ async function onPhoto(file) {
     const typeFor = { sick_leave: "sick", companion_leave: "companion", attendance: "attendance" };
     const docType = typeFor[r?.document_kind];
     let switched = null;
-    if (docType && docType !== state.type && r?.quality !== "not_document") {
+    if (docType && docType !== state.type && !(state.type === "companion" && docType === "sick") && r?.quality !== "not_document") {   // اختار مرافق؟ ما نحوّله لمرضية
       switched = state.type; setType(docType); renderForm(); setLoading(true);
     }
     fillFromAI(state.ai);

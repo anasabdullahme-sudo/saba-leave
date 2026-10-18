@@ -957,7 +957,8 @@ function reroute(list) {
       }
     }
     const kt = KIND_TYPE[x.docKind];
-    if (kt && kt !== x.type && !x.typeManual && x.aiQuality !== "not_document" && !retyped.has(x.id)) {
+    // المرافق ما يتحوّل لمرضية أبداً (تقرير المرافق نفسه شكله إجازة مرضية)
+    if (kt && kt !== x.type && !(x.type === "companion" && kt === "sick") && !x.typeManual && x.aiQuality !== "not_document" && !retyped.has(x.id)) {
       retyped.add(x.id);
       api.update(x.id, typePatch(x, kt)).catch(e => console.warn("retype", x.id, e));   // لو القواعد القديمة ما تسمح، نتجاهل بهدوء
     }
