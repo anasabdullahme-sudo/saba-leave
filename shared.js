@@ -263,6 +263,8 @@ export async function trackKey(id, phone) {
   const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`saba-track|${latinDigits(id || "").replace(/\D/g, "")}|${normPhone(phone || "")}`));
   return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
 }
+/** عنوان الورقة فوق لازم يكون إجازة مرضية (أو مشهد) — غير كذا (وصفة، تحليل…) ما ينقبل */
+export const leaveTitleOk = t => !String(t || "").trim() || /sick\s*leave|leave\s*report|medical\s*leave|attendance|visit|حضور|إجاز[ةه]\s*مرضي|اجاز[ةه]\s*مرضي|بإجاز[ةه]|باجاز[ةه]|مشهد|مرافق|companion/i.test(String(t));
 export const makeRef = () => {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return "SB-" + Array.from(crypto.getRandomValues(new Uint8Array(5)), x => a[x % a.length]).join("");
@@ -327,6 +329,7 @@ OUTPUT RULES:
 - stamp_doctor_name: the name on the stamp, or "" if no stamp/unreadable.
 - doctor_id: match the printed physician to the list below (any spelling, ignore titles like Dr./د./استشاري). stamp_doctor_id: same for the stamp. Use "" when no clear match — a shared first name alone is NOT a match.
 ${list}
+- doc_title: the main title printed at the top of the document, exactly as written (Arabic and/or English), e.g. "Sick Leave Report / تقرير بإجازة مرضية" or "Drug Prescription / وصفة طبية".
 - document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise — IMPORTANT: a drug prescription (Drug Prescription / وصفة طبية / وصفة علاجية, a list of medicines with dosage), lab or radiology results, an invoice/receipt, an appointment card, a referral, or any medical report that does NOT grant leave days is "other", even if it shows the patient and doctor details.
 - For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
 - For attendance: visit_date = the visit date.
@@ -357,7 +360,7 @@ function blockPage() {
 /* ------------- نسخة التجربة داخل Claude (قاعدة بيانات + قراءة بـ Claude) ------------- */
 const AI_KEYS = ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
   "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
-  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship"];
+  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title"];
 async function artifactBackend() {
   const [db, sample, assets, user] = await Promise.all(["db", "sample", "assets", "user"].map(n => window.claude.use(n).catch(() => null)));
   if (!db) return null;
@@ -477,7 +480,7 @@ async function liveBackend(role) {
     const props = {};
     ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
      "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
-     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship"].forEach(k => props[k] = S.string());
+     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title"].forEach(k => props[k] = S.string());
     props.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] });
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
     const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
