@@ -62,6 +62,15 @@ service cloud.firestore {
             && ansOk(request.resource.data.answer));
       allow delete: if false;
     }
+    // بصمات الطلبات (تمنع إرسال نفس الطلب بالضبط مرتين) — البصمة hash ما فيها بيانات مقروءة
+    match /dupKeys/{id} {
+      allow get: if request.auth != null;
+      allow create: if request.auth != null && id.matches('^[a-f0-9]{20}$')
+        && request.resource.data.keys().hasOnly(['uid','at'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.at == request.time;
+      allow delete: if isAdmin();
+    }
     // حالة بوت الواتساب (يكتبها البوت من السيرفر) + أوامر المسؤول له
     match /bot/status { allow read: if isStaff(); allow write: if false; }
     match /bot/control { allow read: if isStaff(); allow write: if isAdmin(); }

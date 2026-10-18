@@ -382,7 +382,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage } from "./shared.js?v=20261016";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields } from "./shared.js?v=20261018";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -450,6 +450,7 @@ function start() {
     if (!S.firstLoad && fresh.length) notify(fresh);
     S.firstLoad = false;
     reroute(list);
+    archiveExactDupes(list);
     renderCounts(); renderPending(); renderHeld(); postQueue();
     if (doneMsgQueue) handleSehaDone(doneMsgQueue);
     if (S.openId) {
@@ -581,6 +582,25 @@ $("#lanes").addEventListener("click", e => {
   const r = e.target.closest(".row"); if (r) openDrawer(r.dataset.id);
 });
 $("#lanes").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.classList.contains("row")) openDrawer(e.target.dataset.id); });
+
+/* ---------- الطلبات المكررة تماماً → الأرشيف تلقائياً ----------
+   نفس النوع + الهوية + الميلاد + تواريخ الإجازة بالضبط: نخلي الأقدم، والباقي ينتقل لـ «تم الرفع» مكتوب عليه إنه مكرر */
+const dupeTried = new Set();
+async function archiveExactDupes(list) {
+  const first = new Map();
+  for (const x of [...list].sort((a, b) => a.createdAt - b.createdAt)) {
+    const k = dupFields(x);
+    if (!x.idNumber) continue;
+    if (!first.has(k)) { first.set(k, x); continue; }
+    if (x.status !== "pending" || dupeTried.has(x.id)) continue;
+    dupeTried.add(x.id);
+    const orig = first.get(k);
+    try {
+      await api.markDone(x.id, `مكرر تلقائياً — نفس طلب ${orig.ref || ""}`.trim());
+      toast(`طلب مكرر لـ ${x.patientName} انتقل للأرشيف تلقائياً`);
+    } catch (err) { if (err?.code !== "already_done") console.warn("dupe", err); }
+  }
+}
 
 /* ---------- تم الرفع ---------- */
 async function markDone(id) {

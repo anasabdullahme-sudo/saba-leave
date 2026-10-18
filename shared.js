@@ -226,6 +226,14 @@ export function normPhone(s = "") {
 }
 export const validPhone = p => /^05\d{8}$/.test(normPhone(p));
 export const validId = s => /^[12]\d{9}$/.test(latinDigits(s).replace(/\D/g, ""));
+/* ---------- كشف الطلب المكرر تماماً (نفس النوع والهوية والميلاد وتواريخ الإجازة) ---------- */
+export const dupFields = r => [r.type, latinDigits(r.idNumber || ""), r.dob || "", r.leaveStart || "", r.leaveEnd || "", r.visitDate || "", latinDigits(r.companionId || "")].join("|");
+export async function dupKey(r) {
+  try {
+    const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("saba-dup|" + dupFields(r)));
+    return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
+  } catch { return ""; }
+}
 export const makeRef = () => {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return "SB-" + Array.from(crypto.getRandomValues(new Uint8Array(5)), x => a[x % a.length]).join("");
@@ -500,10 +508,29 @@ async function liveBackend(role) {
       await new Promise((res, rej) => task.on("state_changed", s => onProgress?.(s.bytesTransferred / s.totalBytes), rej, res));
       return path;
     },
-    async createRequest(data) {
+    // نفس الطلب بالضبط مرسل من قبل؟ (بصمة بدون بيانات شخصية مقروءة)
+    async isDuplicate(key) {
+      if (!key) return false;
+      try { await api.ensureAnon(); return (await FS.getDoc(FS.doc(db, "dupKeys", key))).exists(); } catch { return false; }
+    },
+    async createRequest(data, key) {
       const uid = await api.ensureAnon();
       const ref = FS.doc(col);
-      await FS.setDoc(ref, { ...data, uid, status: "pending", createdAt: FS.serverTimestamp() });
+      const payload = { ...data, uid, status: "pending", createdAt: FS.serverTimestamp() };
+      if (key) {
+        try {
+          // الطلب + بصمته مع بعض: لو البصمة موجودة (مكرر) يرفض الاثنين
+          const b = FS.writeBatch(db);
+          b.set(ref, payload);
+          b.set(FS.doc(db, "dupKeys", key), { uid, at: FS.serverTimestamp() });
+          await b.commit(); return ref.id;
+        } catch (e) {
+          if (e?.code !== "permission-denied") throw e;
+          if (await api.isDuplicate(key)) throw Object.assign(new Error("duplicate"), { code: "duplicate" });
+          // قواعد الحماية لسى ما تحدّثت → نرسل الطلب بدون البصمة (ما يتوقف الرفع)
+        }
+      }
+      await FS.setDoc(ref, payload);
       return ref.id;
     },
     /* --- الموظف --- */
@@ -648,9 +675,13 @@ function demoBackend() {
       const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 900, 0.7);
       return await blobToDataURL(small);
     },
-    async createRequest(data) {
+    async isDuplicate(key) { try { return !!key && JSON.parse(localStorage.getItem(KEY + "_dup") || "[]").includes(key); } catch { return false; } },
+    async createRequest(data, key) {
+      if (key && await api.isDuplicate(key)) throw Object.assign(new Error("duplicate"), { code: "duplicate" });
       const list = load() || []; const id = "d" + Date.now();
-      list.push({ ...data, id, status: "pending", createdAt: Date.now() }); save(list); return id;
+      list.push({ ...data, id, status: "pending", createdAt: Date.now() }); save(list);
+      if (key) try { localStorage.setItem(KEY + "_dup", JSON.stringify([...JSON.parse(localStorage.getItem(KEY + "_dup") || "[]"), key].slice(-500))); } catch {}
+      return id;
     },
     onAuth(cb) { const u = sessionStorage.getItem(KEY + "_u"); cb(u ? { uid: "demo", email: u, name: u.split("@")[0] } : null); api._authCb = cb; return () => {}; },
     async login(e) { sessionStorage.setItem(KEY + "_u", e || "staff@saba.sa"); api._authCb?.({ uid: "demo", email: e, name: (e || "staff").split("@")[0] }); },

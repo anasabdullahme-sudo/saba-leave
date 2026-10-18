@@ -277,7 +277,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel } from "./shared.js?v=20261016";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey } from "./shared.js?v=20261018";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -605,6 +605,9 @@ $("#form").addEventListener("submit", async e => {
   const btn = $("#btnSend"); btn.disabled = true; btn.textContent = "جاري الإرسال…"; state.sending = true;
   let slow;
   try {
+    // نفس الطلب بالضبط (نفس الهوية والميلاد وتواريخ الإجازة) وصلنا من قبل؟ → ما نرسله مرة ثانية
+    const key = await dupKey({ type: state.type, idNumber: latinDigits(fd.idNumber), dob: fd.dob, leaveStart: fd.leaveStart || "", leaveEnd: fd.leaveEnd || "", visitDate: fd.visitDate || "", companionId: latinDigits(fd.companionId || "") });
+    if (await api.isDuplicate?.(key)) return showDuplicate();
     if (!state.imagePath) {
       btn.textContent = "نكمّل رفع الصورة…";
       try { await state.uploadP; } catch { await (state.uploadP = withRetry(() => api.uploadImage(state.blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")).then(p => (state.imagePath = p))); }
@@ -626,11 +629,12 @@ $("#form").addEventListener("submit", async e => {
       imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: clean(ai.quality, 20),
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
-    }));
+    }, key));
     clearTimeout(slow);
     $("#refTxt").textContent = ref;
-    reset("sDone");
+    setDone(false); reset("sDone");
   } catch (err) {
+    if (err?.code === "duplicate") return showDuplicate();
     console.error(err);
     showFail(err, "#note");
   } finally { state.sending = false; clearTimeout(slow); btn.disabled = false; btn.textContent = "إرسال الطلب"; }
@@ -641,7 +645,14 @@ $("#btnCopyRef").onclick = async () => {
   try { await navigator.clipboard.writeText(t); } catch { const a = document.createElement("textarea"); a.value = t; document.body.append(a); a.select(); document.execCommand("copy"); a.remove(); }
   toast("تم نسخ رقم الطلب");
 };
-$("#btnNew").onclick = () => { state.type = null; state.blob = null; reset("sHome"); };
+const DONE_TXT = { h: $("#sDone h2").textContent, p: $("#sDone p").innerHTML };
+function setDone(dup) {
+  $("#sDone h2").textContent = dup ? "طلبك وصلنا من قبل" : DONE_TXT.h;
+  $("#sDone p").innerHTML = dup ? "نفس هذا الطلب (نفس الهوية وتواريخ الإجازة) أرسلته قبل، وهو عند فريق سابا.<br>ما تحتاج ترسله مرة ثانية. إذا عندك استفسار كلّم استقبال الفرع." : DONE_TXT.p;
+  $("#sDone .ref").style.display = dup ? "none" : "";
+}
+function showDuplicate() { setDone(true); reset("sDone"); }
+$("#btnNew").onclick = () => { state.type = null; state.blob = null; setDone(false); reset("sHome"); };
 </script>
 </body>
 </html>
