@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -109,6 +109,7 @@ async function sendOne(id) {
     const [r] = await sock.onWhatsApp(num);
     if (!r?.exists) throw new Error("رقم المريض ما عليه واتساب");
     await sock.sendMessage(r.jid, { text: fx.message });
+    markOut(r.jid, num);
     await ref.update({ sendStatus: "sent", sentAt: TS(), sentFrom: me });
     log.info({ id, to: num }, "انرسلت");
   } catch (e) {
@@ -215,11 +216,20 @@ function watchDoctors() {
 
 /* ---------- الرسائل الواردة ---------- */
 const lastReply = new Map();           // jid → وقت آخر رد (يمنع الإزعاج والحلقات)
-async function reply(jid, text) {
+// آخر رسالة طلعت من البوت لكل شخص (بالمعرّف والرقم) — عشان نعرف إن «تمام/شكراً» رد على رسالتنا
+const lastOut = new Map();
+function markOut(jid, phone) { const n = Date.now(); if (jid) lastOut.set(jid, n); if (phone) lastOut.set(normPhone(phone), n); }
+const lastText = new Map();
+async function reply(jid, text, phone) {
   if (!connected || !sock) return;
+  const prev = lastText.get(jid);
+  if (prev && prev.text === text && Date.now() - prev.at < 2 * 3600e3) return;     // نفس الرد ما يتكرر خلال ساعتين
   await sock.sendMessage(jid, { text });
-  lastReply.set(jid, Date.now());
+  lastReply.set(jid, Date.now()); lastText.set(jid, { text, at: Date.now() }); markOut(jid, phone);
 }
+// ردود قصيرة (سلام، شكر، تمام…) — لو جت بعد رسالة منا ما نرد عليها
+const PLEASANT = /^(و?\s*عليكم\s*السلام.*|السلام\s*عليكم.*|تمام.*|تم|اوكي?|ok(ay)?|شكرا.*|مشكور.*|يعطيك.*|الله\s*يعافيك.*|جزاك.*|طيب|حاضر|ابشر.*|ان\s*شاء\s*الله|خلاص|[\u{1F300}-\u{1FAFF}\u2600-\u27BF\s]+)[\s!.؟?]*$/iu;
+const normMsg = s => latin(s).replace(/[\u064B-\u0652]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").trim();
 async function findByRef(ref) {
   const s = await db.collection("requests").where("ref", "==", ref).limit(1).get();
   return s.docs[0] || null;
@@ -233,6 +243,8 @@ async function onIncoming(m) {
   if (now - (lastReply.get(jid) || 0) < 20000) return;                 // رد واحد كل 20 ثانية لنفس الشخص
   const senderPhone = normPhone(String(jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "")).split(/[:@]/)[0]);
   const t = latin(text).toUpperCase();
+  const recentOut = Math.max(lastOut.get(jid) || 0, senderPhone ? lastOut.get(senderPhone) || 0 : 0);
+  if (normMsg(text).length <= 30 && PLEASANT.test(normMsg(text)) && now - recentOut < 48 * 3600e3) return;   // «وعليكم السلام / تمام / شكراً» بعد رسالتنا → بدون رد
 
   let doc = null;
   const refM = t.match(/SB-?\s?([A-Z0-9]{5})\b/);
@@ -243,6 +255,11 @@ async function onIncoming(m) {
       const s = await db.collection("requests").where("idNumber", "==", idM[0]).get();
       doc = s.docs.filter(d => normPhone(d.get("phone")) === senderPhone).sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
     }
+  }
+  // ما كتب رقم طلب؟ نعرفه من رقم جواله (آخر طلب له)
+  if (!doc && senderPhone && /^05\d{8}$/.test(senderPhone)) {
+    const s = await db.collection("requests").where("phone", "==", senderPhone).get();
+    doc = s.docs.sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
   }
   if (!doc) {
     if (now - (lastReply.get(jid + "#help") || 0) < 6 * 3600e3) return;   // رسالة المساعدة مرة كل 6 ساعات
@@ -276,12 +293,12 @@ async function onIncoming(m) {
         }
       } catch (e) { log.warn({ err: String(e?.message || e) }, "تذكير الطبيب"); }
     } else if (now - ms(r.doctorRemindedAt) <= 12 * 3600e3) reminded = true;
-    await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1) }).catch(() => {});
+    await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: text.slice(0, 160) }).catch(() => {});
     return reply(jid, `✅ ${hi}، تم رفع ${kind} على منصة صحة${r.sehaRef ? ` (رقم ${r.sehaRef})` : ""}.\n\nتقدر تشوفها من تطبيق *صحتي* ← الإجازات المرضية.${reminded ? "\nإذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب — وأرسلنا له تذكير 👍" : "\nإذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب، وعادةً ما تتأخر."}${tail}`);
   }
 
   // بالانتظار أو معلّق → تنبيه للموظفين في اللوحة
-  await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1) });
+  await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: text.slice(0, 160) });
   log.info({ ref: r.ref }, "استفسار مراجع");
   if (r.status === "held" && r.fixToken) {
     const f = await db.doc(`fixes/${r.fixToken}`).get();
