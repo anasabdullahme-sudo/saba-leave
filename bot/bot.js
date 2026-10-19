@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.5.1";
+const VERSION = "1.6.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -235,49 +235,77 @@ async function findByRef(ref) {
   const s = await db.collection("requests").where("ref", "==", ref).limit(1).get();
   return s.docs[0] || null;
 }
+/* ---------- فهم رسالة المراجع (قواعد بسيطة باللهجة) ---------- */
+const INTENT = {
+  greetBack: /و\s*عليكم\s*السلام/,
+  greet: /(^|\s)(السلام\s*عليكم|سلام\s*عليكم|السلام|سلام|مرحبا|مرحباً|هلا|اهلين|اهلا|مساء\s*الخير|صباح\s*الخير|هاي|hi|hello)(\s|$|[!.،,؟?])/i,
+  thanks: /(شكرا|شكراً|مشكور|يعطيك\s*العافيه|الله\s*يعافيك|جزاك|تسلم|ما\s*قصرت|ماقصرت|يسلمو|thank)/i,
+  ok: /^(تمام|اوك|اوكي|ok|okay|طيب|حاضر|ابشر|خلاص|ان\s*شاء\s*الله|زين|👍|🙏|❤️|🌹|🌷)[\s!.]*$/i,
+  status: /(متي|امتي|امتى|متى|وين|ايش\s*صار|وش\s*صار|شو\s*صار|وصلت|ماوصلت|ما\s*وصلت|تنزل|نزلت|ما\s*نزلت|تطلع|طلعت|ما\s*طلعت|ظهرت|ما\s*ظهرت|صحتي|اعتماد|اعتمد|حاله|حالة|رفعتو|انرفعت|خلصت|جاهز|تاخر|تأخر|طولت|ليش|استفسار|استفسر|اجازتي|الاجازه|الاجازة)/i,
+  link: /(رابط|لينك|link|وين\s*اعدل|كيف\s*اعدل|ما\s*فتح|مايفتح|ما\s*يفتح|ما\s*يشتغل)/i,
+  didFix: /(عدلت|عدلتها|عدّلت|تم\s*التعديل|سويت\s*التعديل|كتبت|ارسلت|أرسلت|رسلت|ضفت|اضفت|أضفت|حطيت|عبيت|عبّيت|دخلت\s*البيانات)/i,
+};
+function readIntent(text, media) {
+  const n = normMsg(text), short = n.length <= 40;
+  const i = {
+    greetBack: INTENT.greetBack.test(n),
+    greet: INTENT.greet.test(n) && !INTENT.greetBack.test(n),
+    thanks: short && INTENT.thanks.test(n),
+    ok: INTENT.ok.test(n),
+    link: INTENT.link.test(n),
+    didFix: INTENT.didFix.test(n),
+    status: INTENT.status.test(n),
+    media,
+  };
+  i.social = (i.greet || i.greetBack || i.thanks || i.ok) && !i.link && !i.didFix && !i.status && !media;
+  i.other = !i.social && !i.link && !i.didFix && !i.status && !media && n.length > 0;
+  return i;
+}
+const FLOW = "بعد ما نرفعها على منصة صحة، تحتاج *اعتماد الطبيب*، وأول ما يعتمدها تطلع لك في تطبيق *صحتي* ← الإجازات المرضية.";
+
 async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
   if (m.key?.fromMe || !jid || jid.endsWith("@g.us") || jid.includes("broadcast") || jid.endsWith("@newsletter")) return;
   const msg = m.message || {};
   // تعديل رسالة، حذف، تفاعل (إيموجي على رسالة)… مو رسالة جديدة → نتجاهلها
   if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage || msg.pollUpdateMessage || msg.keepInChatMessage) return;
-  const media = !!(msg.imageMessage || msg.documentMessage || msg.audioMessage || msg.videoMessage || msg.stickerMessage);
+  const media = !!(msg.imageMessage || msg.documentMessage || msg.audioMessage || msg.videoMessage);
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.documentMessage?.caption || "").trim();
-  if (!text && !media) return;
+  if (!text && !media && !msg.stickerMessage) return;
   const now = Date.now();
   if (now - (lastReply.get(jid) || 0) < 20000) return;                 // رد واحد كل 20 ثانية لنفس الشخص
   let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
   const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
   const t = latin(text).toUpperCase();
-  const recentOut = Math.max(lastOut.get(jid) || 0, senderPhone ? lastOut.get(senderPhone) || 0 : 0);
-  const pleasant = normMsg(text).length <= 30 && PLEASANT.test(normMsg(text));     // «وعليكم السلام / تمام / شكراً»
-  const afterUs = now - recentOut < 48 * 3600e3;
+  const it = readIntent(text, media);
+  if (msg.stickerMessage && !text) { it.ok = true; it.social = true; }
+  const once = (key, gapMs) => { const k = jid + "#" + key; if (now - (lastReply.get(k) || 0) < gapMs) return false; lastReply.set(k, now); return true; };
+  const hello = it.greet ? "وعليكم السلام ورحمة الله 🌷\n" : "";
 
+  // ---- نحدد طلبه: رقم الطلب ← الهوية (لازم نفس الجوال) ← رقم جواله
   let doc = null;
   const refM = t.match(/SB-?\s?([A-Z0-9]{5})\b/);
   if (refM) doc = await findByRef("SB-" + refM[1]);
   else {
     const idM = t.match(/\b[12]\d{9}\b/);
-    if (idM && senderPhone) {                                           // بالهوية: لازم يكون نفس جوال الطلب (خصوصية)
+    if (idM && senderPhone) {
       const s = await db.collection("requests").where("idNumber", "==", idM[0]).get();
       doc = s.docs.filter(d => normPhone(d.get("phone")) === senderPhone).sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
     }
   }
-  // ما كتب رقم طلب؟ نعرفه من رقم جواله (آخر طلب له)
   if (!doc && senderPhone && /^05\d{8}$/.test(senderPhone)) {
     const s = await db.collection("requests").where("phone", "==", senderPhone).get();
     doc = s.docs.sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
   }
   if (!doc) {
-    if (pleasant && afterUs) return;
-    if (now - (lastReply.get(jid + "#help") || 0) < 6 * 3600e3) return;   // رسالة المساعدة مرة كل 6 ساعات
-    lastReply.set(jid + "#help", now);
-    return reply(jid, `أهلاً 👋 هذا الرقم الآلي لمتابعة طلبات الإجازات في عيادات سابا.\n\nأرسل *رقم طلبك* (يبدأ بـ SB-) وأعطيك حالته فوراً.\n\nأو تابع طلبك من هنا:\n${SITE_URL}?track`);
+    if (it.social && !it.greet) return;                                 // شكر/تمام بدون طلب → ما نرد
+    if (!once("help", 6 * 3600e3)) return;
+    return reply(jid, `${hello}أهلاً 👋 هذا الرقم الآلي لمتابعة طلبات الإجازات في عيادات سابا.\n\nأرسل *رقم طلبك* (يبدأ بـ SB-) وأعطيك حالته فوراً.\n\nأو تابع طلبك من هنا:\n${SITE_URL}?track`);
   }
 
   let r = doc.data();
-  if (isDupe(r)) {                                                      // طلب مكرر → نرد بحالة الأصلي
+  if (isDupe(r)) {                                                      // طلب مكرر → حالة الأصلي
     const o = (r.doneBy || "").match(/SB-[A-Z0-9]{5}/);
     const od = o && await findByRef(o[0]);
     if (od) { doc = od; r = od.data(); }
@@ -285,27 +313,41 @@ async function onIncoming(m) {
   const name = String(r.patientName || "").trim().split(/\s+/)[0] || "";
   const hi = name ? `أهلاً ${name}` : "أهلاً";
   const kind = TYPE_AR[r.type] || "طلبك";
-  const tail = `\n\nتابع طلبك: ${SITE_URL}?track`;
+  const flag = () => doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
 
-  // عنده تعديل مفتوح؟ نذكّره بالرابط مرة وحدة بس — وبعدها أي رسالة منه تروح للموظفين بدون إزعاج
-  if (r.status === "held" && r.fixToken) {
-    const fref = db.doc(`fixes/${r.fixToken}`), f = await fref.get();
-    if (f.exists && f.get("status") === "open") {
-      if (!pleasant) await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
-      if (f.get("nudgedAt")) {                                          // ذكّرناه قبل
-        if (pleasant) return;
-        const ak = jid + "#ack" + r.fixToken;
-        if (now - (lastReply.get(ak) || ms(f.get("ackAt"))) < 12 * 3600e3) return;   // ردّ «وصلت رسالتك» مرة كل 12 ساعة بالكثير
-        lastReply.set(ak, now); fref.update({ ackAt: TS() }).catch(() => {});
-        return reply(jid, `وصلت رسالتك 🌷 بلّغنا فريق سابا، ولو احتاجوا شي بيتواصلون معك.`, senderPhone);
-      }
-      await fref.update({ nudgedAt: TS() }).catch(() => {});
-      const flds = (f.get("fields") || []).map(k => FIELD_AR[k] || k).join("، ");
-      return reply(jid, `${/سلام/.test(text) ? "وعليكم السلام ورحمة الله 🌷\n" : ""}${hi}، باقي خطوة بسيطة عشان نرفع ${kind}:\nنحتاج تعدّل${flds ? ` (${flds})` : " بياناتك"} من هالرابط 👇\n${SITE_URL}?fix=${r.fixToken}\n\nأول ما ترسل التعديل نكمل الرفع على طول.`, senderPhone);
+  // ---- عنده تعديل مطلوب؟
+  let fix = null, fref = null;
+  if (r.status === "held" && r.fixToken) { fref = db.doc(`fixes/${r.fixToken}`); const f = await fref.get(); if (f.exists) fix = f; }
+  const fixOpen = fix && fix.get("status") === "open";
+  const fixLinkTxt = () => `${SITE_URL}?fix=${r.fixToken}`;
+  const flds = fix ? (fix.get("fields") || []).map(k => FIELD_AR[k] || k).join("، ") : "";
+
+  if (fixOpen) {
+    if (!it.social) flag();
+    if (it.didFix) {                                                    // يقول عدّل — بس ما وصلنا شي
+      if (!once("didfix" + r.fixToken, 3 * 3600e3)) return;
+      return reply(jid, `${hello}${hi}، للحين ما وصلنا تعديلك 🙏\nلازم تفتح الرابط، تعبّي الخانات المطلوبة${flds ? ` (${flds})` : ""}، وتضغط *«إرسال التعديل»* تحت:\n${fixLinkTxt()}\n\nولو فيه مشكلة في الرابط، اكتب لنا وش يطلع لك.`, senderPhone);
     }
+    if (it.link || (!fix.get("nudgedAt") && !it.thanks && !it.ok)) {   // يطلب الرابط، أو أول رد منه بعد رسالتنا
+      if (!once("fixlink" + r.fixToken, 30 * 60e3)) return;
+      fref.update({ nudgedAt: TS() }).catch(() => {});
+      return reply(jid, `${hello}${hi}، باقي خطوة بسيطة عشان نرفع ${kind}:\nنحتاج تعدّل${flds ? ` (${flds})` : " بياناتك"} من هالرابط 👇\n${fixLinkTxt()}\n\nأول ما ترسل التعديل نكمل الرفع على طول.`, senderPhone);
+    }
+    if (it.social) { if (it.greet && once("greet", 6 * 3600e3)) return reply(jid, `وعليكم السلام ورحمة الله 🌷`); if (it.thanks && once("thanks", 12 * 3600e3)) return reply(jid, "العفو، بالخدمة 🌷"); return; }
+    if (!once("ack" + r.fixToken, 12 * 3600e3)) return;
+    return reply(jid, `${hello}وصلت رسالتك 🌷 بلّغنا فريق سابا، ولو احتاجوا شي بيتواصلون معك.\n(وتعديل بياناتك من الرابط اللي أرسلناه يسرّع الرفع)`, senderPhone);
   }
-  if (pleasant && afterUs) return;                                      // سلام/شكر بعد رسالتنا وما عنده شي مطلوب → بدون رد
 
+  // ---- رسائل اجتماعية فقط: نرد السلام/الشكر وبس
+  if (it.social) {
+    if (it.greet && once("greet", 6 * 3600e3)) return reply(jid, `وعليكم السلام ورحمة الله 🌷 ${hi}، تفضل كيف أقدر أخدمك؟`);
+    if (it.thanks && once("thanks", 12 * 3600e3)) return reply(jid, "العفو، بالخدمة 🌷");
+    return;
+  }
+
+  flag(); log.info({ ref: r.ref, intent: Object.keys(it).filter(k => it[k] === true) }, "رسالة مراجع");
+
+  // ---- تم الرفع: نشرح الاعتماد + تذكير للطبيب
   if (r.status === "done") {
     let reminded = false;
     const dp = doctorPhoneFor(r);
@@ -321,22 +363,18 @@ async function onIncoming(m) {
         }
       } catch (e) { log.warn({ err: String(e?.message || e) }, "تذكير الطبيب"); }
     } else if (now - ms(r.doctorRemindedAt) <= 12 * 3600e3) reminded = true;
-    await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: text.slice(0, 160) }).catch(() => {});
-    return reply(jid, `✅ ${hi}، تم رفع ${kind} على منصة صحة${r.sehaRef ? ` (رقم ${r.sehaRef})` : ""}.\n\nتقدر تشوفها من تطبيق *صحتي* ← الإجازات المرضية.${reminded ? "\nإذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب — وأرسلنا له تذكير 👍" : "\nإذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب، وعادةً ما تتأخر."}${tail}`);
+    return reply(jid, `${hello}✅ ${hi}، ${kind} *انرفعت* على منصة صحة${r.sehaRef ? ` (رقم ${r.sehaRef})` : ""}.\n\nالحين بانتظار *اعتماد الطبيب*، وأول ما يعتمدها تطلع لك في تطبيق *صحتي* ← الإجازات المرضية.${reminded ? "\nوأرسلنا للطبيب تذكير يعتمدها 👍" : ""}`, senderPhone);
   }
 
-  // بالانتظار أو معلّق → تنبيه للموظفين في اللوحة
-  await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: text.slice(0, 160) });
-  log.info({ ref: r.ref }, "استفسار مراجع");
-  if (r.status === "held" && r.fixToken) {
-    const f = await db.doc(`fixes/${r.fixToken}`).get();
-    if (f.exists && f.get("status") === "open")
-      return reply(jid, `✏️ ${hi}، ${kind} تحتاج تعديل بسيط قبل ما نرفعها.\n\nافتح الرابط وعدّل البيانات المطلوبة:\n${SITE_URL}?fix=${r.fixToken}`);
-    return reply(jid, `⏳ ${hi}، وصلنا تعديلك وفريق سابا يكمل رفع ${kind} الحين. نبّهناهم باستفسارك 🙏${tail}`);
-  }
+  // ---- وصلنا تعديله وننتظر الرفع
+  if (fix && !fixOpen && r.status !== "done")
+    return reply(jid, `${hello}${hi}، وصلنا تعديلك ✓ وفريق سابا يكمل رفع ${kind} الحين.\n\n${FLOW}`, senderPhone);
+
   if (r.status === "held")
-    return reply(jid, `⏳ ${hi}، ${kind} قيد المراجعة عند فريق سابا، ونبّهناهم باستفسارك 🙏${tail}`);
-  return reply(jid, `⏳ ${hi}، طلبك ${r.ref || ""} وصلنا وهو بالانتظار عند فريق سابا لرفعه على منصة صحة.\nنبّهنا الفريق باستفسارك 🙏${tail}`);
+    return reply(jid, `${hello}⏳ ${hi}، ${kind} قيد المراجعة عند فريق سابا، وبلّغناهم باستفسارك 🙏\n\n${FLOW}`, senderPhone);
+
+  // بالانتظار
+  return reply(jid, `${hello}⏳ ${hi}، طلبك ${r.ref || ""} وصلنا وهو بالانتظار عند فريق سابا لرفعه على منصة صحة.\n\n${FLOW}${it.link ? `\n\nتابع طلبك من هنا: ${SITE_URL}?track` : ""}`, senderPhone);
 }
 
 /* ---------- تطبيق تعديل المريض فوراً (بدون ما ننتظر لوحة موظف مفتوحة) ----------
