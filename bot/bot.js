@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.5.0";
+const VERSION = "1.5.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -239,7 +239,11 @@ async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
   if (m.key?.fromMe || !jid || jid.endsWith("@g.us") || jid.includes("broadcast") || jid.endsWith("@newsletter")) return;
   const msg = m.message || {};
-  const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
+  // تعديل رسالة، حذف، تفاعل (إيموجي على رسالة)… مو رسالة جديدة → نتجاهلها
+  if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage || msg.pollUpdateMessage || msg.keepInChatMessage) return;
+  const media = !!(msg.imageMessage || msg.documentMessage || msg.audioMessage || msg.videoMessage || msg.stickerMessage);
+  const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.documentMessage?.caption || "").trim();
+  if (!text && !media) return;
   const now = Date.now();
   if (now - (lastReply.get(jid) || 0) < 20000) return;                 // رد واحد كل 20 ثانية لنفس الشخص
   let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
@@ -283,14 +287,19 @@ async function onIncoming(m) {
   const kind = TYPE_AR[r.type] || "طلبك";
   const tail = `\n\nتابع طلبك: ${SITE_URL}?track`;
 
-  // عنده تعديل مفتوح؟ أي رد منه (حتى «وعليكم السلام») → نذكّره يعدّل من الرابط
+  // عنده تعديل مفتوح؟ نذكّره بالرابط مرة وحدة بس — وبعدها أي رسالة منه تروح للموظفين بدون إزعاج
   if (r.status === "held" && r.fixToken) {
-    const f = await db.doc(`fixes/${r.fixToken}`).get();
+    const fref = db.doc(`fixes/${r.fixToken}`), f = await fref.get();
     if (f.exists && f.get("status") === "open") {
-      if (!pleasant) await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: text.slice(0, 160) }).catch(() => {});
-      const nk = jid + "#fix" + r.fixToken;
-      if (pleasant && now - (lastReply.get(nk) || 0) < 6 * 3600e3) return;     // ذكّرناه قبل شوي — «تمام» ثانية ما تحتاج رد
-      lastReply.set(nk, now);
+      if (!pleasant) await doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
+      if (f.get("nudgedAt")) {                                          // ذكّرناه قبل
+        if (pleasant) return;
+        const ak = jid + "#ack" + r.fixToken;
+        if (now - (lastReply.get(ak) || ms(f.get("ackAt"))) < 12 * 3600e3) return;   // ردّ «وصلت رسالتك» مرة كل 12 ساعة بالكثير
+        lastReply.set(ak, now); fref.update({ ackAt: TS() }).catch(() => {});
+        return reply(jid, `وصلت رسالتك 🌷 بلّغنا فريق سابا، ولو احتاجوا شي بيتواصلون معك.`, senderPhone);
+      }
+      await fref.update({ nudgedAt: TS() }).catch(() => {});
       const flds = (f.get("fields") || []).map(k => FIELD_AR[k] || k).join("، ");
       return reply(jid, `${/سلام/.test(text) ? "وعليكم السلام ورحمة الله 🌷\n" : ""}${hi}، باقي خطوة بسيطة عشان نرفع ${kind}:\nنحتاج تعدّل${flds ? ` (${flds})` : " بياناتك"} من هالرابط 👇\n${SITE_URL}?fix=${r.fixToken}\n\nأول ما ترسل التعديل نكمل الرفع على طول.`, senderPhone);
     }
