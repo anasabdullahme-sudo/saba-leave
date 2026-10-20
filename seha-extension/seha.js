@@ -62,7 +62,9 @@
   const startOf = r => r.type === "attendance" ? (r.visitDate || r.leaveStart) : r.leaveStart;
   // تاريخ الدخول/الخروج: لو رفع الطلب بنفس يوم الإجازة أو بعدها → يوم الإجازة نفسه، ولو رفعه قبلها → يوم الرفع
   const dkey = d => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ""); return m ? +(m[3] + m[2] + m[1]) : 0; };
-  const entryOf = r => { const st = startOf(r), sub = r.submitDate; if (!sub || !dkey(sub)) return st; if (!dkey(st)) return sub; return dkey(sub) >= dkey(st) ? st : sub; };
+  // ولو رفعه قبلها بأكثر من يوم → يوم واحد قبل الإجازة (أقصى شي)
+  const dayBefore = d => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ""); if (!m) return d; const x = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1] - 1)); return `${String(x.getUTCDate()).padStart(2, "0")}/${String(x.getUTCMonth() + 1).padStart(2, "0")}/${x.getUTCFullYear()}`; };
+  const entryOf = r => { const st = startOf(r), sub = r.submitDate; if (!sub || !dkey(sub)) return st; if (!dkey(st)) return sub; if (dkey(sub) >= dkey(st)) return st; const pre = dayBefore(st); return dkey(sub) >= dkey(pre) ? sub : pre; };
   const notAtt = r => r.type === "attendance", onlyAtt = r => r.type !== "attendance", onlyComp = r => r.type !== "companion";
   const RULES = [
     // الخطوة 1
@@ -485,7 +487,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
-  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, doneIds = [], showFields = false, fixOpen = false, sehaAlert = null, fxType = null, fxChecked = [], fxNoteVal = "";
+  let req = null, auto = true, minimized = false, queue = [], queueAt = 0, hidden = {}, showFields = false, fixOpen = false, sehaAlert = null, fxType = null, fxChecked = [], fxNoteVal = "";
   const FIX_FIELDS = [
     { k: "patientName", ar: "الاسم" }, { k: "idNumber", ar: "الهوية" }, { k: "dob", ar: "الميلاد" }, { k: "phone", ar: "الجوال" },
     { k: "leaveStart", ar: "بداية الإجازة", types: ["sick", "companion"] }, { k: "leaveEnd", ar: "نهاية الإجازة", types: ["sick", "companion"] },
@@ -498,7 +500,11 @@
   const reqAge = () => req ? Date.now() - (req.sentAt || 0) : Infinity;
   const navActive = () => !!req && reqAge() < 5 * 60000;
   const fillActive = () => !!req && reqAge() < 60 * 60000;
-  const pendingQ = () => queue.filter(q => !doneIds.includes(q.id) && q.id !== req?.id);
+  // طلب ضغطت عليه «تم الرفع» أو «طلب تعديل» يختفي من القائمة — لين اللوحة ترجعه (مثلاً المراجع عدّل أو رجّعته للانتظار)
+  const isHidden = id => { const t = hidden[id]; return !!t && queueAt < t + 20000; };
+  const pendingQ = () => queue.filter(q => !isHidden(q.id) && q.id !== req?.id);
+  const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
+  const queueStale = () => !queueAt || Date.now() - queueAt > 3 * 60000;
   function setMin(v) { minimized = v; $("#p").classList.toggle("min", v); $("#min").textContent = v ? "+" : "–"; }
   function updateCount() { const c = $("#cnt"), n = pendingQ().length; c.hidden = !n; c.textContent = n; }
   function useReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
@@ -539,8 +545,8 @@
         ${pend.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(pend[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
         <div class="ql">${pend.map(q => `<button class="qi ${here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
-          || `<div class="empty">${queueAt ? "ما فيه طلبات تنتظر ✓" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
-        ${hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
+          || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
+        ${queueStale() ? `<div class="note" style="background:#FFF4E5;color:#8A4B00">⚠ القائمة مو محدّثة${hh ? ` (آخر تحديث ${hh})` : ""} — افتح لوحة سابا، ولو مفتوحة حدّث صفحتها (F5)</div>` : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
       const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(pend[0]);
       root.querySelectorAll(".qi").forEach(el => el.onclick = () => { const q = queue.find(x => x.id === el.dataset.id); if (q) useReq(q); });
@@ -606,8 +612,7 @@
         fixOpen = false;
         toastLocal(res.auto ? "✓ البوت بيرسل للمريض — الطلب صار «معلّق»" : "البوت مو متصل — أرسلها من لوحة سابا");
         if (!res.auto && res.wa) window.open(res.wa, "_blank");
-        doneIds = [...doneIds, r0.id].slice(-300);
-        chrome.storage.local.set({ sabaDoneIds: doneIds }, () => chrome.storage.local.remove("sabaReq"));
+        chrome.storage.local.set({ sabaHidden: hideId(r0.id) }, () => chrome.storage.local.remove("sabaReq"));
       };
     }
     $("#fill").onclick = async () => {
@@ -630,8 +635,7 @@
     $("#closeReq").onclick = () => chrome.storage.local.remove("sabaReq");
     $("#done").onclick = () => {
       const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
-      doneIds = [...doneIds, req.id].slice(-300);
-      chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() }, sabaDoneIds: doneIds }, () => {
+      chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() }, sabaHidden: hideId(req.id) }, () => {
         chrome.storage.local.remove("sabaReq");
         toastLocal("تم ✓ — بيتحدث الطلب في لوحة سابا");
       });
@@ -747,11 +751,15 @@
   // الصفحة الرئيسية أحياناً تحمّل بدون تغييرات نلقطها — نحاول كل ثانيتين لمدة دقيقتين بعد وصول الطلب
   setInterval(() => { if (TOP && auto && navActive() && !document.hidden) openAddForm(); }, 2000);
 
+  // القائمة تتحدث كل دقيقة من اللوحة — لو وقفت نبيّن تنبيه
+  let lastStale = null;
+  setInterval(() => { if (!TOP || req || minimized) return; const st = queueStale(); if (st !== lastStale) { lastStale = st; render(); } }, 20000);
+
   // ---------- تشغيل ----------
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaDoneIds", "sabaPos", "sabaShowFields", "sabaAlert"], d => {
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert"], d => {
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
     if (TOP && d.sabaPos) placeAt(d.sabaPos.x, d.sabaPos.y);
-    queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; doneIds = d.sabaDoneIds || [];
+    queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; hidden = d.sabaHidden || {}; chrome.storage.local.remove("sabaDoneIds");
     if (req && !fillActive()) { req = null; if (TOP) chrome.storage.local.remove("sabaReq"); }   // طلب قديم → نتجاهله
     setMin(!req);                                                                             // بدون طلب: اللوحة مصغّرة وما تزعج
     if (TOP) document.documentElement.append(host);
@@ -764,8 +772,14 @@
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
     if (ch.sabaAlert && TOP) { sehaAlert = ch.sabaAlert.newValue || null; if (sehaAlert) { setMin(false); toastLocal("⚠ صحة أضافت خانة جديدة"); } render(); }
-    if (ch.sabaQueue) { queue = ch.sabaQueue.newValue?.items || []; queueAt = ch.sabaQueue.newValue?.at || 0; if (!req && !minimized) render(); else updateCount(); }
-    if (ch.sabaDoneIds) doneIds = ch.sabaDoneIds.newValue || [];
+    if (ch.sabaQueue) {
+      const sig = () => JSON.stringify(pendingQ().map(q => [q.id, q.type, q.branch, q.patientName]));
+      const before = sig(), wasStale = queueStale();
+      queue = ch.sabaQueue.newValue?.items || []; queueAt = ch.sabaQueue.newValue?.at || 0;
+      if (before === sig() && wasStale === queueStale()) updateCount();          // نبضة كل دقيقة بدون تغيير → لا نعيد الرسم
+      else if (!req && !minimized) render(); else updateCount();
+    }
+    if (ch.sabaHidden) hidden = ch.sabaHidden.newValue || {};
     if (ch.sabaReq) {
       req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
       if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
