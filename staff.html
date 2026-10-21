@@ -276,7 +276,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
       <a class="seha tool" id="toolDl" download title="تحميل إضافة «سابا ← صحة» للتعبئة التلقائية"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
-      <span class="who" id="who" role="button" tabindex="0" title="اسمك على هالجهاز — اضغط للتغيير" style="cursor:pointer"></span>
+      <span class="who" id="who" title="اسم هالجهاز"></span>
       <button class="bot-pill" id="botPill" title="بوت الواتساب لطلبات التعديل"><i></i><span>واتساب</span></button>
       <button class="admin-btn" id="btnClean" hidden>تنظيف الصور</button>
       <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
@@ -406,18 +406,10 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <div class="btn-row"><button class="btn btn-primary" id="docSave">حفظ</button><button class="btn btn-ghost" id="docClose">إلغاء</button></div>
   </div>
 </div>
-<div class="modal" id="nameModal" hidden>
-  <div class="box" role="dialog" aria-modal="true" aria-labelledby="nmTtl">
-    <h3 id="nmTtl">مين يشتغل على هالجهاز؟</h3>
-    <p style="margin:0;color:var(--muted);font-size:13.5px;line-height:1.7">اكتب اسمك. يظهر للباقين لما تفتح طلب أو ترفعه، عشان ما يشتغل اثنين على نفس المريض. (يتحفظ في هالجهاز، وتقدر تغيّره بالضغط على اسمك فوق)</p>
-    <input id="nmIn" maxlength="24" placeholder="مثلاً: سارة" style="border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;font:inherit;font-size:16px">
-    <div class="btn-row"><button class="btn btn-primary" id="nmSave">حفظ</button><button class="btn btn-ghost" id="nmCancel">لاحقاً</button></div>
-  </div>
-</div>
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields } from "./shared.js?v=20261021a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum } from "./shared.js?v=20261021b";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -456,7 +448,7 @@ api.onAuth(user => {
     S.unsub?.(); S.unsub = null; return;
   }
   $("#vLogin").hidden = true; $("#vApp").hidden = false;
-  setTimeout(() => { $("#who").textContent = myLabel(); if (!devName && !DEMO) askName(); }, 300);
+  setTimeout(ensureDevice, 300);
   $("#btnClean").hidden = !(user.role === "admin" && api.cleanupImages);
   setTimeout(start, 0);   // بعد ما يكتمل تحميل الصفحة (بعض الدوال معرّفة تحت)
 });
@@ -562,29 +554,28 @@ const OPEN_MS = 5 * 60000;
 // كل جهاز له اسم موظف ومعرّف خاص (لأن الموظفين يدخلون بنفس الحساب)
 const LSx = { get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 const DEV_ID = LSx.get("saba_dev_id") || (() => { const d = Math.random().toString(36).slice(2, 8); LSx.set("saba_dev_id", d); return d; })();
-let devName = LSx.get("saba_dev_name");
+let devNo = +LSx.get("saba_dev_no") || 0;
 const accName = () => S.me?.name || S.me?.email || "";
-const myLabel = () => devName || accName();
+const myLabel = () => devNo ? `${accName()} ${arNum(devNo)}` : accName();      // أنس ١، أنس ٢…
 const myName = myLabel;                                   // يظهر في «رفعه/علّقه فلان»
-const claimTag = () => `${myLabel()}~${DEV_ID}`;          // يميّز الجهاز حتى لو نفس الاسم
+const claimTag = () => `${myLabel()}~${DEV_ID}`;          // يميّز الجهاز
 const whoOf = s => String(s || "").split("~")[0];
 const openByOther = x => {
   const o = x.openedBy;
   if (!o || !x.openedAt || Date.now() - x.openedAt >= OPEN_MS || o === claimTag()) return "";
-  if (!o.includes("~") && o === accName() && !devName) return "";          // أجهزة قديمة بدون اسم
-  const w = whoOf(o) || "موظف ثاني";
+  if (!o.includes("~") && o === accName() && !devNo) return "";            // أجهزة قديمة بدون رقم
+  const w = whoOf(o) || "جهاز ثاني";
   return w === myLabel() ? `${w} (جهاز ثاني)` : w;
 };
-function askName() {
-  $("#nmIn").value = devName; $("#nameModal").hidden = false; setTimeout(() => $("#nmIn").focus(), 50);
+// كل جهاز ياخذ رقم تلقائي أول مرة (أنس ١، أنس ٢…) ويتحفظ فيه
+let devBusy = false;
+async function ensureDevice() {
+  $("#who").textContent = myLabel();
+  if (devNo || devBusy) return; devBusy = true;
+  try { const n = await api.claimDeviceNo?.(); if (n) { devNo = n; LSx.set("saba_dev_no", n); $("#who").textContent = myLabel(); } }
+  catch (e) { console.warn("deviceNo", e); }
+  finally { devBusy = false; }
 }
-$("#nmSave").onclick = () => {
-  const v = $("#nmIn").value.trim().replace(/~/g, "").slice(0, 24); if (!v) return $("#nmIn").focus();
-  devName = v; LSx.set("saba_dev_name", v); $("#who").textContent = v; $("#nameModal").hidden = true; toast(`أهلاً ${v} ✓`);
-};
-$("#nmIn").onkeydown = e => { if (e.key === "Enter") $("#nmSave").click(); };
-$("#nmCancel").onclick = () => { $("#nameModal").hidden = true; };
-$("#who").onclick = askName;
 // حجز الطلب: أي طلب مفتوح عندك يظهر للباقين «مفتوح عند فلان» (يتجدد كل دقيقتين وينتهي بعد 5 دقايق)
 const myClaims = new Map();   // id → آخر تجديد
 function claimReq(id) { if (!id) return; myClaims.set(id, Date.now()); api.claim?.(id, claimTag()).catch(() => {}); }

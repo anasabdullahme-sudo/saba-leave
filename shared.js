@@ -263,6 +263,12 @@ export async function trackKey(id, phone) {
   const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`saba-track|${latinDigits(id || "").replace(/\D/g, "")}|${normPhone(phone || "")}`));
   return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
 }
+/* ---------- رقم الجهاز (الموظفين يدخلون بنفس الحساب: أنس ١، أنس ٢…) ---------- */
+export async function devKey(n) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("saba-dev|" + n));
+  return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+export const arNum = n => String(n).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
 /** عنوان الورقة فوق لازم يكون إجازة مرضية (أو مشهد) — غير كذا (وصفة، تحليل…) ما ينقبل */
 export const leaveTitleOk = t => !String(t || "").trim() || /sick\s*leave|leave\s*report|medical\s*leave|attendance|visit|حضور|إجاز[ةه]\s*مرضي|اجاز[ةه]\s*مرضي|بإجاز[ةه]|باجاز[ةه]|مشهد|مرافق|companion/i.test(String(t));
 export const makeRef = () => {
@@ -654,6 +660,20 @@ async function liveBackend(role) {
     async getDoctorPhones() { const d = await FS.getDoc(FS.doc(db, "bot", "doctors")); return d.exists() ? (d.data().phones || {}) : {}; },
     botTest: phone => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "test", phone, at: FS.serverTimestamp() }),
     saveDoctorPhones: (phones, names) => FS.setDoc(FS.doc(db, "bot", "doctors"), { phones, names, at: FS.serverTimestamp() }),
+    // يحجز أول رقم جهاز فاضي (مستند بصمة ما ينكتب فوقه — نفس قواعد dupKeys بدون أي تعديل)
+    async claimDeviceNo() {
+      for (let n = 1; n < 200; n++) {
+        const ref = FS.doc(db, "dupKeys", await devKey(n));
+        try {
+          await FS.runTransaction(db, async tx => {
+            if ((await tx.get(ref)).exists()) throw Object.assign(new Error("taken"), { code: "taken" });
+            tx.set(ref, { uid: auth.currentUser.uid, at: FS.serverTimestamp() });
+          });
+          return n;
+        } catch (e) { if (e?.code !== "taken" && e?.code !== "permission-denied") throw e; }
+      }
+      return 0;
+    },
     /* --- المراجع: متابعة الطلب + رقم البوت --- */
     async getTrack(key) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "track", key)); return d.exists() ? (d.data().items || {}) : null; },
     async getBotWa() { try { const d = await FS.getDoc(FS.doc(db, "public", "bot")); return d.exists() ? String(d.data().wa || "") : ""; } catch { return ""; } },
@@ -780,6 +800,7 @@ function demoBackend() {
     async botLogout() {},
     async getDoctorPhones() { try { return JSON.parse(localStorage.getItem(KEY + "_docph") || "{}"); } catch { return {}; } },
     async saveDoctorPhones(phones) { localStorage.setItem(KEY + "_docph", JSON.stringify(phones)); },
+    async claimDeviceNo() { const n = (+localStorage.getItem(KEY + "_devs") || 0) + 1; localStorage.setItem(KEY + "_devs", n); return n; },
     async botTest(phone) { api._lastTest = { phone, ok: demoBot(), err: demoBot() ? "" : "البوت مو متصل بواتساب", at: Date.now() }; fire(); },
     async getTrack(key) {
       const items = {};
