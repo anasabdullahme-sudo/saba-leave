@@ -276,7 +276,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
       <a class="seha tool" id="toolDl" download title="تحميل إضافة «سابا ← صحة» للتعبئة التلقائية"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
-      <span class="who" id="who"></span>
+      <span class="who" id="who" role="button" tabindex="0" title="اسمك على هالجهاز — اضغط للتغيير" style="cursor:pointer"></span>
       <button class="bot-pill" id="botPill" title="بوت الواتساب لطلبات التعديل"><i></i><span>واتساب</span></button>
       <button class="admin-btn" id="btnClean" hidden>تنظيف الصور</button>
       <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
@@ -406,10 +406,18 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <div class="btn-row"><button class="btn btn-primary" id="docSave">حفظ</button><button class="btn btn-ghost" id="docClose">إلغاء</button></div>
   </div>
 </div>
+<div class="modal" id="nameModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="nmTtl">
+    <h3 id="nmTtl">مين يشتغل على هالجهاز؟</h3>
+    <p style="margin:0;color:var(--muted);font-size:13.5px;line-height:1.7">اكتب اسمك. يظهر للباقين لما تفتح طلب أو ترفعه، عشان ما يشتغل اثنين على نفس المريض. (يتحفظ في هالجهاز، وتقدر تغيّره بالضغط على اسمك فوق)</p>
+    <input id="nmIn" maxlength="24" placeholder="مثلاً: سارة" style="border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;font:inherit;font-size:16px">
+    <div class="btn-row"><button class="btn btn-primary" id="nmSave">حفظ</button><button class="btn btn-ghost" id="nmCancel">لاحقاً</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields } from "./shared.js?v=20261018k";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields } from "./shared.js?v=20261021a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -448,7 +456,7 @@ api.onAuth(user => {
     S.unsub?.(); S.unsub = null; return;
   }
   $("#vLogin").hidden = true; $("#vApp").hidden = false;
-  $("#who").textContent = user.name;
+  setTimeout(() => { $("#who").textContent = myLabel(); if (!devName && !DEMO) askName(); }, 300);
   $("#btnClean").hidden = !(user.role === "admin" && api.cleanupImages);
   setTimeout(start, 0);   // بعد ما يكتمل تحميل الصفحة (بعض الدوال معرّفة تحت)
 });
@@ -551,8 +559,41 @@ function dates(x) {
   return x.leaveEnd && x.leaveEnd !== x.leaveStart ? `${x.leaveStart} ← ${x.leaveEnd}` : x.leaveStart;
 }
 const OPEN_MS = 5 * 60000;
-const myName = () => S.me?.name || S.me?.email || "";
-const openByOther = x => x.openedBy && x.openedBy !== myName() && x.openedAt && Date.now() - x.openedAt < OPEN_MS ? x.openedBy : "";
+// كل جهاز له اسم موظف ومعرّف خاص (لأن الموظفين يدخلون بنفس الحساب)
+const LSx = { get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+const DEV_ID = LSx.get("saba_dev_id") || (() => { const d = Math.random().toString(36).slice(2, 8); LSx.set("saba_dev_id", d); return d; })();
+let devName = LSx.get("saba_dev_name");
+const accName = () => S.me?.name || S.me?.email || "";
+const myLabel = () => devName || accName();
+const myName = myLabel;                                   // يظهر في «رفعه/علّقه فلان»
+const claimTag = () => `${myLabel()}~${DEV_ID}`;          // يميّز الجهاز حتى لو نفس الاسم
+const whoOf = s => String(s || "").split("~")[0];
+const openByOther = x => {
+  const o = x.openedBy;
+  if (!o || !x.openedAt || Date.now() - x.openedAt >= OPEN_MS || o === claimTag()) return "";
+  if (!o.includes("~") && o === accName() && !devName) return "";          // أجهزة قديمة بدون اسم
+  const w = whoOf(o) || "موظف ثاني";
+  return w === myLabel() ? `${w} (جهاز ثاني)` : w;
+};
+function askName() {
+  $("#nmIn").value = devName; $("#nameModal").hidden = false; setTimeout(() => $("#nmIn").focus(), 50);
+}
+$("#nmSave").onclick = () => {
+  const v = $("#nmIn").value.trim().replace(/~/g, "").slice(0, 24); if (!v) return $("#nmIn").focus();
+  devName = v; LSx.set("saba_dev_name", v); $("#who").textContent = v; $("#nameModal").hidden = true; toast(`أهلاً ${v} ✓`);
+};
+$("#nmIn").onkeydown = e => { if (e.key === "Enter") $("#nmSave").click(); };
+$("#nmCancel").onclick = () => { $("#nameModal").hidden = true; };
+$("#who").onclick = askName;
+// حجز الطلب: أي طلب مفتوح عندك يظهر للباقين «مفتوح عند فلان» (يتجدد كل دقيقتين وينتهي بعد 5 دقايق)
+const myClaims = new Map();   // id → آخر تجديد
+function claimReq(id) { if (!id) return; myClaims.set(id, Date.now()); api.claim?.(id, claimTag()).catch(() => {}); }
+function releaseReq(id) {
+  if (!myClaims.has(id)) return; myClaims.delete(id);
+  const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id);
+  if (x && x.openedBy === claimTag()) api.update(id, { openedBy: "", openedAt: null }).catch(() => {});
+}
+setInterval(() => { for (const [id, t] of myClaims) { if (Date.now() - t > 10 * 60000) myClaims.delete(id); else if (S.pending.some(r => r.id === id) || S.held.some(r => r.id === id)) api.claim?.(id, claimTag()).catch(() => {}); } }, 120000);
 function rowHTML(x, mode) {
   const done = mode === "done", held = mode === "held";
   const dupe = mode === "pending" && S.pending.filter(y => y.idNumber === x.idNumber && y.type === x.type && (y.leaveStart || y.visitDate) === (x.leaveStart || x.visitDate)).length > 1;
@@ -651,7 +692,7 @@ async function archiveExactDupes(list) {
 /* ---------- تم الرفع ---------- */
 async function markDone(id) {
   const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id); if (!x) return;
-  const by = S.me?.name || S.me?.email || "";
+  const by = myName();
   // تحديث فوري في الواجهة
   S.pending = S.pending.filter(r => r.id !== id); S.held = S.held.filter(r => r.id !== id);
   const doneItem = { ...x, status: "done", doneAt: Date.now(), doneBy: by };
@@ -693,7 +734,7 @@ $("#holdConfirm").onclick = async () => {
   const id = S.openId, note = $("#holdNote").value.trim();
   if (!holdReason) return toast("اختر سبب التعليق");
   if (holdReason === "other" && !note) { $("#holdNote").focus(); return toast("اكتب السبب في الملاحظة"); }
-  const by = S.me?.name || S.me?.email || "";
+  const by = myName();
   const dx = !S.pending.some(r => r.id === id) && S.done.find(r => r.id === id);
   if (dx) return reholdDone(dx, holdReason, note, by);
   const x = S.pending.find(r => r.id === id); if (!x) return;
@@ -805,7 +846,7 @@ async function openDrawer(id, holdNow) {
   const other = !isDone && openByOther(x);
   $("#dOpenInfo").hidden = !other;
   if (other) $("#dOpenInfo").textContent = `هذا الطلب مفتوح الآن عند ${other}. تأكد منه قبل الرفع حتى لا ينرفع مرتين.`;
-  if (!isDone && !other) api.claim?.(id, myName()).catch(() => {});
+  if (!isDone && !other) claimReq(id);
   // الصورة
   const img = $("#dImg"), pdf = $("#dPdf");
   img.style.transform = ""; $("#viewer").classList.remove("zoom");
@@ -829,6 +870,7 @@ function fillDrawerMeta(x) {
   $("#dMeta").textContent = `${typeName(x.type)} — وصل ${timeAgo(x.createdAt)}${d ? "" : " — الطبيب غير مدرج (تحقق من الفرع)"}`;
 }
 function closeDrawer() {
+  if (S.openId && !S.sentSeha?.has(S.openId)) releaseReq(S.openId);    // فتحته بس شفته؟ نفكّ الحجز
   S.openId = null;
   $("#scrim").classList.remove("on"); $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true");
   document.querySelectorAll(".row.sel").forEach(r => r.classList.remove("sel"));
@@ -1066,6 +1108,7 @@ $("#fixSend").onclick = async () => {
   const fields = [...$("#fixFields").querySelectorAll("input:checked")].map(i => i.value);
   const newType = fixType && fixType !== x.type ? fixType : null;
   if (!fields.length) return toast("اختر الخانة الغلط أو الناقصة");
+  if (x.status === "held" && x.fixToken) return toast(`انرسل له طلب تعديل من قبل${x.heldBy ? ` (${x.heldBy})` : ""} — ما نرسل مرتين`);
   const note = $("#fixNote").value.trim(), by = myName();
   const btn = $("#fixSend"); btn.disabled = true;
   const values = {}; fields.forEach(k => { if (k !== "photo" && x[k]) values[k] = x[k]; });
@@ -1080,7 +1123,10 @@ $("#fixSend").onclick = async () => {
     closeDrawer(); renderCounts(); renderPending(); renderHeld();
     $("#fixForm").hidden = true; $("#fixSent").hidden = false;
     showFixSending(id, message, x, auto);
-  } catch (e) { console.error(e); toast("ما قدرت أنشئ طلب التعديل — تأكد من الاتصال"); }
+  } catch (e) {
+    if (e?.code === "already_fixing" || e?.code === "already_done") { toast(fixDupMsg(e)); closeFix(); return; }
+    console.error(e); toast("ما قدرت أنشئ طلب التعديل — تأكد من الاتصال");
+  }
   finally { btn.disabled = false; }
 };
 function showFixSending(id, message, x, auto) {
@@ -1136,6 +1182,7 @@ async function handleExtFix(m) {
   const reply = r => window.postMessage({ type: "SABA_FIX_RES", at: m.at, ...r }, location.origin);
   const x = S.pending.find(r => r.id === m.id) || S.held.find(r => r.id === m.id);
   if (!x) return reply({ ok: false, msg: "الطلب مو موجود بالانتظار (يمكن انرفع أو انحذف)" });
+  if (x.status === "held" && x.fixToken) return reply({ ok: false, msg: `انرسل له طلب تعديل من قبل${x.heldBy ? ` (${x.heldBy})` : ""} — ما نرسل مرتين` });
   if (!waPhone(x.phone)) return reply({ ok: false, msg: "رقم جوال المريض غير صحيح — صحّحه من اللوحة" });
   const newType = ["sick", "companion", "attendance"].includes(m.newType) && m.newType !== x.type ? m.newType : null;
   const fields = (Array.isArray(m.fields) ? m.fields : []).filter(k => fixFieldsFor(newType || x.type).some(f => f.k === k));
@@ -1152,12 +1199,19 @@ async function handleExtFix(m) {
     renderCounts(); renderPending(); renderHeld(); postQueue();
     toast(`✎ طلب تعديل لـ ${x.patientName} (من صحة)${auto ? " — البوت يرسله" : " — البوت مو متصل، أرسله يدوي من «معلّق»"}`);
     reply({ ok: true, auto, wa: auto ? "" : `https://wa.me/${waPhone(x.phone)}?text=${encodeURIComponent(message)}` });
-  } catch (e) { console.error(e); reply({ ok: false, msg: "ما قدرت أنشئ طلب التعديل — تأكد من الاتصال" }); }
+  } catch (e) {
+    if (e?.code === "already_fixing" || e?.code === "already_done") return reply({ ok: false, msg: fixDupMsg(e) });
+    console.error(e); reply({ ok: false, msg: "ما قدرت أنشئ طلب التعديل — تأكد من الاتصال" });
+  }
+}
+function fixDupMsg(e) {
+  return e.code === "already_done" ? `هذا الطلب رفعه ${e.by || "موظف ثاني"} — ما انرسل تعديل`
+    : `${e.by || "موظف ثاني"} أرسل له طلب تعديل${e.at ? " " + timeAgo(e.at) : ""} — ما نرسل مرتين`;
 }
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
-let extVersion = null;
-const EXT_LATEST = "1.3.6", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
+let extVersion = null, sehaWarned = null;
+const EXT_LATEST = "1.3.7", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
 const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 let extWarned = false;
 $("#toolDl").href = EXT_ZIP; $("#toolVer").textContent = EXT_LATEST;
@@ -1192,13 +1246,16 @@ function sehaPayload(x) {
 function postQueue() {
   try {
     if (!extVersion || !S.pending) return;
-    window.postMessage({ type: "SABA_QUEUE", items: S.pending.map(x => ({ ...sehaPayload(x), sentAt: 0 })) }, location.origin);
+    window.postMessage({ type: "SABA_QUEUE", items: S.pending.map(x => ({ ...sehaPayload(x), sentAt: 0, lockedBy: openByOther(x) })) }, location.origin);
   } catch (err) { /* اللوحة لسى تحمّل */ }
 }
 $("#sehaDrawer").addEventListener("click", e => {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
-  const payload = sehaPayload(x);
   e.preventDefault();
+  const other = openByOther(x);
+  if (other && sehaWarned !== x.id) { sehaWarned = x.id; chime(); return toast(`⚠ ${other} فاتح هالطلب الحين — لو متأكد إنه ما يرفعه، اضغط زر صحة مرة ثانية`); }
+  sehaWarned = null; (S.sentSeha ||= new Set()).add(x.id); claimReq(x.id);
+  const payload = sehaPayload(x);
   window.postMessage({ type: "SABA_SEHA_FILL", payload }, location.origin);
   if (extVersion) {
     // تبويب صحة واحد نعيد استخدامه: لو مفتوح ننتقل له بدون إعادة تحميل (الإضافة تفتح النموذج لحالها)
@@ -1218,6 +1275,8 @@ addEventListener("message", async e => {
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
+  if (m.type === "SABA_ACTIVE" && m.id && (S.pending.some(r => r.id === m.id) || S.held.some(r => r.id === m.id))) { (S.sentSeha ||= new Set()).add(m.id); claimReq(m.id); }
+  if (m.type === "SABA_RELEASE" && m.id) { S.sentSeha?.delete(m.id); if (S.openId !== m.id) releaseReq(m.id); }
   if (m.type === "SABA_SEHA_ALERT") { chime(); toast(`⚠ صحة غيّرت شي في النموذج: ${(m.labels || []).join("، ") || "خانات ما تتعبّى"} — من قائمة الإضافة اضغط «تقرير فني» وأرسله لـ Claude`, "تمام", () => {}); }
 });
 let doneMsgQueue = null;

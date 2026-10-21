@@ -627,10 +627,15 @@ async function liveBackend(role) {
     newFixId: () => FS.doc(FS.collection(db, "fixes")).id,
     async createFix(req, data, id) {
       const ref = id ? FS.doc(db, "fixes", id) : FS.doc(FS.collection(db, "fixes"));
-      const b = FS.writeBatch(db);
-      b.set(ref, { ...data, reqId: req.id, ref: req.ref || "", name: req.patientName || "", phone: req.phone || "", type: req.type, status: "open", createdAt: FS.serverTimestamp() });
-      b.update(FS.doc(col, req.id), { status: "held", holdReason: "data", holdNote: data.note || "بانتظار تعديل المريض", heldAt: FS.serverTimestamp(), heldBy: data.by || "", fixToken: ref.id, fixAt: FS.serverTimestamp() });
-      await b.commit(); return ref.id;
+      // داخل معاملة: لو موظف ثاني (حتى بنفس الحساب) أرسل تعديل أو رفعه بنفس اللحظة → ما نرسل مرتين
+      await FS.runTransaction(db, async tx => {
+        const rr = FS.doc(col, req.id), cur = (await tx.get(rr)).data() || {};
+        if (cur.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.doneBy });
+        if (cur.status === "held" && cur.fixToken) throw Object.assign(new Error("already_fixing"), { code: "already_fixing", by: cur.heldBy, at: cur.heldAt?.toMillis?.() || null });
+        tx.set(ref, { ...data, reqId: req.id, ref: req.ref || "", name: req.patientName || "", phone: req.phone || "", type: req.type, status: "open", createdAt: FS.serverTimestamp() });
+        tx.update(rr, { status: "held", holdReason: "data", holdNote: data.note || "بانتظار تعديل المريض", heldAt: FS.serverTimestamp(), heldBy: data.by || "", fixToken: ref.id, fixAt: FS.serverTimestamp() });
+      });
+      return ref.id;
     },
     watchFix(id, cb) { return FS.onSnapshot(FS.doc(db, "fixes", id), d => cb(d.exists() ? { id: d.id, ...d.data() } : null), () => cb(null)); },
     watchAnsweredFixes(cb) { return FS.onSnapshot(FS.query(FS.collection(db, "fixes"), FS.where("status", "==", "answered")), s => cb(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => console.warn("fixes", e)); },
@@ -753,6 +758,9 @@ function demoBackend() {
     newFixId: () => Array.from({ length: 20 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 62)]).join(""),
     async createFix(req, data, id) {
       id ||= api.newFixId();
+      const cur = load().find(r => r.id === req.id) || {};
+      if (cur.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.doneBy });
+      if (cur.status === "held" && cur.fixToken) throw Object.assign(new Error("already_fixing"), { code: "already_fixing", by: cur.heldBy, at: cur.heldAt || null });
       const fx = loadFx(); fx.push({ ...data, id, reqId: req.id, ref: req.ref || "", name: req.patientName || "", phone: req.phone || "", type: req.type, status: "open", createdAt: Date.now() }); saveFx(fx);
       await api.update(req.id, { status: "held", holdReason: "data", holdNote: data.note || "بانتظار تعديل المريض", heldAt: Date.now(), heldBy: data.by || "", fixToken: id, fixAt: Date.now() });
       if (demoBot() && data.sendStatus === "queued") setTimeout(() => { const f = loadFx(); const x = f.find(y => y.id === id); if (x) { x.sendStatus = "sent"; x.sentAt = Date.now(); saveFx(f); } }, 1200);

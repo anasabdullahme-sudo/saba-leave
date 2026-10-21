@@ -28,6 +28,15 @@
   });
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaDone?.newValue) forwardDone(); });
+  // الطلب المفتوح في صحة بهالجهاز → اللوحة تحجزه («مفتوح عند فلان» عند الباقين)
+  const active = () => chrome.storage.local.get("sabaReq", ({ sabaReq: r }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id }); });
+  chrome.storage.onChanged.addListener((ch, area) => {
+    if (area !== "local" || !ch.sabaReq || !isBoard()) return;
+    const o = ch.sabaReq.oldValue, n = ch.sabaReq.newValue;
+    if (o?.id && o.id !== n?.id) post({ type: "SABA_RELEASE", id: o.id });
+    if (n?.id) active();
+  });
+  setInterval(() => { try { active(); } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ } }, 120000);
   chrome.storage.onChanged.addListener((ch, area) => { const a = area === "local" && ch.sabaAlert?.newValue; if (a && isBoard()) post({ type: "SABA_SEHA_ALERT", labels: a.labels || [], at: a.at }); });
 
   // طلب تعديل من داخل صحة → لوحة سابا (تبويب واحد بس يتكفّل فيه)

@@ -474,6 +474,8 @@
     .qi:hover{background:#F5FBFE;border-color:#7FD0F0}
     .qi span{font-size:12px;color:#5B7690}
     .qi.here{border-color:#0E9F6E}
+    .qi.lk{opacity:.6;background:#F6F7F9}
+    .lkb{font-style:normal;font-size:11.5px;font-weight:600;color:#B45309;background:#FEF3C7;border-radius:6px;padding:1px 6px;margin-inline-start:4px}
     .tiny{font-size:11.5px;color:#8AA0B4}
     details summary{cursor:pointer;font-size:12.5px;color:#0082D4}
     .note{font-size:12px;color:#8A5A12;background:#FFF7EA;border-radius:8px;padding:6px 8px}
@@ -506,7 +508,8 @@
   const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
   const queueStale = () => !queueAt || Date.now() - queueAt > 3 * 60000;
   function setMin(v) { minimized = v; $("#p").classList.toggle("min", v); $("#min").textContent = v ? "+" : "–"; }
-  function updateCount() { const c = $("#cnt"), n = pendingQ().length; c.hidden = !n; c.textContent = n; }
+  function updateCount() { const c = $("#cnt"), n = pendingQ().filter(q => !q.lockedBy).length; c.hidden = !n; c.textContent = n; }
+  let lockWarned = null;
   function useReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
   const TYPE_AR = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
   const LTR = new Set(["fileNo", "idNumber", "companionId", "dob", "companionDob", "phone", "leaveStart", "leaveEnd", "visitDate", "ref", "leaveDays", "patientNameEn"]);
@@ -539,17 +542,22 @@
       $("#foot").hidden = true; fixOpen = false;
       const cur = norm(currentAccountText()), pend = pendingQ();
       const here = q => q.account && cur && cur.includes(norm(q.account.key));
-      pend.sort((a, b) => here(b) - here(a));
+      pend.sort((a, b) => (!!a.lockedBy - !!b.lockedBy) || (here(b) - here(a)));     // اللي عند موظف ثاني تنزل تحت
+      const free = pend.filter(q => !q.lockedBy);
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
       b.innerHTML = `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
-        ${pend.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(pend[0].patientName || "")}</button>` : ""}
+        ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
-        <div class="ql">${pend.map(q => `<button class="qi ${here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
+        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
           || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
         ${queueStale() ? `<div class="note" style="background:#FFF4E5;color:#8A4B00">⚠ القائمة مو محدّثة${hh ? ` (آخر تحديث ${hh})` : ""} — افتح لوحة سابا، ولو مفتوحة حدّث صفحتها (F5)</div>` : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
-      const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(pend[0]);
-      root.querySelectorAll(".qi").forEach(el => el.onclick = () => { const q = queue.find(x => x.id === el.dataset.id); if (q) useReq(q); });
+      const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(free[0]);
+      root.querySelectorAll(".qi").forEach(el => el.onclick = () => {
+        const q = queue.find(x => x.id === el.dataset.id); if (!q) return;
+        if (q.lockedBy && lockWarned !== q.id) { lockWarned = q.id; return toastLocal(`${q.lockedBy} فاتح هالطلب — لو متأكد اضغط عليه مرة ثانية`); }
+        lockWarned = null; useReq(q);
+      });
       bindPaste(); return;
     }
     const acc = accountState(req);
@@ -567,7 +575,8 @@
     if (!fxType) fxType = req.type;
     const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(fxType));
     const need = fxType === req.type ? [] : fxType === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : fxType === "attendance" ? ["visitDate"] : req.type === "attendance" ? ["leaveStart", "leaveEnd"] : [];
-    b.innerHTML = `
+    const lockedNow = queue.find(q => q.id === req.id)?.lockedBy;
+    b.innerHTML = `${lockedNow ? `<div class="acc wrong" style="font-weight:600">⚠ ${esc(lockedNow)} فاتح نفس الطلب الحين — تأكدوا مين يرفعه عشان ما ينرفع مرتين</div>` : ""}
       <div class="card">
         <div class="nm">${esc(req.patientName)}</div>
         <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>${esc(req.ref || "")}</span></div>
@@ -773,11 +782,13 @@
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
     if (ch.sabaAlert && TOP) { sehaAlert = ch.sabaAlert.newValue || null; if (sehaAlert) { setMin(false); toastLocal("⚠ صحة أضافت خانة جديدة"); } render(); }
     if (ch.sabaQueue) {
-      const sig = () => JSON.stringify(pendingQ().map(q => [q.id, q.type, q.branch, q.patientName]));
-      const before = sig(), wasStale = queueStale();
+      const sig = () => JSON.stringify(pendingQ().map(q => [q.id, q.type, q.branch, q.patientName, q.lockedBy || ""]));
+      const lk = () => req ? queue.find(q => q.id === req.id)?.lockedBy || "" : "";
+      const before = sig(), wasStale = queueStale(), lkBefore = lk();
       queue = ch.sabaQueue.newValue?.items || []; queueAt = ch.sabaQueue.newValue?.at || 0;
-      if (before === sig() && wasStale === queueStale()) updateCount();          // نبضة كل دقيقة بدون تغيير → لا نعيد الرسم
-      else if (!req && !minimized) render(); else updateCount();
+      if (req) { updateCount(); if (lk() !== lkBefore) render(); }               // تنبيه «فلان فاتح نفس الطلب»
+      else if (before === sig() && wasStale === queueStale()) updateCount();  // نبضة كل دقيقة بدون تغيير → لا نعيد الرسم
+      else if (!minimized) render(); else updateCount();
     }
     if (ch.sabaHidden) hidden = ch.sabaHidden.newValue || {};
     if (ch.sabaReq) {
