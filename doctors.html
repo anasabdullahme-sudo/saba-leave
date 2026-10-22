@@ -33,6 +33,7 @@ button{cursor:pointer;border:0;background:none}
 main{max-width:1240px;margin:0 auto;padding:22px 20px 70px}
 .top{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
 .clock{margin-inline-end:auto}
+@media (max-width:760px){.top{display:grid;grid-template-columns:1fr}.views{width:100%}.views button{flex:1}.search{width:100%!important}}
 .clock b{display:block;font-size:30px;font-weight:700;color:var(--navy);letter-spacing:-.5px;font-variant-numeric:tabular-nums}
 .clock span{color:var(--muted);font-size:14.5px}
 .search{position:relative;width:min(340px,100%)}
@@ -70,7 +71,8 @@ main{max-width:1240px;margin:0 auto;padding:22px 20px 70px}
 .seg{display:inline-flex;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:99px;padding:4px}
 .seg button{height:36px;padding:0 16px;border-radius:99px;font-weight:600;font-size:14px;color:var(--muted)}
 .seg button.on{background:var(--navy);color:#fff}
-.tbl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:26px 0 12px}
+.views{order:0}.views button{height:40px;padding:0 20px;font-size:15px}
+.tbl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 12px}
 .tbl-head h2{font-size:19px;color:var(--navy);margin-inline-end:auto}
 .grp{background:var(--white);border:1px solid var(--line);border-radius:18px;margin-bottom:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,55,101,.04)}
 .gh{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--ice-2);border-bottom:1px solid var(--line)}
@@ -145,6 +147,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
 <main id="app" hidden>
   <div class="top">
     <div class="clock"><b id="clk">--:--</b><span id="day"></span></div>
+    <div class="seg views" role="tablist" aria-label="العرض"><button class="on" data-view="now">المتواجدين الآن</button><button data-view="table">جدول الدوامات</button></div>
     <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" placeholder="ابحث باسم الطبيب أو القسم أو التحويلة" aria-label="بحث"></label>
   </div>
@@ -169,7 +172,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
         <div class="ph"><h2>في إجازة</h2><span class="n" id="vacN">0</span><button class="act" id="addVac" hidden>+ إجازة</button></div>
         <div id="vacList"></div>
       </section>
-      <section class="panel" id="covPanel">
+      <section class="panel" id="covPanel" hidden>
         <div class="ph"><h2>تغطية في فروع ثانية</h2><button class="act" id="addCov" hidden>+ تغطية</button></div>
         <div id="covList"></div>
       </section>
@@ -266,7 +269,7 @@ const WEEK = [6, 0, 1, 2, 3, 4];                     // السبت ← الخم�
 const FLOORS = ["B", "G", "1", "2", "3", "4", "5"];
 const FLOOR_DEF = { B: "عيادة التجميل (بيوتي)", G: "الدور الأرضي", 1: "الدور الأول", 2: "الدور الثاني", 3: "الدور الثالث", 4: "الدور الرابع", 5: "الدور الخامس" };
 
-const S = { board: null, by: "floor", q: "", edit: false, me: null };
+const S = { board: null, by: "floor", q: "", edit: false, me: null, view: "now" };
 const floorName = f => S.board?.floorNames?.[f] || FLOOR_DEF[f] || ("الدور " + f);
 
 /* ---------- الوقت (توقيت جدة دائماً) ---------- */
@@ -321,7 +324,8 @@ function render() {
   $("#clk").textContent = hm(t.m);
   $("#day").textContent = t.wd === 5 ? "الجمعة — العيادات مغلقة" : `${WD[t.wd]} · ${new Date().toLocaleDateString("ar-SA-u-ca-gregory", { timeZone: "Asia/Riyadh", day: "numeric", month: "long" })}`;
   const b = S.board;
-  $("#importBox").hidden = !!b; $("#dash").hidden = !b; $(".tbl-head").hidden = !b;
+  $("#importBox").hidden = !!b;
+  $("#dash").hidden = !b || S.view !== "now"; $(".tbl-head").hidden = !b || S.view !== "table"; $("#groups").hidden = S.view !== "table";
   if (!b) { $("#groups").innerHTML = ""; return; }
   const docs = allDocs();
   // متواجدين الآن
@@ -345,7 +349,7 @@ function render() {
     || '<div class="empty">ما فيه إجازات حالياً.</div>';
   // التغطية
   const cov = b.coverage || [];
-  $("#covPanel").hidden = !cov.length && !S.edit;
+  $("#covPanel").hidden = true;          // التغطية مخفية (البيانات محفوظة)
   $("#covList").innerHTML = cov.map(c => `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(c.doctor)}</div><div class="meta">${esc(c.branch)}${c.when ? " · " + esc(c.when) : ""}${c.note ? " · " + esc(c.note) : ""}</div></div>${S.edit ? `<button class="mini" data-cov="${esc(c.id)}">تعديل</button>` : ""}</div>`).join("")
     || '<div class="empty">ما فيه تغطيات.</div>';
   // الجدول
@@ -373,7 +377,7 @@ function render() {
       </tbody></table></section>`;
   }).join("") || '<div class="panel empty">ما لقيت شي بهالبحث.</div>';
   // السجل
-  $("#logPanel").hidden = !S.edit || !(b.log || []).length;
+  $("#logPanel").hidden = !S.edit || S.view !== "table" || !(b.log || []).length;
   $("#logList").innerHTML = (b.log || []).map(l => `${new Date(l.at).toLocaleString("ar-SA-u-ca-gregory", { timeZone: "Asia/Riyadh", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} — <b>${esc(l.by)}</b>: ${esc(l.what)}`).join("<br>");
 }
 
@@ -492,10 +496,11 @@ document.addEventListener("click", async e => {
   if (t.dataset.dep) openDep(t.dataset.dep);
   if (t.dataset.cov) openCov(t.dataset.cov);
   if (t.dataset.delvac) { const v = S.board.vacations.find(x => x.id === t.dataset.delvac); if (v) await save(b => { b.vacations = b.vacations.filter(x => x.id !== v.id); return b; }, `شال إجازة د. ${v.name}`); }
-  if (t.dataset.by) { S.by = t.dataset.by; $$(".seg button").forEach(x => x.classList.toggle("on", x === t)); try { localStorage.setItem("saba_docs_by", S.by); } catch {} render(); }
+  if (t.dataset.view) { S.view = t.dataset.view; $$(".views button").forEach(x => x.classList.toggle("on", x === t)); render(); scrollTo(0, 0); }
+  if (t.dataset.by) { S.by = t.dataset.by; $$(".seg button[data-by]").forEach(x => x.classList.toggle("on", x === t)); try { localStorage.setItem("saba_docs_by", S.by); } catch {} render(); }
 });
 $("#addVac").onclick = openVac; $("#addCov").onclick = () => openCov(null); $("#addDoc").onclick = () => openDoc(null);
-$("#btnEdit").onclick = () => { S.edit = !S.edit; $("#btnEdit").classList.toggle("on", S.edit); $("#btnEdit").textContent = S.edit ? "✓ خلصت التعديل" : "✎ تعديل الجداول"; ["#addVac", "#addCov", "#addDoc"].forEach(s => $(s).hidden = !S.edit); render(); };
+$("#btnEdit").onclick = () => { S.edit = !S.edit; $("#btnEdit").classList.toggle("on", S.edit); $("#btnEdit").textContent = S.edit ? "✓ خلصت التعديل" : "✎ تعديل الجداول"; ["#addVac", "#addDoc"].forEach(s => $(s).hidden = !S.edit); render(); };
 $("#q").addEventListener("input", e => { S.q = e.target.value.trim(); render(); });
 $("#impFile").onchange = async e => {
   const f = e.target.files?.[0]; if (!f) return;
@@ -508,7 +513,7 @@ $("#impFile").onchange = async e => {
 
 /* ---------- التشغيل ---------- */
 try { S.by = localStorage.getItem("saba_docs_by") === "dep" ? "dep" : "floor"; } catch {}
-$$(".seg button").forEach(x => x.classList.toggle("on", x.dataset.by === S.by));
+$$(".seg button[data-by]").forEach(x => x.classList.toggle("on", x.dataset.by === S.by));
 const api = await backend("staff");
 let unsub = null;
 api.onAuth(user => {
