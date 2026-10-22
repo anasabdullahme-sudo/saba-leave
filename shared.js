@@ -269,6 +269,20 @@ export async function devKey(n) {
   return [...new Uint8Array(h)].slice(0, 10).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 export const arNum = n => String(n).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
+/* ---------- تنبيهات الأطباء (من قروب الاستقبال) → إضافة كروم تعرضها فوق أي صفحة ---------- */
+export function relayDoctorAlerts(api, onLocal) {
+  const seen = new Set(); let first = true;
+  return api.watchToday?.(t => {
+    for (const ev of t?.events || []) {
+      if (seen.has(ev.id)) continue; seen.add(ev.id);
+      if (first && Date.now() - ev.at > 120000) continue;          // القديمة وقت فتح الصفحة ما نعيدها
+      if (Date.now() - ev.at > 10 * 60000) continue;
+      window.postMessage({ type: "SABA_DOC_ALERT", ev }, location.origin);
+      onLocal?.(ev);
+    }
+    first = false;
+  });
+}
 /** عنوان الورقة فوق لازم يكون إجازة مرضية (أو مشهد) — غير كذا (وصفة، تحليل…) ما ينقبل */
 export const leaveTitleOk = t => !String(t || "").trim() || /sick\s*leave|leave\s*report|medical\s*leave|attendance|visit|حضور|إجاز[ةه]\s*مرضي|اجاز[ةه]\s*مرضي|بإجاز[ةه]|باجاز[ةه]|مشهد|مرافق|companion/i.test(String(t));
 export const makeRef = () => {
@@ -672,6 +686,10 @@ async function liveBackend(role) {
       tx.set(ref, next);
     }),
     async getBoardPrev() { const d = await FS.getDoc(FS.doc(db, "board", "bawadi_prev")); return d.exists() ? d.data() : null; },
+    // حالات اليوم من قروب الاستقبال (يكتبها البوت) + اقتراحات التغييرات الدائمة
+    watchToday(cb) { return FS.onSnapshot(FS.doc(db, "board", "bawadi_today"), d => cb(d.exists() ? d.data() : null), e => console.warn("today", e)); },
+    watchInbox(cb) { return FS.onSnapshot(FS.doc(db, "board", "bawadi_inbox"), d => cb(d.exists() ? (d.data().items || []) : []), e => console.warn("inbox", e)); },
+    dropInbox: id => FS.runTransaction(db, async tx => { const r = FS.doc(db, "board", "bawadi_inbox"), cur = (await tx.get(r)).data() || { items: [] }; tx.set(r, { items: (cur.items || []).filter(x => x.id !== id), at: Date.now() }); }),
     // رجوع للنسخة السابقة (والحالية تصير هي السابقة — فتقدر ترجع لها لو غيّرت رأيك)
     restoreBoard: by => FS.runTransaction(db, async tx => {
       const ref = FS.doc(db, "board", "bawadi"), prevRef = FS.doc(db, "board", "bawadi_prev");
@@ -743,7 +761,7 @@ function demoBackend() {
   let listeners = [];
   const fire = () => listeners.forEach(f => f());
   bc && (bc.onmessage = fire);
-  window.addEventListener("storage", e => (e.key === KEY || e.key === KEY + "_fixes" || e.key === KEY + "_board") && fire());
+  window.addEventListener("storage", e => [KEY, KEY + "_fixes", KEY + "_board", KEY + "_today", KEY + "_inbox"].includes(e.key) && fire());
 
   if (!load()) save(seed());
 
@@ -832,6 +850,9 @@ function demoBackend() {
     async exportAll() { return load(); },
     watchBoard(cb) { const f = () => { try { cb(JSON.parse(localStorage.getItem(KEY + "_board") || "null")); } catch { cb(null); } }; listeners.push(f); f(); return () => { listeners = listeners.filter(x => x !== f); }; },
     async getBoardPrev() { return JSON.parse(localStorage.getItem(KEY + "_board_prev") || "null"); },
+    watchToday(cb) { const f = () => { try { cb(JSON.parse(localStorage.getItem(KEY + "_today") || "null")); } catch { cb(null); } }; listeners.push(f); f(); return () => { listeners = listeners.filter(x => x !== f); }; },
+    watchInbox(cb) { const f = () => { try { cb(JSON.parse(localStorage.getItem(KEY + "_inbox") || "[]")); } catch { cb([]); } }; listeners.push(f); f(); return () => { listeners = listeners.filter(x => x !== f); }; },
+    async dropInbox(id) { const l = JSON.parse(localStorage.getItem(KEY + "_inbox") || "[]").filter(x => x.id !== id); localStorage.setItem(KEY + "_inbox", JSON.stringify(l)); fire(); },
     async restoreBoard(by) {
       const cur = JSON.parse(localStorage.getItem(KEY + "_board") || "null"), prev = JSON.parse(localStorage.getItem(KEY + "_board_prev") || "null");
       if (!prev) throw Object.assign(new Error("no_prev"), { code: "no_prev" });

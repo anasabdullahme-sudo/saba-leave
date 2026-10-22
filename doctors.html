@@ -78,6 +78,7 @@ main{max-width:1800px;margin:0 auto;padding:22px 20px 70px}
 .tag.green{background:#E2F6EE;color:#0A7A55}
 .tag.blue{background:var(--ice);color:var(--blue)}
 .tag.gray{background:#EEF2F5;color:var(--muted)}
+.tag.red{background:#FDECEC;color:#B4232A}
 .x{color:var(--muted);font-size:13px;padding:4px 8px;border-radius:8px}
 .x:hover{color:var(--red);background:#FDECEC}
 .seg{display:inline-flex;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:99px;padding:4px}
@@ -130,6 +131,11 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
 .btn-g{background:var(--ice);color:var(--navy)}
 .btn-d{background:#FDECEC;color:var(--red);margin-inline-start:auto}
 .err{color:var(--red);font-size:13px}
+.dal{display:flex;width:min(360px,calc(100vw - 32px));background:#fff;border-radius:14px;box-shadow:0 14px 40px -10px rgba(0,25,50,.45),0 0 0 1px rgba(0,55,101,.08);overflow:hidden;animation:dalIn .25s}
+@keyframes dalIn{from{transform:translateY(16px);opacity:0}}
+.dal>i{width:7px;background:#E5383B}.dal.green>i{background:#0E9F6E}.dal.orange>i{background:#E59A1A}.dal.blue>i{background:#0082D4}
+.dal>div{flex:1;padding:10px 14px;display:grid;gap:1px}.dal b{font-size:13.5px;color:#B4232A}.dal.green b{color:#0A7A55}.dal.orange b{color:#9A5B00}.dal.blue b{color:#0B5FA5}
+.dal span{font-size:12px;color:#8AA0B4}.dal strong{font-size:18px}.dal small{font-size:12.5px;color:var(--muted)}.dal>button{align-self:start;padding:8px 10px;color:#8AA0B4}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);opacity:0;pointer-events:none;background:var(--navy);color:#fff;padding:12px 18px;border-radius:14px;font-size:14.5px;transition:.25s;z-index:80;box-shadow:var(--shadow)}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 .gate{max-width:420px;margin:12vh auto;text-align:center;display:grid;gap:14px}
@@ -192,6 +198,10 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
   </div>
   <div id="groups"></div>
 
+  <section class="panel" id="inboxPanel" hidden style="margin-top:22px">
+    <div class="ph"><h2>💡 اقتراحات من القروب</h2><span class="n" id="inboxN">0</span></div>
+    <div id="inboxList"></div>
+  </section>
   <section class="panel" id="logPanel" hidden style="margin-top:22px">
     <div class="ph"><h2>آخر التعديلات</h2><button class="act" id="restore" hidden>↩ رجّع النسخة السابقة</button></div>
     <div class="empty" id="prevInfo" hidden style="background:var(--ice-2);border-radius:12px;padding:8px 12px;margin-bottom:8px"></div>
@@ -270,10 +280,11 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
   <div class="err" id="loginErr"></div>
   <div class="btns"><button class="btn btn-p" id="login">دخول</button><button class="btn btn-g" data-close>إلغاء</button></div>
 </div></div>
+<div id="dalWrap" style="position:fixed;left:16px;bottom:16px;z-index:95;display:grid;gap:8px"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { backend, arNum, DEMO } from "./shared.js?v=20261022d";
+import { backend, arNum, DEMO, relayDoctorAlerts } from "./shared.js?v=20261022e";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const toast = t => { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); };
@@ -312,6 +323,42 @@ function activeShift(d, t) {
   return null;
 }
 const startsSoon = (d, t) => d.workdays.includes(t.wd) && shiftsFor(d, t.wd).find(s => s.s > t.m && s.s - t.m <= 60);
+/* ---------- حالات اليوم من قروب الاستقبال ---------- */
+const stOf = d => { const t = S.today; return t && t.date === nowRiyadh().iso ? t.st?.[d.id] || null : null; };
+const dayEnd = (d, wd) => Math.max(0, ...shiftsFor(d, wd).map(s => s.e > s.s ? s.e : 1440));
+// متواجد الحين؟ (الجدول + تحديثات القروب)
+function liveOn(d, t) {
+  if (onVacation(d, t.iso)) return null;
+  const s = stOf(d), base = activeShift(d, t);
+  if (!s) return base ? { end: base.e } : null;
+  switch (s.kind) {
+    case "stop": case "absent": return null;
+    case "late": return t.m < s.from ? null : base ? { end: base.e } : null;
+    case "leaves": return s.until != null && t.m >= s.until ? null : base ? { end: s.until ?? base.e } : null;
+    case "starts": { const end = s.until ?? (dayEnd(d, t.wd) || 1440); return s.from != null && t.m >= s.from && t.m < end ? { end } : null; }
+    case "present": return s.until != null && t.m >= s.until ? null : { end: s.until ?? base?.e ?? null };
+    case "free": case "busy": case "appt": return { end: base?.e ?? null };
+    default: return base ? { end: base.e } : null;              // stop_at وغيره
+  }
+}
+const recent = (s, mins) => Date.now() - (s.at || 0) < mins * 60000;
+function chip(d, t) {
+  const s = stOf(d); if (!s) return "";
+  const c = (cls, txt) => ` <span class="tag ${cls}">${txt}</span>`;
+  switch (s.kind) {
+    case "stop": return c("red", `⛔ وقف الاستقبال ${new Date(s.at).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" })}`);
+    case "absent": return c("red", "غائب اليوم");
+    case "stop_at": return c("amber", `يوقف ${hm(s.from)}`);
+    case "late": return t.m < s.from ? c("amber", `متأخر — يوصل ${hm(s.from)}`) : "";
+    case "leaves": return s.until != null ? c("amber", `يطلع ${hm(s.until)}`) : "";
+    case "starts": return s.from != null ? c("blue", `اليوم من ${hm(s.from)}`) : "";
+    case "appt": return c("amber", "مواعيد فقط");
+    case "busy": return recent(s, 90) ? c("amber", `⏳ ${s.count ? s.count + " بالانتظار" : "زحمة"}`) : "";
+    case "free": return recent(s, 60) ? c("green", "🟢 فاضي") : "";
+    case "present": return c("green", "موجود");
+  }
+  return "";
+}
 const onVacation = (d, iso) => (S.board?.vacations || []).find(v => (v.doctorId === d.id || (!v.doctorId && v.code && v.code === d.code)) && v.start <= iso && (!v.end || v.end >= iso));
 
 /* ---------- الاستيراد من ملف البيانات (مرة وحدة) ---------- */
@@ -345,29 +392,34 @@ function render() {
   if (!b) { $("#groups").innerHTML = S.edit ? "" : '<div class="panel empty">الجداول لسى ما تجهّزت.</div>'; $("#groups").hidden = false; return; }
   const docs = allDocs();
   // متواجدين الآن
-  const now = docs.filter(d => !onVacation(d, t.iso) && activeShift(d, t)).filter(match)
+  const now = docs.filter(d => liveOn(d, t)).filter(match)
     .sort((a, b) => FLOORS.indexOf(a.fl) - FLOORS.indexOf(b.fl));
-  $("#nowN").textContent = now.length;
+  // أطباء مو في الجدول قالوا عنهم «موجود» في القروب
+  const extra = (S.today?.date === t.iso ? S.today.extra || [] : []).filter(x => { const s = S.today.st?.[x.key]; return s && (s.until == null || t.m < s.until) && (!S.q || x.name.includes(S.q)); });
+  $("#nowN").textContent = now.length + extra.length;
   // سطر مختصر لكل طبيب: الاسم + التحويلة، وتحته الغرفة ولين متى
   const nm = d => { const [a, ...r] = d.name.split(/\s*[–-]\s*/); return `د. ${esc(a)}${r.length ? ` <small>${esc(r.join(" – "))}</small>` : ""}`; };
-  const row = (d, line, showDep) => `<div class="dr"><span class="n">${nm(d)}</span><span class="e">${d.ext ? "☎ " + esc(d.ext) : ""}</span>
+  const row = (d, line, showDep) => `<div class="dr"><span class="n">${nm(d)}${chip(d, t)}</span><span class="e">${d.ext ? "☎ " + esc(d.ext) : ""}</span>
     <span class="s">${line}${showDep ? " · " + esc(d.dep.name) : ""}${d.fl !== d.dep.floor ? " · " + esc(floorName(d.fl)) : ""}${d.room ? " · غرفة " + esc(d.room) : ""}${d.fee ? " · " + esc(d.fee) + " ريال" : ""}</span></div>`;
   // مقسّمين حسب القسم (الأسنان لحالهم، الباطنية لحالهم…) بترتيب الأدوار
   const byDep = new Map(); now.forEach(d => { if (!byDep.has(d.dep.id)) byDep.set(d.dep.id, []); byDep.get(d.dep.id).push(d); });
   $("#nowList").innerHTML = [...byDep.values()].map(l => `<div class="dg"><div class="dgh"><b>${esc(l[0].dep.name)}</b><span>${esc(floorName(l[0].dep.floor))}</span><i>${l.length}</i></div>
-    ${l.map(d => row(d, `<b>لين ${hm(activeShift(d, t).e)}</b>`)).join("")}</div>`).join("")
+    ${l.map(d => { const o = liveOn(d, t); return row(d, o?.end != null ? `<b>لين ${hm(o.end)}</b>` : "<b>موجود</b>"); }).join("")}</div>`).join("")
+    + (extra.length ? `<div class="dg"><div class="dgh"><b>موجودين اليوم (من القروب)</b><i>${extra.length}</i></div>${extra.map(x => `<div class="dr"><span class="n">د. ${esc(x.name)} <span class="tag green">موجود</span></span><span class="e"></span><span class="s"><b>${x.until != null ? "لين " + hm(x.until) : "اليوم"}</b>${x.dep ? " · " + esc(x.dep) : ""}</span></div>`).join("")}</div>` : "")
     || `<div class="empty">${t.wd === 5 ? "يوم الجمعة — ما فيه دوام." : "ما فيه أحد متواجد الحين."}</div>`;
-  const soon = docs.filter(d => !onVacation(d, t.iso) && !activeShift(d, t) && startsSoon(d, t)).filter(match);
+  const soon = docs.filter(d => !onVacation(d, t.iso) && !liveOn(d, t) && !["stop", "absent"].includes(stOf(d)?.kind) && startsSoon(d, t)).filter(match);
   $("#soonWrap").hidden = !soon.length;
   $("#soonList").innerHTML = soon.length ? `<div class="dg">${soon.map(d => row(d, `<b>يبدأ ${hm(startsSoon(d, t).s)}</b>`, true)).join("")}</div>` : "";
   // الإجازات: الحالية والقادمة
   const vacs = (b.vacations || []).filter(v => !v.end || v.end >= t.iso).sort((a, c) => a.start.localeCompare(c.start));
-  $("#vacN").textContent = vacs.filter(v => v.start <= t.iso).length;
+  const absent = docs.filter(d => stOf(d)?.kind === "absent");
+  $("#vacN").textContent = vacs.filter(v => v.start <= t.iso).length + absent.length;
   const dmy = s => s ? s.split("-").reverse().join("/") : "";
   $("#vacList").innerHTML = vacs.map(v => { const cur = v.start <= t.iso, d = docs.find(x => x.id === v.doctorId);
     return `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(v.name)}</div><div class="meta">${d ? esc(d.dep.name) + " · " : ""}${esc(v.type)} · من ${dmy(v.start)}${v.end ? " إلى " + dmy(v.end) : " (الرجوع ما تحدد)"}</div></div>
       <span class="tag ${cur ? "amber" : "blue"}">${cur ? "في إجازة" : "قادمة"}</span>${S.edit ? `<button class="x" data-delvac="${esc(v.id)}" aria-label="حذف">✕</button>` : ""}</div>`; }).join("")
-    || '<div class="empty">ما فيه إجازات حالياً.</div>';
+    || "";
+  $("#vacList").innerHTML = absent.map(d => `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(d.name)}</div><div class="meta">${esc(d.dep.name)} · من القروب</div></div><span class="tag red">غائب اليوم</span></div>`).join("") + $("#vacList").innerHTML || '<div class="empty">ما فيه إجازات حالياً.</div>';
   // التغطية
   const cov = b.coverage || [];
   $("#covPanel").hidden = true;          // التغطية مخفية (البيانات محفوظة)
@@ -389,14 +441,21 @@ function render() {
     const act = S.edit && g.dep ? `<span class="act"><button class="mini" data-adddoc="${esc(g.dep.id)}">+ طبيب</button><button class="mini" data-dep="${esc(g.dep.id)}">القسم</button></span>` : "";
     return `<section class="grp"><div class="gh"><b>${esc(g.title)}</b><span class="tag gray">${g.items.length}</span>${notes}${act}</div>
       <table><thead><tr><th>الطبيب</th><th>${S.by === "floor" ? "القسم" : "الدور"}</th><th>الدوام</th><th>الأيام</th><th>غرفة</th><th>تحويلة</th><th>كشفية</th>${S.edit ? '<th class="edit-col"></th>' : ""}</tr></thead><tbody>
-      ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && activeShift(d, t);
-        return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : on ? ' <span class="tag green">متواجد</span>' : ""}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
+      ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && liveOn(d, t), ch = chip(d, t);
+        return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : ch || (on ? ' <span class="tag green">متواجد</span>' : "")}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
         <td data-l="${S.by === "floor" ? "القسم" : "الدور"}">${esc(S.by === "floor" ? d.dep.name : floorName(d.fl))}</td>
         <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}</td>
         <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
         ${S.edit ? `<td class="edit-col"><button class="mini" data-doc="${esc(d.id)}">تعديل</button></td>` : ""}</tr>`; }).join("")}
       </tbody></table></section>`;
   }).join("") || '<div class="panel empty">ما لقيت شي بهالبحث.</div>';
+  // اقتراحات القروب (طبيب جديد، نقل، تغيير دوام ثابت) — للمسؤول بس
+  const inbox = S.inbox || [];
+  $("#inboxPanel").hidden = !S.edit || !inbox.length; $("#inboxN").textContent = inbox.length;
+  const KN = { new_doctor: "طبيب جديد", moved: "انتقل لفرع ثاني", schedule_change: "تغيير دوام ثابت" };
+  $("#inboxList").innerHTML = inbox.map(x => `<div class="vac"><div style="flex:1"><div class="nm">${esc(KN[x.kind] || x.kind)}: د. ${esc(x.name)}${x.dept ? " — " + esc(x.dept) : ""}</div>
+    <div class="meta">«${esc(x.text)}» — ${esc(x.by)}${x.date ? " · " + esc(x.date) : ""}${x.room ? " · عيادة " + esc(x.room) : ""}${x.branch ? " · " + esc(x.branch) : ""}</div></div>
+    <button class="mini" data-inbox="${esc(x.id)}">${x.kind === "new_doctor" ? "أضفه" : "عدّل"}</button><button class="x" data-inboxdrop="${esc(x.id)}">تجاهل</button></div>`).join("");
   // السجل
   $("#logPanel").hidden = !S.edit || !(b.log || []).length;
   if (S.edit) loadPrev();
@@ -432,7 +491,8 @@ $$(".modal").forEach(m => m.addEventListener("click", e => { if (e.target === m)
 addEventListener("keydown", e => { if (e.key === "Escape") $$(".modal").forEach(m => m.hidden = true); });
 const floorOpts = sel => sel.innerHTML = FLOORS.map(f => `<option value="${f}">${esc(floorName(f))}</option>`).join("");
 
-let editDoc = null;
+let editDoc = null, pendingInbox = null;
+const norm2 = s => String(s || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/^ال/, "").trim();
 function openDoc(docId, depId) {
   const b = S.board, d = docId ? allDocs().find(x => x.id === docId) : null;
   editDoc = { id: docId, depId: d?.dep.id || depId || b.departments[0]?.id };
@@ -479,7 +539,7 @@ $("#dSave").onclick = async () => {
     p.doctors.push(nd);
     return b;
   }, `${editDoc.id ? "عدّل" : "أضاف"} د. ${name}`);
-  if (ok) $("#mDoc").hidden = true;
+  if (ok) { $("#mDoc").hidden = true; if (pendingInbox) { api.dropInbox?.(pendingInbox).catch(() => {}); pendingInbox = null; } }
 };
 $("#dDel").onclick = async () => {
   const d = allDocs().find(x => x.id === editDoc.id); if (!d) return;
@@ -535,6 +595,15 @@ document.addEventListener("click", async e => {
   if (t.dataset.adddoc) openDoc(null, t.dataset.adddoc);
   if (t.dataset.dep) openDep(t.dataset.dep);
   if (t.dataset.cov) openCov(t.dataset.cov);
+  if (t.dataset.inboxdrop) { await api.dropInbox?.(t.dataset.inboxdrop).catch(() => toast("ما قدرت — تأكد من الاتصال")); }
+  if (t.dataset.inbox) {
+    const x = (S.inbox || []).find(i => i.id === t.dataset.inbox); if (!x) return;
+    pendingInbox = x.id;
+    if (x.kind === "new_doctor") {
+      const nd = norm2(x.dept); const dep = S.board.departments.find(p => nd && (norm2(p.name).includes(nd) || nd.includes(norm2(p.name)))) || S.board.departments.find(p => /اسنان|أسنان/.test(p.name) && /اسنان|أسنان/.test(x.dept));
+      openDoc(null, dep?.id); $("#dName").value = x.name + (x.dept ? " – " + x.dept : ""); $("#dRoom").value = x.room || "";
+    } else if (x.doctorId) openDoc(x.doctorId); else toast("افتح الطبيب من الجدول وعدّله");
+  }
   if (t.dataset.delvac) { const v = S.board.vacations.find(x => x.id === t.dataset.delvac); if (v) await save(b => { b.vacations = b.vacations.filter(x => x.id !== v.id); return b; }, `شال إجازة د. ${v.name}`); }
   if (t.dataset.view) { S.view = t.dataset.view; $$(".views button").forEach(x => x.classList.toggle("on", x === t)); render(); scrollTo(0, 0); }
   if (t.dataset.by) { S.by = t.dataset.by; $$(".seg button[data-by]").forEach(x => x.classList.toggle("on", x === t)); try { localStorage.setItem("saba_docs_by", S.by); } catch {} render(); }
@@ -578,6 +647,19 @@ const api = await backend("staff");
 // العرض مفتوح بدون تسجيل دخول — التعديل للمسؤول بس
 api.onAuth(user => { S.me = user; if (S.edit && !(user && user.role === "admin")) setEdit(false); });
 api.watchBoard(b => { S.err = ""; S.board = b; render(); }, e => { console.error(e); S.err = e?.code === "permission-denied" ? "قواعد Firebase تحتاج تحديث عشان تظهر الجداول (العرض بدون تسجيل دخول)." : "تعذّر التحميل — تأكد من الاتصال."; render(); });
+api.watchToday?.(t => { S.today = t; render(); });
+api.watchInbox?.(l => { S.inbox = l; if (S.edit) render(); });
+// تنبيهات القروب: الإضافة تعرضها فوق أي صفحة؛ وبدون الإضافة تطلع هنا تحت يسار
+let extOn = false;
+addEventListener("message", e => { if (e.source === window && e.data?.type === "SABA_EXT_READY") extOn = true; });
+window.postMessage({ type: "SABA_EXT_PING" }, location.origin);
+relayDoctorAlerts(api, ev => { if (!extOn) pageAlert(ev); });
+function pageAlert(ev) {
+  const box = document.createElement("div"); box.className = "dal " + (ev.color || "");
+  box.innerHTML = `<i></i><div><b>${esc(ev.title)}</b><span>${new Date(ev.at).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" })}</span><strong>د. ${esc(ev.name)}</strong><small>${esc([ev.info, ev.dep, ev.ext ? "تحويلة " + ev.ext : ""].filter(Boolean).join(" · "))}</small></div><button aria-label="إغلاق">✕</button>`;
+  box.querySelector("button").onclick = () => box.remove();
+  $("#dalWrap").append(box); setTimeout(() => box.remove(), 5000);
+}
 const waitMe = email => new Promise(res => { let n = 0; const t = setInterval(() => { if ((S.me && (S.me.email || "").toLowerCase() === email.toLowerCase()) || ++n > 40) { clearInterval(t); res(S.me); } }, 150); });
 $("#login").onclick = async () => {
   const email = $("#em").value.trim(), pw = $("#pw").value; $("#loginErr").textContent = "";

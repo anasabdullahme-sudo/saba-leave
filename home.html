@@ -49,7 +49,7 @@ a.tile.main{color:#fff}
  <a class="mini" href="./saba-seha-extension.zip" download><div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></div><span>أداة صحة<small>تحميل الإضافة لجهاز جديد</small></span></a>
 </div>
 </main><script type="module">
-import { backend, SEHA_URL } from "./shared.js?v=20261022d";
+import { backend, SEHA_URL, relayDoctorAlerts } from "./shared.js?v=20261022e";
 const $ = s => document.querySelector(s);
 $("#sehaLink").href = SEHA_URL;
 const WD = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
@@ -64,7 +64,7 @@ function active(d, t) {
   const y = (t.wd + 6) % 7; if (d.workdays.includes(y)) for (const s of shiftsFor(d, y)) if (s.e <= s.s && t.m < s.e) return true;
   return false;
 }
-let board = null;
+let board = null, today = null;
 function tick() {
   const t = nowRiyadh();
   $("#clk").textContent = hm(t.m);
@@ -73,14 +73,17 @@ function tick() {
   if (!board) return;
   const vac = d => (board.vacations || []).some(v => (v.doctorId === d.id || (!v.doctorId && v.code && v.code === d.code)) && v.start <= t.iso && (!v.end || v.end >= t.iso));
   const docs = (board.departments || []).flatMap(p => p.doctors);
-  const on = docs.filter(d => !vac(d) && active(d, t));
+  const st = d => today?.date === t.iso ? today.st?.[d.id] : null;
+  const on = docs.filter(d => !vac(d) && active(d, t) && !["stop", "absent"].includes(st(d)?.kind) && !(st(d)?.kind === "late" && t.m < st(d).from));
   const soon = docs.filter(d => !vac(d) && !active(d, t) && d.workdays.includes(t.wd) && shiftsFor(d, t.wd).some(s => s.s > t.m && s.s - t.m <= 60));
   $("#nNow").textContent = on.length; $("#nSoon").textContent = soon.length; $("#soonSt").hidden = !soon.length;
-  $("#nVac").textContent = docs.filter(vac).length;
+  $("#nVac").textContent = docs.filter(d => vac(d) || st(d)?.kind === "absent").length;
 }
 tick(); setInterval(tick, 20000);
 const api = await backend("staff");
 api.watchBoard(b => { board = b; tick(); }, () => {});
+api.watchToday?.(t => { today = t; tick(); });
+relayDoctorAlerts(api);
 let unsub = null;
 api.onAuth(u => {
   const ok = u && !u.denied;

@@ -57,6 +57,21 @@
     chrome.storage.local.set({ sabaFixRes: res }); chrome.storage.local.remove("sabaFixReq");
   });
 
+  // تنبيه طبيب من قروب الاستقبال → كل تبويبات كروم (alert.js يعرضه في الصفحة اللي قدامك)
+  window.addEventListener("message", async e => {
+    if (e.source !== window || e.data?.type !== "SABA_DOC_ALERT" || !e.data.ev?.id) return;
+    const ev = e.data.ev;
+    try {
+      const { sabaDocSeen: seen = [] } = await chrome.storage.local.get("sabaDocSeen");
+      if (seen.includes(ev.id)) return;
+      await chrome.storage.local.set({ sabaDocClaim: { id: ev.id, tab: TAB } });
+      await new Promise(r => setTimeout(r, 150 + Math.random() * 150));
+      const { sabaDocClaim: c, sabaDocSeen: s2 = [] } = await chrome.storage.local.get(["sabaDocClaim", "sabaDocSeen"]);
+      if (c?.tab !== TAB || s2.includes(ev.id)) return;              // تبويب ثاني تكفّل فيه
+      await chrome.storage.local.set({ sabaDocAlert: { ...ev, shownAt: Date.now() }, sabaDocSeen: [...s2, ev.id].slice(-150) });
+    } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ }
+  });
+
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce); else announce();
   setTimeout(announce, 1500);
 })();
