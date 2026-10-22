@@ -207,6 +207,11 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
   <div class="f"><label>أيام الدوام</label><div class="days" id="dDays"></div></div>
   <div class="f"><label>الشفت الأول</label><div class="shift"><input type="time" id="s1a"><span>إلى</span><input type="time" id="s1b"><span></span></div></div>
   <div class="f"><label>الشفت الثاني (اختياري)</label><div class="shift"><input type="time" id="s2a"><span>إلى</span><input type="time" id="s2b"><button class="x" id="s2x" type="button">مسح</button></div></div>
+  <details id="altBox"><summary style="cursor:pointer;font-weight:600;font-size:13.5px;color:var(--blue)">دوام مختلف لأيام معيّنة</summary>
+    <div class="f" style="margin-top:8px"><label>الأيام</label><div class="days" id="aDays"></div></div>
+    <div class="f"><label>دوامها في هالأيام</label><div class="shift"><input type="time" id="a1a"><span>إلى</span><input type="time" id="a1b"><span></span></div></div>
+    <div class="f"><label>شفت ثاني بهالأيام (اختياري)</label><div class="shift"><input type="time" id="a2a"><span>إلى</span><input type="time" id="a2b"><button class="x" id="aX" type="button">مسح الكل</button></div></div>
+  </details>
   <div class="err" id="dErr"></div>
   <div class="btns"><button class="btn btn-p" id="dSave">حفظ</button><button class="btn btn-g" data-close>إلغاء</button><button class="btn btn-d" id="dDel">حذف الطبيب</button></div>
 </div></div>
@@ -273,18 +278,22 @@ function nowRiyadh() {
 const hm = m => { m = ((m % 1440) + 1440) % 1440; const h = Math.floor(m / 60), mi = m % 60; return `${h % 12 || 12}${mi ? ":" + String(mi).padStart(2, "0") : ""}${h < 12 ? "ص" : "م"}`; };
 const toTime = m => m == null ? "" : `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const fromTime = v => { const x = /^(\d{1,2}):(\d{2})/.exec(v || ""); return x ? +x[1] * 60 + +x[2] : null; };
-const shiftTxt = d => (d.shifts || []).length ? d.shifts.map(s => `${hm(s.s)} – ${hm(s.e)}`).join("  و  ") : "الدوام ما تحدد";
+const shTxt = l => l.map(s => `${hm(s.s)} – ${hm(s.e)}`).join("  و  ");
+// دوام مختلف لأيام معيّنة (مثلاً الأحد والأربعاء 9ص–1م)
+const shiftsFor = (d, wd) => d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []);
+const shiftTxt = d => ((d.shifts || []).length ? shTxt(d.shifts) : "الدوام ما تحدد") + (d.alt?.days?.length ? ` · ${WEEK.filter(i => d.alt.days.includes(i)).map(i => WD[i]).join(" و")}: ${shTxt(d.alt.shifts || []) || "—"}` : "");
 const daysTxt = w => { const k = WEEK.filter(i => w.includes(i)); return k.length === 6 ? "السبت – الخميس" : k.map(i => WD[i]).join("، ") || "—"; };
 const prevDay = wd => (wd + 6) % 7;
 // متواجد الحين؟ (الشفت اللي يعدّي نص الليل يحسب على يوم بدايته)
 function activeShift(d, t) {
-  for (const s of d.shifts || []) {
-    if (s.e > s.s) { if (d.workdays.includes(t.wd) && t.m >= s.s && t.m < s.e) return s; }
-    else if ((d.workdays.includes(t.wd) && t.m >= s.s) || (d.workdays.includes(prevDay(t.wd)) && t.m < s.e)) return s;
+  if (d.workdays.includes(t.wd)) for (const s of shiftsFor(d, t.wd)) {
+    if (s.e > s.s ? (t.m >= s.s && t.m < s.e) : t.m >= s.s) return s;
   }
+  const y = prevDay(t.wd);
+  if (d.workdays.includes(y)) for (const s of shiftsFor(d, y)) if (s.e <= s.s && t.m < s.e) return s;   // شفت من أمس يعدّي نص الليل
   return null;
 }
-const startsSoon = (d, t) => d.workdays.includes(t.wd) && (d.shifts || []).find(s => s.s > t.m && s.s - t.m <= 60);
+const startsSoon = (d, t) => d.workdays.includes(t.wd) && shiftsFor(d, t.wd).find(s => s.s > t.m && s.s - t.m <= 60);
 const onVacation = (d, iso) => (S.board?.vacations || []).find(v => (v.doctorId === d.id || (!v.doctorId && v.code && v.code === d.code)) && v.start <= iso && (!v.end || v.end >= iso));
 
 /* ---------- الاستيراد من ملف البيانات (مرة وحدة) ---------- */
@@ -294,7 +303,8 @@ function fromSeed(j) {
   const iso = d => { const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(d || ""); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
   const departments = (j.departments || []).map(p => ({ id: uid(), name: p.name, floor: String(p.floor), notes: p.notes || "",
     doctors: (p.doctors || []).map(d => ({ id: uid(), name: d.name, code: d.code || "", ext: d.ext || "", room: d.room || "", fee: d.fee || "", floor: d.floor ? String(d.floor) : "",
-      workdays: (d.workdays || [0, 1, 2, 3, 4, 6]).filter(w => w !== 5), shifts: (d.shifts || []).map(t).filter(Boolean) })) }));
+      workdays: (d.workdays || [0, 1, 2, 3, 4, 6]).filter(w => w !== 5), shifts: (d.shifts || []).map(t).filter(Boolean),
+      ...(d.alt?.days?.length ? { alt: { days: d.alt.days.filter(w => w !== 5), shifts: (d.alt.shifts || []).map(t).filter(Boolean) } } : {}) })) }));
   const all = departments.flatMap(p => p.doctors);
   const vacations = (j.vacations || []).map(v => { const d = all.find(x => v.code && x.code === v.code) || all.find(x => x.name.split(/\s*[–-]\s*/)[0] === v.name); return { id: uid(), doctorId: d?.id || "", code: v.code || "", name: d ? d.name : v.name, start: iso(v.start), end: iso(v.end), type: v.type || "إجازة" }; }).filter(v => v.start);
   const coverage = (j.coverage || []).map(c => ({ id: uid(), doctor: c.doctor || "", branch: c.branch || "", when: [c.shift, c.date].filter(Boolean).join(" — "), note: c.note || "" }));
@@ -393,16 +403,24 @@ function openDoc(docId, depId) {
   $("#dDays").innerHTML = WEEK.map(i => `<label><input type="checkbox" value="${i}" ${wd.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("");
   const sh = d?.shifts || [];
   $("#s1a").value = toTime(sh[0]?.s); $("#s1b").value = toTime(sh[0]?.e); $("#s2a").value = toTime(sh[1]?.s); $("#s2b").value = toTime(sh[1]?.e);
+  const al = d?.alt || { days: [], shifts: [] };
+  $("#aDays").innerHTML = WEEK.map(i => `<label><input type="checkbox" value="${i}" ${al.days.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("");
+  $("#a1a").value = toTime(al.shifts[0]?.s); $("#a1b").value = toTime(al.shifts[0]?.e); $("#a2a").value = toTime(al.shifts[1]?.s); $("#a2b").value = toTime(al.shifts[1]?.e);
+  $("#altBox").open = !!al.days.length;
   $("#dDel").hidden = !d; $("#dErr").textContent = "";
   open("#mDoc");
 }
 $("#dDep").onchange = () => { const nw = $("#dDep").value === "__new"; $("#dNewDepWrap").hidden = !nw; if (!nw) { const p = S.board.departments.find(x => x.id === $("#dDep").value); if (p) $("#dFloor").value = p.floor; } };
 $("#s2x").onclick = () => { $("#s2a").value = ""; $("#s2b").value = ""; };
+$("#aX").onclick = () => { ["#a1a", "#a1b", "#a2a", "#a2b"].forEach(s => $(s).value = ""); $$("#aDays input").forEach(i => i.checked = false); };
 $("#dSave").onclick = async () => {
   const name = $("#dName").value.trim(); if (!name) return $("#dErr").textContent = "اكتب اسم الطبيب";
   const shifts = [[$("#s1a").value, $("#s1b").value], [$("#s2a").value, $("#s2b").value]].map(([a, c]) => ({ s: fromTime(a), e: fromTime(c) })).filter(x => x.s != null && x.e != null);
   if (($("#s1a").value && !$("#s1b").value) || ($("#s2a").value && !$("#s2b").value)) return $("#dErr").textContent = "حدد نهاية الشفت";
   const workdays = $$("#dDays input:checked").map(i => +i.value);
+  const altDays = $$("#aDays input:checked").map(i => +i.value);
+  const altShifts = [[$("#a1a").value, $("#a1b").value], [$("#a2a").value, $("#a2b").value]].map(([a, c]) => ({ s: fromTime(a), e: fromTime(c) })).filter(x => x.s != null && x.e != null);
+  if (altDays.length && !altShifts.length) return $("#dErr").textContent = "حدد دوام الأيام المختلفة أو شيل اختيار الأيام";
   let depId = $("#dDep").value, newDep = null;
   if (depId === "__new") { const n = $("#dNewDep").value.trim(); if (!n) return $("#dErr").textContent = "اكتب اسم القسم الجديد"; newDep = { id: uid(), name: n, floor: $("#dFloor").value, notes: "", doctors: [] }; depId = newDep.id; }
   const fl = $("#dFloor").value;
@@ -412,7 +430,9 @@ $("#dSave").onclick = async () => {
     if (newDep) b.departments.push(newDep);
     let old = null; b.departments.forEach(p => { const i = p.doctors.findIndex(x => x.id === id); if (i >= 0) old = p.doctors.splice(i, 1)[0]; });
     const p = b.departments.find(x => x.id === depId);
-    p.doctors.push({ ...(old || {}), id, ...rec, floor: fl !== p.floor ? fl : "" });
+    const nd = { ...(old || {}), id, ...rec, floor: fl !== p.floor ? fl : "" };
+    if (altDays.length) nd.alt = { days: altDays, shifts: altShifts }; else delete nd.alt;
+    p.doctors.push(nd);
     return b;
   }, `${editDoc.id ? "عدّل" : "أضاف"} د. ${name}`);
   if (ok) $("#mDoc").hidden = true;
