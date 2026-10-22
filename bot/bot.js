@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.7.0";
+const VERSION = "1.7.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -506,6 +506,27 @@ async function applyFix(fref) {
   if (res) log.info(res, "تطبّق تعديل المريض");
 }
 
+/* ---------- نسخة احتياطية أسبوعية (بدون الصور) على قرص Railway ----------
+   كل الطلبات وطلبات التعديل → /data/backups/saba-YYYY-MM-DD.json.gz — نحتفظ بآخر 8 نسخ */
+async function backupWeekly() {
+  try {
+    if (!fs.existsSync("/data")) return;
+    const dir = "/data/backups"; fs.mkdirSync(dir, { recursive: true });
+    const files = fs.readdirSync(dir).filter(f => /^saba-\d{4}-\d{2}-\d{2}\.json\.gz$/.test(f)).sort();
+    const lastF = files[files.length - 1];
+    if (lastF && Date.now() - fs.statSync(`${dir}/${lastF}`).mtimeMs < 6.5 * DAY) return;
+    const conv = v => v?.toMillis ? v.toMillis() : v;
+    const dump = async name => (await db.collection(name).get()).docs.map(d => ({ id: d.id, ...Object.fromEntries(Object.entries(d.data()).map(([k, v]) => [k, conv(v)])) }));
+    const data = { at: new Date().toISOString(), requests: await dump("requests"), fixes: await dump("fixes") };
+    const { gzipSync } = await import("node:zlib");
+    const name = `saba-${new Date().toISOString().slice(0, 10)}.json.gz`;
+    fs.writeFileSync(`${dir}/${name}`, gzipSync(JSON.stringify(data)));
+    for (const f of [...files, name].slice(0, -8)) fs.rmSync(`${dir}/${f}`, { force: true });
+    await setStatus({ backup: { at: TS(), requests: data.requests.length, file: name } });
+    log.info({ file: name, requests: data.requests.length }, "نسخة احتياطية");
+  } catch (e) { log.error({ err: String(e?.message || e) }, "فشل النسخ الاحتياطي"); }
+}
+
 /* ---------- تنظيف الصور التلقائي (يومياً) ----------
    الخطة المجانية فيها 1GB بس، والصور داخل Firestore. لو امتلت يوقف الرفع عند المرضى.
    - نمسح صور الطلبات المنتهية الأقدم من KEEP_DAYS
@@ -587,16 +608,22 @@ async function main() {
     try { await sock?.logout(); } catch { /* connection.update يتكفل بالباقي */ }
   }, e => log.error({ e }, "control listener"));
 
-  // نبض كل ٣٠ ثانية عشان اللوحة تعرف إن البوت شغال
-  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 30000);
+  // نبض كل دقيقتين ونص عشان اللوحة تعرف إن البوت شغال (كل نبضة = قراءة عند كل لوحة مفتوحة، فما نكثّر)
+  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 150000);
 
   startTrackSync();
   watchDoctors();
   startFixApplier();
 
-  // تنظيف الصور: بعد التشغيل بدقيقتين، وبعدها كل ١٢ ساعة
-  setTimeout(cleanupImages, 2 * 60000);
-  setInterval(cleanupImages, 12 * 3600000);
+  // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
+  const daily = async () => {
+    const st = (await statusRef.get().catch(() => null))?.data() || {};
+    const last = st.storage?.at?.toMillis?.() || 0;
+    if (Date.now() - last > 20 * 3600000) await cleanupImages();
+    await backupWeekly();
+  };
+  setTimeout(daily, 3 * 60000);
+  setInterval(daily, 24 * 3600000);
 
   await connect();
 }

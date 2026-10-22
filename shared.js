@@ -658,6 +658,7 @@ async function liveBackend(role) {
     watchBot(cb) { return FS.onSnapshot(FS.doc(db, "bot", "status"), d => { const x = d.exists() ? d.data() : null; cb(x && { ...x, lastSeen: x.lastSeen?.toMillis?.() ?? 0, lastTest: x.lastTest ? { ...x.lastTest, at: x.lastTest.at?.toMillis?.() ?? 0 } : null }); }, () => cb(null)); },
     botLogout: () => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "logout", at: FS.serverTimestamp() }),
     async getDoctorPhones() { const d = await FS.getDoc(FS.doc(db, "bot", "doctors")); return d.exists() ? (d.data().phones || {}) : {}; },
+    async exportAll() { const s = await FS.getDocs(col); return s.docs.map(toObj).sort((a, b) => a.createdAt - b.createdAt); },
     botTest: phone => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "test", phone, at: FS.serverTimestamp() }),
     saveDoctorPhones: (phones, names) => FS.setDoc(FS.doc(db, "bot", "doctors"), { phones, names, at: FS.serverTimestamp() }),
     // يحجز أول رقم جهاز فاضي (مستند بصمة ما ينكتب فوقه — نفس قواعد dupKeys بدون أي تعديل)
@@ -684,6 +685,9 @@ async function liveBackend(role) {
       async oldImages(cutoffMs) {
         const active = await FS.getDocs(FS.query(col, FS.where("status", "in", ["pending", "held"])));
         const keep = new Set(active.docs.map(d => d.data().imagePath).filter(p => String(p).startsWith("fs:")).map(p => p.slice(3)));
+        // صور تعديلات المرضى اللي لسى ما تطبّقت
+        const fx = await FS.getDocs(FS.query(FS.collection(db, "fixes"), FS.where("status", "in", ["open", "answered"])));
+        fx.docs.forEach(d => { const p = d.data().answer?.imagePath; if (String(p || "").startsWith("fs:")) keep.add(p.slice(3)); });
         const old = await FS.getDocs(FS.query(FS.collection(db, "images"), FS.where("createdAt", "<", FS.Timestamp.fromMillis(cutoffMs))));
         return old.docs.filter(d => !keep.has(d.id)).map(d => ({ id: d.id, size: d.data().size || 0 }));
       },
@@ -801,6 +805,7 @@ function demoBackend() {
     async getDoctorPhones() { try { return JSON.parse(localStorage.getItem(KEY + "_docph") || "{}"); } catch { return {}; } },
     async saveDoctorPhones(phones) { localStorage.setItem(KEY + "_docph", JSON.stringify(phones)); },
     async claimDeviceNo() { const n = (+localStorage.getItem(KEY + "_devs") || 0) + 1; localStorage.setItem(KEY + "_devs", n); return n; },
+    async exportAll() { return load(); },
     async botTest(phone) { api._lastTest = { phone, ok: demoBot(), err: demoBot() ? "" : "البوت مو متصل بواتساب", at: Date.now() }; fire(); },
     async getTrack(key) {
       const items = {};

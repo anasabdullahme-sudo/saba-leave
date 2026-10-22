@@ -394,7 +394,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <h3 id="botTtl">بوت الواتساب</h3>
     <p id="botTxt"></p>
     <div class="qr-box" id="botQr" hidden></div>
-    <div class="btn-row"><button class="btn btn-ghost" id="botDocs" hidden>أرقام الأطباء</button><button class="btn btn-danger" id="botLogout" hidden>فك الربط</button><button class="btn btn-ghost" id="botClose">إغلاق</button></div>
+    <div class="btn-row"><button class="btn btn-ghost" id="botDocs" hidden>أرقام الأطباء</button><button class="btn btn-ghost" id="botExport" hidden>⬇ نسخة احتياطية</button><button class="btn btn-danger" id="botLogout" hidden>فك الربط</button><button class="btn btn-ghost" id="botClose">إغلاق</button></div>
   </div>
 </div>
 <div class="modal" id="docModal" hidden>
@@ -409,7 +409,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum } from "./shared.js?v=20261021b";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum } from "./shared.js?v=20261022a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -475,8 +475,9 @@ function start() {
   api.watchAnsweredFixes?.(list => { S.answered = new Map(list.map(f => [f.reqId, f])); list.forEach(applyAnswered); renderHeld(); });
   let prevIds = null, doneTimer;
   S.unsub = api.watchPending((list, added) => {
-    const ids = new Set(list.map(x => x.id));
-    if (prevIds && [...prevIds].some(id => !ids.has(id))) { clearTimeout(doneTimer); doneTimer = setTimeout(() => loadDone(true), 900); } // موظف ثاني رفع طلب
+    const ids = new Map(list.map(x => [x.id, x]));
+    // موظف ثاني رفع طلب → نحدّث «تم الرفع» بس لو الطلب من نفس الفرع والنوع اللي قدامك (توفير قراءات)
+    if (prevIds && [...prevIds].some(([id, p]) => !ids.has(id) && p.branch === S.branch && p.type === S.type)) { clearTimeout(doneTimer); doneTimer = setTimeout(() => loadDone(true), 1500); }
     prevIds = ids;
     S.pending = list.filter(x => x.status !== "held");
     S.held = list.filter(x => x.status === "held");
@@ -999,7 +1000,7 @@ function reroute(list) {
 }
 
 /* ---------- طلبات التعديل عبر بوت الواتساب ---------- */
-const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 120000;
+const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 400000;
 const waPhone = p => { const d = String(p || "").replace(/\D/g, "").replace(/^966/, "").replace(/^0/, ""); return d.length === 9 ? "966" + d : ""; };
 function renderBot() {
   const b = $("#botPill"), on = botOnline(), qr = S.bot?.state === "qr";
@@ -1021,12 +1022,15 @@ async function renderBotModal() {
     : "البوت طافي أو السيرفر مو شغال. طلبات التعديل بتطلع لك أزرار ترسلها بنفسك.";
   const sto = st?.storage;
   if (admin && sto?.mb != null) $("#botTxt").textContent += `\nمساحة الصور: ${sto.mb} من ${sto.maxMb || 1024} ميجا (${sto.images || 0} صورة) — التنظيف تلقائي كل يوم${sto.mb > 850 ? " ⚠️ قربت تمتلي" : ""}.`;
+  const bk = st?.backup;
+  if (admin && bk?.at) $("#botTxt").textContent += `\nآخر نسخة احتياطية في السيرفر: ${new Date(bk.at.toMillis ? bk.at.toMillis() : bk.at).toLocaleDateString("ar-SA")} (${bk.requests} طلب).`;
   $("#botTxt").style.whiteSpace = "pre-line";
   const box = $("#botQr");
   box.hidden = !(admin && st?.state === "qr" && st.qr);
   if (!box.hidden) { try { box.innerHTML = await qrSvg(st.qr); } catch { box.textContent = "تعذّر عرض الباركود"; } }
   $("#botLogout").hidden = !(admin && on);
   $("#botDocs").hidden = !(admin && api.saveDoctorPhones);
+  $("#botExport").hidden = !(admin && api.exportAll);
 }
 setInterval(renderBot, 30000);   // لو البوت وقف (ما وصل نبضه) يتحدّث المؤشر
 $("#botPill").onclick = () => { $("#botModal").hidden = false; renderBotModal(); };
@@ -1034,6 +1038,23 @@ $("#botClose").onclick = () => { $("#botModal").hidden = true; };
 $("#botLogout").onclick = async () => { if (!confirm("فك ربط الرقم من البوت؟ بيطلع باركود جديد للربط.")) return; try { await api.botLogout(); toast("انرسل أمر فك الربط"); } catch { toast("ما قدرت أرسل الأمر"); } };
 
 /* ---------- أرقام الأطباء (تذكير الاعتماد) — للمسؤول ---------- */
+// نسخة احتياطية على جهازك: كل الطلبات (بدون الصور) في ملف يفتح بالإكسل
+$("#botExport").onclick = async () => {
+  const btn = $("#botExport"); btn.disabled = true; btn.textContent = "يجهّز…";
+  try {
+    const list = await api.exportAll();
+    const cols = [["ref","رقم الطلب"],["status","الحالة"],["type","النوع"],["branch","الفرع"],["patientName","الاسم"],["patientNameEn","الاسم EN"],["idNumber","الهوية"],["dob","الميلاد"],["phone","الجوال"],["leaveStart","من"],["leaveEnd","إلى"],["leaveDays","الأيام"],["visitDate","تاريخ الحضور"],["companionName","المرافق"],["companionId","هوية المرافق"],["companionDob","ميلاد المرافق"],["relationship","القرابة"],["doctorName","الطبيب"],["fileNo","رقم الملف"],["createdAt","تاريخ الإرسال"],["doneAt","تاريخ الرفع"],["doneBy","رفعه"],["sehaRef","رقم صحة"],["holdReason","سبب التعليق"],["holdNote","ملاحظة التعليق"],["id","المعرّف"]];
+    const fmt = (k, v) => v == null ? "" : /At$/.test(k) && typeof v === "number" ? new Date(v).toLocaleString("en-GB", { timeZone: "Asia/Riyadh" }) : k === "type" ? typeName(v) : k === "branch" ? branchName(v) : k === "status" ? ({ pending: "بالانتظار", held: "معلّق", done: "تم الرفع" }[v] || v) : String(v);
+    const cell = v => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    const TXT = new Set(["idNumber", "phone", "companionId", "fileNo", "sehaRef"]);   // الإكسل لا يشيل الصفر من البداية
+    const out = (k, v) => { const t = fmt(k, v); return TXT.has(k) && /^\d+$/.test(t) ? `"=""${t}"""` : cell(t); };
+    const csv = "\ufeff" + [cols.map(c => c[1]).join(","), ...list.map(x => cols.map(([k]) => out(k, x[k])).join(","))].join("\r\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `saba-leaves-backup-${new Date().toISOString().slice(0, 10)}.csv`; document.body.append(a); a.click(); a.remove();
+    toast(`انحفظت نسخة فيها ${list.length} طلب ✓`);
+  } catch (e) { console.error(e); toast("ما قدرت أجهّز النسخة — تأكد من الاتصال"); }
+  finally { btn.disabled = false; btn.textContent = "⬇ نسخة احتياطية"; }
+};
 $("#botDocs").onclick = async () => {
   $("#botModal").hidden = true; $("#docModal").hidden = false;
   $("#docList").innerHTML = '<p style="color:var(--muted)">جاري التحميل…</p>';
