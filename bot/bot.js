@@ -11,7 +11,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.7.1";
+const VERSION = "1.7.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -506,6 +506,21 @@ async function applyFix(fref) {
   if (res) log.info(res, "تطبّق تعديل المريض");
 }
 
+/* ---------- جداول أطباء البوادي: أول مرة بس (لو الجدول فاضي) ننسخ البيانات المجهزة ---------- */
+async function seedBoard() {
+  try {
+    const ref = db.doc("board/bawadi");
+    const done = await db.runTransaction(async tx => {
+      const cur = await tx.get(ref);
+      if (cur.exists && (cur.get("departments") || []).length) return false;          // فيه بيانات — ما نلمسها
+      const seed = JSON.parse(fs.readFileSync(new URL("./board-seed.json", import.meta.url), "utf8"));
+      tx.set(ref, { ...seed, log: [{ at: Date.now(), by: "البوت", what: "استيراد بيانات الأطباء" }], updatedAt: Date.now(), updatedBy: "البوت" });
+      return true;
+    });
+    if (done) log.info("انستوردت جداول الأطباء");
+  } catch (e) { log.error({ err: String(e?.message || e) }, "فشل استيراد جداول الأطباء"); }
+}
+
 /* ---------- نسخة احتياطية أسبوعية (بدون الصور) على قرص Railway ----------
    كل الطلبات وطلبات التعديل → /data/backups/saba-YYYY-MM-DD.json.gz — نحتفظ بآخر 8 نسخ */
 async function backupWeekly() {
@@ -614,6 +629,7 @@ async function main() {
   startTrackSync();
   watchDoctors();
   startFixApplier();
+  seedBoard();
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {
