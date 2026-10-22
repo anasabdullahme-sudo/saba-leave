@@ -659,6 +659,16 @@ async function liveBackend(role) {
     botLogout: () => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "logout", at: FS.serverTimestamp() }),
     async getDoctorPhones() { const d = await FS.getDoc(FS.doc(db, "bot", "doctors")); return d.exists() ? (d.data().phones || {}) : {}; },
     async exportAll() { const s = await FS.getDocs(col); return s.docs.map(toObj).sort((a, b) => a.createdAt - b.createdAt); },
+    /* --- جداول الأطباء (مستند واحد لكل فرع) --- */
+    watchBoard(cb, onErr) { return FS.onSnapshot(FS.doc(db, "board", "bawadi"), d => cb(d.exists() ? d.data() : null), onErr); },
+    // التعديل داخل معاملة على آخر نسخة (لو جهازين عدّلوا بنفس اللحظة ما يضيع تعديل أحد)
+    saveBoard: (mutate, by, what) => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(db, "board", "bawadi"), cur = (await tx.get(ref)).data() || null;
+      const next = mutate(cur ? structuredClone(cur) : null);
+      next.log = [{ at: Date.now(), by: by || "", what: what || "" }, ...(cur?.log || [])].slice(0, 60);
+      next.updatedAt = Date.now(); next.updatedBy = by || "";
+      tx.set(ref, next);
+    }),
     botTest: phone => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "test", phone, at: FS.serverTimestamp() }),
     saveDoctorPhones: (phones, names) => FS.setDoc(FS.doc(db, "bot", "doctors"), { phones, names, at: FS.serverTimestamp() }),
     // يحجز أول رقم جهاز فاضي (مستند بصمة ما ينكتب فوقه — نفس قواعد dupKeys بدون أي تعديل)
@@ -719,7 +729,7 @@ function demoBackend() {
   let listeners = [];
   const fire = () => listeners.forEach(f => f());
   bc && (bc.onmessage = fire);
-  window.addEventListener("storage", e => (e.key === KEY || e.key === KEY + "_fixes") && fire());
+  window.addEventListener("storage", e => (e.key === KEY || e.key === KEY + "_fixes" || e.key === KEY + "_board") && fire());
 
   if (!load()) save(seed());
 
@@ -806,6 +816,12 @@ function demoBackend() {
     async saveDoctorPhones(phones) { localStorage.setItem(KEY + "_docph", JSON.stringify(phones)); },
     async claimDeviceNo() { const n = (+localStorage.getItem(KEY + "_devs") || 0) + 1; localStorage.setItem(KEY + "_devs", n); return n; },
     async exportAll() { return load(); },
+    watchBoard(cb) { const f = () => { try { cb(JSON.parse(localStorage.getItem(KEY + "_board") || "null")); } catch { cb(null); } }; listeners.push(f); f(); return () => { listeners = listeners.filter(x => x !== f); }; },
+    async saveBoard(mutate, by, what) {
+      const cur = JSON.parse(localStorage.getItem(KEY + "_board") || "null"), next = mutate(cur ? structuredClone(cur) : null);
+      next.log = [{ at: Date.now(), by: by || "", what: what || "" }, ...(cur?.log || [])].slice(0, 60); next.updatedAt = Date.now(); next.updatedBy = by || "";
+      localStorage.setItem(KEY + "_board", JSON.stringify(next)); fire(); bc?.postMessage(1);
+    },
     async botTest(phone) { api._lastTest = { phone, ok: demoBot(), err: demoBot() ? "" : "البوت مو متصل بواتساب", at: Date.now() }; fire(); },
     async getTrack(key) {
       const items = {};

@@ -275,6 +275,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <div class="me">
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
       <a class="seha tool" id="toolDl" download title="تحميل إضافة «سابا ← صحة» للتعبئة التلقائية"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
+      <a class="admin-btn" href="./doctors.html" style="display:inline-flex;align-items:center;text-decoration:none" title="جداول أطباء البوادي">جداول الأطباء</a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who" title="اسم هالجهاز"></span>
       <button class="bot-pill" id="botPill" title="بوت الواتساب لطلبات التعديل"><i></i><span>واتساب</span></button>
@@ -409,7 +410,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum } from "./shared.js?v=20261022a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum } from "./shared.js?v=20261022b";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

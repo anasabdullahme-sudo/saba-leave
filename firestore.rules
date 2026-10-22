@@ -81,6 +81,14 @@ service cloud.firestore {
     match /bot/status { allow read: if isStaff(); allow write: if false; }
     match /bot/control { allow read: if isStaff(); allow write: if isAdmin(); }
 
+    // جداول الأطباء (مستند لكل فرع) — الموظفين يقرون ويعدّلون، وما ينحذف
+    match /board/{branch} {
+      allow read: if isStaff();
+      allow create, update: if isStaff() && branch in ['bawadi']
+        && request.resource.data.departments is list && request.resource.data.departments.size() > 0;
+      allow delete: if false;
+    }
+
     // قائمة الموظفين — تُضاف من الكونسول فقط
     match /staff/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;

@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#F3FAFE">
+<title>أطباء البوادي | سابا</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#003765; --blue:#0082D4; --sky:#00A6E2; --sky-2:#7FD0F0; --ice:#EAF6FC; --ice-2:#F5FBFE;
+  --ink:#0B2B47; --muted:#5B7690; --line:#DCEBF4; --white:#fff; --red:#E5383B; --amber:#B86E00; --ok:#0E9F6E;
+  --shadow:0 1px 2px rgba(0,55,101,.05),0 14px 36px -16px rgba(0,55,101,.22);
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;
+  background:radial-gradient(1200px 520px at 50% -220px,#CDEEFB 0%,rgba(205,238,251,0) 70%),linear-gradient(180deg,#F3FAFE 0%,#F8FCFE 100%);background-attachment:fixed}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+:focus-visible{outline:3px solid var(--sky);outline-offset:2px;border-radius:8px}
+[hidden]{display:none!important}
+.bar{position:sticky;top:0;z-index:10;backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px);background:rgba(243,250,254,.82);border-bottom:1px solid rgba(220,235,244,.7)}
+.bar-in{max-width:1240px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;color:var(--navy);margin-inline-end:auto}
+.brand b{font-size:19px;font-weight:700}
+.brand small{display:block;font-size:12px;color:var(--muted);margin-top:-3px}
+.pill-btn{display:inline-flex;align-items:center;gap:7px;height:40px;padding:0 16px;border-radius:99px;background:var(--white);border:1px solid var(--line);color:var(--navy);font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
+.pill-btn:hover{border-color:var(--sky-2)}
+.pill-btn.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.who{font-size:13px;color:var(--muted)}
+main{max-width:1240px;margin:0 auto;padding:22px 20px 70px}
+.top{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.clock{margin-inline-end:auto}
+.clock b{display:block;font-size:30px;font-weight:700;color:var(--navy);letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.clock span{color:var(--muted);font-size:14.5px}
+.search{position:relative;width:min(340px,100%)}
+.search input{width:100%;height:46px;border:1.5px solid var(--line);border-radius:14px;background:var(--white);padding:0 42px 0 14px;font-size:15px}
+.search svg{position:absolute;right:14px;top:14px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--white);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:16px 18px}
+.panel+.panel{margin-top:16px}
+.ph{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.ph h2{font-size:17px;color:var(--navy);font-weight:700}
+.ph .n{font-size:12.5px;font-weight:700;background:var(--ice);color:var(--blue);border-radius:99px;padding:2px 9px}
+.ph .act{margin-inline-start:auto;font-size:13px;font-weight:600;color:var(--blue)}
+.live{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(14,159,110,.15)}
+.now-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.doc{border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:grid;gap:3px;background:var(--ice-2)}
+.doc .nm{font-weight:600;font-size:15px}
+.doc .meta{font-size:12.5px;color:var(--muted)}
+.doc .ext{display:flex;gap:10px;font-size:13px;color:var(--navy);font-weight:600;margin-top:3px}
+.doc .ext span{white-space:nowrap}
+.until{font-size:12px;color:var(--ok);font-weight:600}
+.soon .until{color:var(--blue)}
+.empty{color:var(--muted);font-size:14px;padding:8px 2px}
+.vac{display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.vac:first-of-type{border-top:0}
+.vac .nm{font-weight:600;font-size:14.5px}
+.vac .meta{font-size:12.5px;color:var(--muted)}
+.tag{font-size:11.5px;font-weight:700;border-radius:99px;padding:2px 9px;white-space:nowrap}
+.tag.amber{background:#FFF1D6;color:var(--amber)}
+.tag.green{background:#E2F6EE;color:#0A7A55}
+.tag.blue{background:var(--ice);color:var(--blue)}
+.tag.gray{background:#EEF2F5;color:var(--muted)}
+.x{color:var(--muted);font-size:13px;padding:4px 8px;border-radius:8px}
+.x:hover{color:var(--red);background:#FDECEC}
+.seg{display:inline-flex;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:99px;padding:4px}
+.seg button{height:36px;padding:0 16px;border-radius:99px;font-weight:600;font-size:14px;color:var(--muted)}
+.seg button.on{background:var(--navy);color:#fff}
+.tbl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:26px 0 12px}
+.tbl-head h2{font-size:19px;color:var(--navy);margin-inline-end:auto}
+.grp{background:var(--white);border:1px solid var(--line);border-radius:18px;margin-bottom:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,55,101,.04)}
+.gh{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--ice-2);border-bottom:1px solid var(--line)}
+.gh b{font-size:15.5px;color:var(--navy)}
+.gh .note{font-size:12.5px;color:var(--amber);background:#FFF7E8;border-radius:8px;padding:2px 8px}
+.gh .act{margin-inline-start:auto;display:flex;gap:6px}
+.mini{height:30px;padding:0 11px;border-radius:99px;border:1px solid var(--line);background:var(--white);font-size:12.5px;font-weight:600;color:var(--blue)}
+.mini:hover{border-color:var(--sky-2)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-size:12px;color:var(--muted);font-weight:600;text-align:right;padding:8px 12px;white-space:nowrap}
+td{padding:9px 12px;border-top:1px solid #EDF4F9;vertical-align:top}
+td.nm{font-weight:600}
+td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-inline-end:6px;vertical-align:1px;background:#C9D6E0}
+.dot.on{background:var(--ok)}.dot.vac{background:var(--amber)}
+.edit-col{width:1%;white-space:nowrap}
+@media (max-width:760px){
+  table,thead,tbody,tr,td{display:block} thead{display:none}
+  tr{padding:10px 14px;border-top:1px solid #EDF4F9} tr:first-child{border-top:0}
+  td{border:0;padding:2px 0} td.nm{padding-bottom:4px}
+  td[data-l]{display:inline-block;margin-inline-end:12px;font-size:13px} td[data-l]::before{content:attr(data-l) ": ";color:var(--muted);font-size:12px}
+  .bar-in{padding:10px 14px} main{padding:16px 14px 60px} .clock b{font-size:24px}
+}
+.log{font-size:12.5px;color:var(--muted);line-height:1.9;max-height:220px;overflow:auto}
+.modal{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(0,35,64,.35);padding:16px;overflow:auto}
+.box{width:min(520px,100%);background:var(--white);border-radius:20px;padding:22px;box-shadow:var(--shadow);display:grid;gap:12px}
+.box h3{font-size:19px;color:var(--navy)}
+.box p{font-size:14px;color:var(--muted);line-height:1.7}
+.f{display:grid;gap:5px}
+.f label{font-size:13.5px;font-weight:600}
+.f input,.f select,.f textarea{height:44px;border:1.5px solid var(--line);border-radius:12px;padding:0 12px;font-size:15px;width:100%;background:var(--white)}
+.f textarea{height:70px;padding:10px 12px;resize:vertical}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.days{display:flex;flex-wrap:wrap;gap:6px}
+.days label{display:inline-flex;align-items:center;gap:5px;border:1.5px solid var(--line);border-radius:99px;padding:5px 11px;font-size:13.5px;font-weight:500;cursor:pointer}
+.days input{accent-color:var(--navy)}
+.shift{display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;align-items:center}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.btn{height:44px;padding:0 18px;border-radius:12px;font-weight:600;font-size:15px}
+.btn-p{background:var(--navy);color:#fff}
+.btn-g{background:var(--ice);color:var(--navy)}
+.btn-d{background:#FDECEC;color:var(--red);margin-inline-start:auto}
+.err{color:var(--red);font-size:13px}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(30px);opacity:0;pointer-events:none;background:var(--navy);color:#fff;padding:12px 18px;border-radius:14px;font-size:14.5px;transition:.25s;z-index:80;box-shadow:var(--shadow)}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.gate{max-width:420px;margin:12vh auto;text-align:center;display:grid;gap:14px}
+.gate h1{font-size:22px;color:var(--navy)}
+.gate input{height:48px;border:1.5px solid var(--line);border-radius:12px;padding:0 14px;font-size:15px}
+</style>
+</head>
+<body>
+<header class="bar"><div class="bar-in">
+  <div class="brand">
+    <svg width="32" height="32" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
+    <span><b>أطباء البوادي</b><small>سابا — للموظفين</small></span>
+  </div>
+  <span class="who" id="who"></span>
+  <button class="pill-btn" id="btnEdit" hidden>✎ تعديل الجداول</button>
+  <a class="pill-btn" href="./staff.html">لوحة الإجازات ←</a>
+</div></header>
+
+<section class="gate" id="gate" hidden>
+  <h1>سجّل دخول الموظفين</h1>
+  <input id="em" type="email" placeholder="البريد" autocomplete="username" dir="ltr">
+  <input id="pw" type="password" placeholder="كلمة المرور" autocomplete="current-password" dir="ltr">
+  <button class="btn btn-p" id="login">دخول</button>
+  <div class="err" id="loginErr"></div>
+</section>
+
+<main id="app" hidden>
+  <div class="top">
+    <div class="clock"><b id="clk">--:--</b><span id="day"></span></div>
+    <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" placeholder="ابحث باسم الطبيب أو القسم أو التحويلة" aria-label="بحث"></label>
+  </div>
+
+  <div id="importBox" class="panel" hidden style="margin-bottom:16px">
+    <div class="ph"><h2>أول مرة: استورد بيانات الأطباء</h2></div>
+    <p class="empty">اختر ملف <b>saba-doctors-data.json</b> اللي أرسله لك Claude. يتحفظ مرة وحدة، وبعدها التعديل يصير من هنا.</p>
+    <div class="btns"><input type="file" id="impFile" accept=".json,application/json"></div>
+  </div>
+
+  <div class="grid" id="dash">
+    <section class="panel">
+      <div class="ph"><i class="live"></i><h2>متواجدين الآن</h2><span class="n" id="nowN">0</span></div>
+      <div class="now-list" id="nowList"></div>
+      <div id="soonWrap" hidden>
+        <div class="ph" style="margin-top:16px"><h2 style="font-size:15px">يبدأ دوامهم خلال ساعة</h2></div>
+        <div class="now-list soon" id="soonList"></div>
+      </div>
+    </section>
+    <div>
+      <section class="panel">
+        <div class="ph"><h2>في إجازة</h2><span class="n" id="vacN">0</span><button class="act" id="addVac" hidden>+ إجازة</button></div>
+        <div id="vacList"></div>
+      </section>
+      <section class="panel" id="covPanel">
+        <div class="ph"><h2>تغطية في فروع ثانية</h2><button class="act" id="addCov" hidden>+ تغطية</button></div>
+        <div id="covList"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="tbl-head">
+    <h2>جدول كل الأطباء <span class="tag blue" id="allN"></span></h2>
+    <button class="mini" id="addDoc" hidden>+ طبيب</button>
+    <div class="seg" role="tablist"><button class="on" data-by="floor">بالأدوار</button><button data-by="dep">بالتخصصات</button></div>
+  </div>
+  <div id="groups"></div>
+
+  <section class="panel" id="logPanel" hidden style="margin-top:22px">
+    <div class="ph"><h2>آخر التعديلات</h2></div>
+    <div class="log" id="logList"></div>
+  </section>
+</main>
+
+<!-- تعديل طبيب -->
+<div class="modal" id="mDoc" hidden><div class="box" role="dialog" aria-modal="true" aria-labelledby="mDocT">
+  <h3 id="mDocT">طبيب</h3>
+  <div class="f"><label for="dName">الاسم والمسمى</label><input id="dName" placeholder="مثلاً: وفاء محمد – أخصائية"></div>
+  <div class="row2">
+    <div class="f"><label for="dDep">القسم</label><select id="dDep"></select></div>
+    <div class="f"><label for="dFloor">الدور</label><select id="dFloor"></select></div>
+  </div>
+  <div class="f" id="dNewDepWrap" hidden><label for="dNewDep">اسم القسم الجديد</label><input id="dNewDep"></div>
+  <div class="row3">
+    <div class="f"><label for="dRoom">الغرفة</label><input id="dRoom" inputmode="numeric"></div>
+    <div class="f"><label for="dExt">التحويلة</label><input id="dExt" inputmode="numeric"></div>
+    <div class="f"><label for="dFee">الكشفية</label><input id="dFee" inputmode="numeric"></div>
+  </div>
+  <div class="f"><label for="dCode">الكود الوظيفي</label><input id="dCode" inputmode="numeric"></div>
+  <div class="f"><label>أيام الدوام</label><div class="days" id="dDays"></div></div>
+  <div class="f"><label>الشفت الأول</label><div class="shift"><input type="time" id="s1a"><span>إلى</span><input type="time" id="s1b"><span></span></div></div>
+  <div class="f"><label>الشفت الثاني (اختياري)</label><div class="shift"><input type="time" id="s2a"><span>إلى</span><input type="time" id="s2b"><button class="x" id="s2x" type="button">مسح</button></div></div>
+  <div class="err" id="dErr"></div>
+  <div class="btns"><button class="btn btn-p" id="dSave">حفظ</button><button class="btn btn-g" data-close>إلغاء</button><button class="btn btn-d" id="dDel">حذف الطبيب</button></div>
+</div></div>
+
+<!-- إجازة -->
+<div class="modal" id="mVac" hidden><div class="box" role="dialog" aria-modal="true" aria-labelledby="mVacT">
+  <h3 id="mVacT">إجازة طبيب</h3>
+  <div class="f"><label for="vDoc">الطبيب</label><select id="vDoc"></select></div>
+  <div class="row2">
+    <div class="f"><label for="vFrom">من</label><input type="date" id="vFrom"></div>
+    <div class="f"><label for="vTo">إلى (فاضي = ما تحدد)</label><input type="date" id="vTo"></div>
+  </div>
+  <div class="f"><label for="vType">النوع</label><select id="vType"><option>إجازة سنوية</option><option>إجازة بدون راتب</option><option>إجازة مرضية</option><option>إجازة اضطرارية</option><option>إجازة</option></select></div>
+  <div class="err" id="vErr"></div>
+  <div class="btns"><button class="btn btn-p" id="vSave">حفظ</button><button class="btn btn-g" data-close>إلغاء</button></div>
+</div></div>
+
+<!-- ملاحظة قسم -->
+<div class="modal" id="mDep" hidden><div class="box" role="dialog" aria-modal="true" aria-labelledby="mDepT">
+  <h3 id="mDepT">القسم</h3>
+  <div class="row2">
+    <div class="f"><label for="pName">اسم القسم</label><input id="pName"></div>
+    <div class="f"><label for="pFloor">الدور</label><select id="pFloor"></select></div>
+  </div>
+  <div class="f"><label for="pNote">ملاحظة تظهر للموظفين</label><textarea id="pNote" placeholder="مثلاً: 50 ريال إضافية لمرضى التأمين"></textarea></div>
+  <div class="btns"><button class="btn btn-p" id="pSave">حفظ</button><button class="btn btn-g" data-close>إلغاء</button></div>
+</div></div>
+
+<!-- تغطية -->
+<div class="modal" id="mCov" hidden><div class="box" role="dialog" aria-modal="true" aria-labelledby="mCovT">
+  <h3 id="mCovT">تغطية في فرع ثاني</h3>
+  <div class="row2">
+    <div class="f"><label for="cDoc">الطبيب</label><input id="cDoc"></div>
+    <div class="f"><label for="cBranch">الفرع</label><input id="cBranch" placeholder="سابا الزهرا"></div>
+  </div>
+  <div class="f"><label for="cWhen">متى</label><input id="cWhen" placeholder="الأحد والأربعاء صباحاً"></div>
+  <div class="f"><label for="cNote">ملاحظة</label><input id="cNote"></div>
+  <div class="btns"><button class="btn btn-p" id="cSave">حفظ</button><button class="btn btn-g" data-close>إلغاء</button><button class="btn btn-d" id="cDel">حذف</button></div>
+</div></div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import { backend, arNum, DEMO } from "./shared.js?v=20261022b";
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const toast = t => { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); };
+const uid = () => Math.random().toString(36).slice(2, 9);
+
+const WD = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+const WEEK = [6, 0, 1, 2, 3, 4];                     // السبت ← الخميس (الجمعة مغلق)
+const FLOORS = ["B", "G", "1", "2", "3", "4", "5"];
+const FLOOR_DEF = { B: "عيادة التجميل (بيوتي)", G: "الدور الأرضي", 1: "الدور الأول", 2: "الدور الثاني", 3: "الدور الثالث", 4: "الدور الرابع", 5: "الدور الخامس" };
+
+const S = { board: null, by: "floor", q: "", edit: false, me: null };
+const floorName = f => S.board?.floorNames?.[f] || FLOOR_DEF[f] || ("الدور " + f);
+
+/* ---------- الوقت (توقيت جدة دائماً) ---------- */
+function nowRiyadh() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday];
+  return { m: +p.hour * 60 + +p.minute, wd, iso: `${p.year}-${p.month}-${p.day}` };
+}
+const hm = m => { m = ((m % 1440) + 1440) % 1440; const h = Math.floor(m / 60), mi = m % 60; return `${h % 12 || 12}${mi ? ":" + String(mi).padStart(2, "0") : ""}${h < 12 ? "ص" : "م"}`; };
+const toTime = m => m == null ? "" : `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const fromTime = v => { const x = /^(\d{1,2}):(\d{2})/.exec(v || ""); return x ? +x[1] * 60 + +x[2] : null; };
+const shiftTxt = d => (d.shifts || []).length ? d.shifts.map(s => `${hm(s.s)} – ${hm(s.e)}`).join("  و  ") : "الدوام ما تحدد";
+const daysTxt = w => { const k = WEEK.filter(i => w.includes(i)); return k.length === 6 ? "السبت – الخميس" : k.map(i => WD[i]).join("، ") || "—"; };
+const prevDay = wd => (wd + 6) % 7;
+// متواجد الحين؟ (الشفت اللي يعدّي نص الليل يحسب على يوم بدايته)
+function activeShift(d, t) {
+  for (const s of d.shifts || []) {
+    if (s.e > s.s) { if (d.workdays.includes(t.wd) && t.m >= s.s && t.m < s.e) return s; }
+    else if ((d.workdays.includes(t.wd) && t.m >= s.s) || (d.workdays.includes(prevDay(t.wd)) && t.m < s.e)) return s;
+  }
+  return null;
+}
+const startsSoon = (d, t) => d.workdays.includes(t.wd) && (d.shifts || []).find(s => s.s > t.m && s.s - t.m <= 60);
+const onVacation = (d, iso) => (S.board?.vacations || []).find(v => (v.doctorId === d.id || (!v.doctorId && v.code && v.code === d.code)) && v.start <= iso && (!v.end || v.end >= iso));
+
+/* ---------- الاستيراد من ملف البيانات (مرة وحدة) ---------- */
+function fromSeed(j) {
+  const t = s => { const x = /^(\d{1,2}):(\d{2})$/.exec(s.from || ""), y = /^(\d{1,2}):(\d{2})$/.exec(s.to || ""); if (!x || !y) return null;
+    const c = (h, mi, ap) => ((+h % 12) + (ap === "م" ? 12 : 0)) * 60 + +mi; return { s: c(x[1], x[2], s.fp), e: c(y[1], y[2], s.tp) }; };
+  const iso = d => { const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(d || ""); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+  const departments = (j.departments || []).map(p => ({ id: uid(), name: p.name, floor: String(p.floor), notes: p.notes || "",
+    doctors: (p.doctors || []).map(d => ({ id: uid(), name: d.name, code: d.code || "", ext: d.ext || "", room: d.room || "", fee: d.fee || "", floor: d.floor ? String(d.floor) : "",
+      workdays: (d.workdays || [0, 1, 2, 3, 4, 6]).filter(w => w !== 5), shifts: (d.shifts || []).map(t).filter(Boolean) })) }));
+  const all = departments.flatMap(p => p.doctors);
+  const vacations = (j.vacations || []).map(v => { const d = all.find(x => v.code && x.code === v.code) || all.find(x => x.name.split(/\s*[–-]\s*/)[0] === v.name); return { id: uid(), doctorId: d?.id || "", code: v.code || "", name: d ? d.name : v.name, start: iso(v.start), end: iso(v.end), type: v.type || "إجازة" }; }).filter(v => v.start);
+  const coverage = (j.coverage || []).map(c => ({ id: uid(), doctor: c.doctor || "", branch: c.branch || "", when: [c.shift, c.date].filter(Boolean).join(" — "), note: c.note || "" }));
+  return { v: 1, branch: "bawadi", departments, vacations, coverage, floorNames: { ...FLOOR_DEF, ...(j.floorNames || {}) } };
+}
+
+/* ---------- العرض ---------- */
+const allDocs = () => (S.board?.departments || []).flatMap(p => p.doctors.map(d => ({ ...d, dep: p, fl: d.floor || p.floor })));
+const match = d => !S.q || [d.name, d.dep.name, d.ext, d.code, d.room, floorName(d.fl)].some(v => String(v || "").includes(S.q));
+const myName = () => { let n = 0; try { n = +localStorage.getItem("saba_dev_no") || 0; } catch {} const a = S.me?.name || ""; return n ? `${a} ${arNum(n)}` : a; };
+
+function render() {
+  const t = nowRiyadh();
+  $("#clk").textContent = hm(t.m);
+  $("#day").textContent = t.wd === 5 ? "الجمعة — العيادات مغلقة" : `${WD[t.wd]} · ${new Date().toLocaleDateString("ar-SA-u-ca-gregory", { timeZone: "Asia/Riyadh", day: "numeric", month: "long" })}`;
+  const b = S.board;
+  $("#importBox").hidden = !!b; $("#dash").hidden = !b; $(".tbl-head").hidden = !b;
+  if (!b) { $("#groups").innerHTML = ""; return; }
+  const docs = allDocs();
+  // متواجدين الآن
+  const now = docs.filter(d => !onVacation(d, t.iso) && activeShift(d, t)).filter(match)
+    .sort((a, b) => FLOORS.indexOf(a.fl) - FLOORS.indexOf(b.fl));
+  $("#nowN").textContent = now.length;
+  const card = (d, line) => `<div class="doc"><span class="nm">د. ${esc(d.name)}</span><span class="meta">${esc(d.dep.name)} · ${esc(floorName(d.fl))}${d.room ? " · غرفة " + esc(d.room) : ""}</span>
+    <span class="ext">${d.ext ? `<span>☎ ${esc(d.ext)}</span>` : ""}${d.fee ? `<span>${esc(d.fee)} ريال</span>` : ""}</span>${line}</div>`;
+  $("#nowList").innerHTML = now.map(d => card(d, `<span class="until">متواجد لين ${hm(activeShift(d, t).e)}</span>`)).join("")
+    || `<div class="empty">${t.wd === 5 ? "يوم الجمعة — ما فيه دوام." : "ما فيه أحد متواجد الحين."}</div>`;
+  const soon = docs.filter(d => !onVacation(d, t.iso) && !activeShift(d, t) && startsSoon(d, t)).filter(match);
+  $("#soonWrap").hidden = !soon.length;
+  $("#soonList").innerHTML = soon.map(d => card(d, `<span class="until">يبدأ ${hm(startsSoon(d, t).s)}</span>`)).join("");
+  // الإجازات: الحالية والقادمة
+  const vacs = (b.vacations || []).filter(v => !v.end || v.end >= t.iso).sort((a, c) => a.start.localeCompare(c.start));
+  $("#vacN").textContent = vacs.filter(v => v.start <= t.iso).length;
+  const dmy = s => s ? s.split("-").reverse().join("/") : "";
+  $("#vacList").innerHTML = vacs.map(v => { const cur = v.start <= t.iso, d = docs.find(x => x.id === v.doctorId);
+    return `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(v.name)}</div><div class="meta">${d ? esc(d.dep.name) + " · " : ""}${esc(v.type)} · من ${dmy(v.start)}${v.end ? " إلى " + dmy(v.end) : " (الرجوع ما تحدد)"}</div></div>
+      <span class="tag ${cur ? "amber" : "blue"}">${cur ? "في إجازة" : "قادمة"}</span>${S.edit ? `<button class="x" data-delvac="${esc(v.id)}" aria-label="حذف">✕</button>` : ""}</div>`; }).join("")
+    || '<div class="empty">ما فيه إجازات حالياً.</div>';
+  // التغطية
+  const cov = b.coverage || [];
+  $("#covPanel").hidden = !cov.length && !S.edit;
+  $("#covList").innerHTML = cov.map(c => `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(c.doctor)}</div><div class="meta">${esc(c.branch)}${c.when ? " · " + esc(c.when) : ""}${c.note ? " · " + esc(c.note) : ""}</div></div>${S.edit ? `<button class="mini" data-cov="${esc(c.id)}">تعديل</button>` : ""}</div>`).join("")
+    || '<div class="empty">ما فيه تغطيات.</div>';
+  // الجدول
+  const list = docs.filter(match);
+  $("#allN").textContent = list.length + " طبيب";
+  const groups = new Map();
+  if (S.by === "floor") {
+    FLOORS.forEach(f => groups.set(f, { title: floorName(f), items: [] }));
+    list.forEach(d => { if (!groups.has(d.fl)) groups.set(d.fl, { title: floorName(d.fl), items: [] }); groups.get(d.fl).items.push(d); });
+  } else {
+    [...b.departments].sort((a, c) => a.name.localeCompare(c.name, "ar")).forEach(p => groups.set(p.id, { title: p.name, dep: p, items: [] }));
+    list.forEach(d => groups.get(d.dep.id).items.push(d));
+  }
+  $("#groups").innerHTML = [...groups.values()].filter(g => g.items.length || (S.edit && g.dep && !S.q)).map(g => {
+    const notes = S.by === "dep" ? (g.dep?.notes ? `<span class="note">${esc(g.dep.notes)}</span>` : "") : "";
+    const act = S.edit && g.dep ? `<span class="act"><button class="mini" data-adddoc="${esc(g.dep.id)}">+ طبيب</button><button class="mini" data-dep="${esc(g.dep.id)}">القسم</button></span>` : "";
+    return `<section class="grp"><div class="gh"><b>${esc(g.title)}</b><span class="tag gray">${g.items.length}</span>${notes}${act}</div>
+      <table><thead><tr><th>الطبيب</th><th>${S.by === "floor" ? "القسم" : "الدور"}</th><th>الدوام</th><th>الأيام</th><th>غرفة</th><th>تحويلة</th><th>كود</th><th>كشفية</th>${S.edit ? '<th class="edit-col"></th>' : ""}</tr></thead><tbody>
+      ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && activeShift(d, t);
+        return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : on ? ' <span class="tag green">متواجد</span>' : ""}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
+        <td data-l="${S.by === "floor" ? "القسم" : "الدور"}">${esc(S.by === "floor" ? d.dep.name : floorName(d.fl))}</td>
+        <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}</td>
+        <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كود">${esc(d.code || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
+        ${S.edit ? `<td class="edit-col"><button class="mini" data-doc="${esc(d.id)}">تعديل</button></td>` : ""}</tr>`; }).join("")}
+      </tbody></table></section>`;
+  }).join("") || '<div class="panel empty">ما لقيت شي بهالبحث.</div>';
+  // السجل
+  $("#logPanel").hidden = !S.edit || !(b.log || []).length;
+  $("#logList").innerHTML = (b.log || []).map(l => `${new Date(l.at).toLocaleString("ar-SA-u-ca-gregory", { timeZone: "Asia/Riyadh", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} — <b>${esc(l.by)}</b>: ${esc(l.what)}`).join("<br>");
+}
+
+/* ---------- التعديل ---------- */
+const save = async (mut, what) => {
+  try { await api.saveBoard(mut, myName(), what); toast("انحفظ ✓"); return true; }
+  catch (e) { console.error(e); toast(e?.code === "permission-denied" ? "ما عندك صلاحية — قواعد Firebase تحتاج تحديث" : "ما انحفظ — تأكد من الاتصال"); return false; }
+};
+const open = id => { $(id).hidden = false; setTimeout(() => $(id).querySelector("input,select")?.focus(), 50); };
+$$("[data-close]").forEach(b => b.onclick = () => b.closest(".modal").hidden = true);
+$$(".modal").forEach(m => m.addEventListener("click", e => { if (e.target === m) m.hidden = true; }));
+addEventListener("keydown", e => { if (e.key === "Escape") $$(".modal").forEach(m => m.hidden = true); });
+const floorOpts = sel => sel.innerHTML = FLOORS.map(f => `<option value="${f}">${esc(floorName(f))}</option>`).join("");
+
+let editDoc = null;
+function openDoc(docId, depId) {
+  const b = S.board, d = docId ? allDocs().find(x => x.id === docId) : null;
+  editDoc = { id: docId, depId: d?.dep.id || depId || b.departments[0]?.id };
+  $("#mDocT").textContent = d ? "تعديل طبيب" : "إضافة طبيب";
+  $("#dDep").innerHTML = b.departments.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("") + '<option value="__new">+ قسم جديد…</option>';
+  $("#dDep").value = editDoc.depId; $("#dNewDepWrap").hidden = true; $("#dNewDep").value = "";
+  floorOpts($("#dFloor"));
+  const dep = b.departments.find(p => p.id === editDoc.depId);
+  $("#dFloor").value = d?.fl || dep?.floor || "G";
+  $("#dName").value = d?.name || ""; $("#dRoom").value = d?.room || ""; $("#dExt").value = d?.ext || ""; $("#dFee").value = d?.fee || ""; $("#dCode").value = d?.code || "";
+  const wd = d?.workdays || [0, 1, 2, 3, 4, 6];
+  $("#dDays").innerHTML = WEEK.map(i => `<label><input type="checkbox" value="${i}" ${wd.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("");
+  const sh = d?.shifts || [];
+  $("#s1a").value = toTime(sh[0]?.s); $("#s1b").value = toTime(sh[0]?.e); $("#s2a").value = toTime(sh[1]?.s); $("#s2b").value = toTime(sh[1]?.e);
+  $("#dDel").hidden = !d; $("#dErr").textContent = "";
+  open("#mDoc");
+}
+$("#dDep").onchange = () => { const nw = $("#dDep").value === "__new"; $("#dNewDepWrap").hidden = !nw; if (!nw) { const p = S.board.departments.find(x => x.id === $("#dDep").value); if (p) $("#dFloor").value = p.floor; } };
+$("#s2x").onclick = () => { $("#s2a").value = ""; $("#s2b").value = ""; };
+$("#dSave").onclick = async () => {
+  const name = $("#dName").value.trim(); if (!name) return $("#dErr").textContent = "اكتب اسم الطبيب";
+  const shifts = [[$("#s1a").value, $("#s1b").value], [$("#s2a").value, $("#s2b").value]].map(([a, c]) => ({ s: fromTime(a), e: fromTime(c) })).filter(x => x.s != null && x.e != null);
+  if (($("#s1a").value && !$("#s1b").value) || ($("#s2a").value && !$("#s2b").value)) return $("#dErr").textContent = "حدد نهاية الشفت";
+  const workdays = $$("#dDays input:checked").map(i => +i.value);
+  let depId = $("#dDep").value, newDep = null;
+  if (depId === "__new") { const n = $("#dNewDep").value.trim(); if (!n) return $("#dErr").textContent = "اكتب اسم القسم الجديد"; newDep = { id: uid(), name: n, floor: $("#dFloor").value, notes: "", doctors: [] }; depId = newDep.id; }
+  const fl = $("#dFloor").value;
+  const rec = { name, room: $("#dRoom").value.trim(), ext: $("#dExt").value.trim(), fee: $("#dFee").value.trim(), code: $("#dCode").value.trim(), workdays, shifts };
+  const id = editDoc.id || uid();
+  const ok = await save(b => {
+    if (newDep) b.departments.push(newDep);
+    let old = null; b.departments.forEach(p => { const i = p.doctors.findIndex(x => x.id === id); if (i >= 0) old = p.doctors.splice(i, 1)[0]; });
+    const p = b.departments.find(x => x.id === depId);
+    p.doctors.push({ ...(old || {}), id, ...rec, floor: fl !== p.floor ? fl : "" });
+    return b;
+  }, `${editDoc.id ? "عدّل" : "أضاف"} د. ${name}`);
+  if (ok) $("#mDoc").hidden = true;
+};
+$("#dDel").onclick = async () => {
+  const d = allDocs().find(x => x.id === editDoc.id); if (!d) return;
+  if ($("#dDel").dataset.sure !== d.id) { $("#dDel").dataset.sure = d.id; $("#dDel").textContent = "متأكد؟ اضغط مرة ثانية"; setTimeout(() => { $("#dDel").dataset.sure = ""; $("#dDel").textContent = "حذف الطبيب"; }, 4000); return; }
+  $("#dDel").dataset.sure = ""; $("#dDel").textContent = "حذف الطبيب";
+  const ok = await save(b => { b.departments.forEach(p => p.doctors = p.doctors.filter(x => x.id !== d.id)); b.vacations = (b.vacations || []).filter(v => v.doctorId !== d.id); return b; }, `حذف د. ${d.name}`);
+  if (ok) $("#mDoc").hidden = true;
+};
+
+function openVac() {
+  const docs = allDocs().sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  $("#vDoc").innerHTML = docs.map(d => `<option value="${d.id}">${esc(d.name)} — ${esc(d.dep.name)}</option>`).join("");
+  $("#vFrom").value = nowRiyadh().iso; $("#vTo").value = ""; $("#vErr").textContent = ""; open("#mVac");
+}
+$("#vSave").onclick = async () => {
+  const d = allDocs().find(x => x.id === $("#vDoc").value), from = $("#vFrom").value, to = $("#vTo").value;
+  if (!d || !from) return $("#vErr").textContent = "اختر الطبيب وتاريخ البداية";
+  if (to && to < from) return $("#vErr").textContent = "تاريخ النهاية قبل البداية";
+  const ok = await save(b => { (b.vacations ||= []).push({ id: uid(), doctorId: d.id, code: d.code || "", name: d.name, start: from, end: to, type: $("#vType").value }); return b; }, `إجازة د. ${d.name} من ${from}`);
+  if (ok) $("#mVac").hidden = true;
+};
+
+let editDep = null;
+function openDep(id) {
+  const p = S.board.departments.find(x => x.id === id); if (!p) return; editDep = id;
+  floorOpts($("#pFloor")); $("#pName").value = p.name; $("#pFloor").value = p.floor; $("#pNote").value = p.notes || ""; open("#mDep");
+}
+$("#pSave").onclick = async () => {
+  const name = $("#pName").value.trim(); if (!name) return;
+  const ok = await save(b => { const p = b.departments.find(x => x.id === editDep); Object.assign(p, { name, floor: $("#pFloor").value, notes: $("#pNote").value.trim() }); return b; }, `عدّل قسم ${name}`);
+  if (ok) $("#mDep").hidden = true;
+};
+
+let editCov = null;
+function openCov(id) {
+  const c = (S.board.coverage || []).find(x => x.id === id); editCov = id || null;
+  $("#cDoc").value = c?.doctor || ""; $("#cBranch").value = c?.branch || ""; $("#cWhen").value = c?.when || ""; $("#cNote").value = c?.note || "";
+  $("#cDel").hidden = !c; open("#mCov");
+}
+$("#cSave").onclick = async () => {
+  const rec = { doctor: $("#cDoc").value.trim(), branch: $("#cBranch").value.trim(), when: $("#cWhen").value.trim(), note: $("#cNote").value.trim() };
+  if (!rec.doctor || !rec.branch) return toast("اكتب الطبيب والفرع");
+  const id = editCov || uid();
+  const ok = await save(b => { b.coverage = (b.coverage || []).filter(x => x.id !== id); b.coverage.push({ id, ...rec }); return b; }, `تغطية د. ${rec.doctor} في ${rec.branch}`);
+  if (ok) $("#mCov").hidden = true;
+};
+$("#cDel").onclick = async () => { const c = (S.board.coverage || []).find(x => x.id === editCov); if (!c) return;
+  if (await save(b => { b.coverage = b.coverage.filter(x => x.id !== editCov); return b; }, `حذف تغطية د. ${c.doctor}`)) $("#mCov").hidden = true; };
+
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.doc) openDoc(t.dataset.doc);
+  if (t.dataset.adddoc) openDoc(null, t.dataset.adddoc);
+  if (t.dataset.dep) openDep(t.dataset.dep);
+  if (t.dataset.cov) openCov(t.dataset.cov);
+  if (t.dataset.delvac) { const v = S.board.vacations.find(x => x.id === t.dataset.delvac); if (v) await save(b => { b.vacations = b.vacations.filter(x => x.id !== v.id); return b; }, `شال إجازة د. ${v.name}`); }
+  if (t.dataset.by) { S.by = t.dataset.by; $$(".seg button").forEach(x => x.classList.toggle("on", x === t)); try { localStorage.setItem("saba_docs_by", S.by); } catch {} render(); }
+});
+$("#addVac").onclick = openVac; $("#addCov").onclick = () => openCov(null); $("#addDoc").onclick = () => openDoc(null);
+$("#btnEdit").onclick = () => { S.edit = !S.edit; $("#btnEdit").classList.toggle("on", S.edit); $("#btnEdit").textContent = S.edit ? "✓ خلصت التعديل" : "✎ تعديل الجداول"; ["#addVac", "#addCov", "#addDoc"].forEach(s => $(s).hidden = !S.edit); render(); };
+$("#q").addEventListener("input", e => { S.q = e.target.value.trim(); render(); });
+$("#impFile").onchange = async e => {
+  const f = e.target.files?.[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text()); const b = fromSeed(j);
+    if (!b.departments.length) throw new Error("empty");
+    if (await save(cur => cur && cur.departments?.length ? cur : b, "استيراد بيانات الأطباء")) toast(`انستورد ${b.departments.flatMap(p => p.doctors).length} طبيب ✓`);
+  } catch (err) { console.error(err); toast("الملف مو صحيح — اختر saba-doctors-data.json"); }
+};
+
+/* ---------- التشغيل ---------- */
+try { S.by = localStorage.getItem("saba_docs_by") === "dep" ? "dep" : "floor"; } catch {}
+$$(".seg button").forEach(x => x.classList.toggle("on", x.dataset.by === S.by));
+const api = await backend("staff");
+let unsub = null;
+api.onAuth(user => {
+  S.me = user;
+  const ok = user && !user.denied;
+  $("#gate").hidden = ok; $("#app").hidden = !ok; $("#btnEdit").hidden = !ok;
+  if (user?.denied) { $("#loginErr").textContent = "هذا الحساب غير مفعّل كموظف."; api.logout(); }
+  if (!ok) { unsub?.(); unsub = null; return; }
+  setTimeout(() => { $("#who").textContent = myName(); }, 0);
+  unsub ||= api.watchBoard(b => { S.board = b; render(); }, e => { console.error(e); $("#groups").innerHTML = `<div class="panel empty">${e?.code === "permission-denied" ? "قواعد Firebase تحتاج تحديث عشان تظهر الجداول." : "تعذّر التحميل — تأكد من الاتصال."}</div>`; });
+});
+if (DEMO) { $("#em").value = "anas@saba.sa"; $("#pw").value = "demo"; }
+$("#login").onclick = async () => {
+  $("#loginErr").textContent = "";
+  try { await api.login($("#em").value.trim(), $("#pw").value); } catch (e) { $("#loginErr").textContent = "البريد أو كلمة المرور غلط"; }
+};
+$("#pw").addEventListener("keydown", e => { if (e.key === "Enter") $("#login").click(); });
+setInterval(() => { if (S.board && !$$(".modal").some(m => !m.hidden)) render(); }, 30000);
+</script>
+</body>
+</html>
