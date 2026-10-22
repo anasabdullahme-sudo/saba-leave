@@ -218,7 +218,6 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
     <div class="f"><label for="dExt">التحويلة</label><input id="dExt" inputmode="numeric"></div>
     <div class="f"><label for="dFee">الكشفية</label><input id="dFee" inputmode="numeric"></div>
   </div>
-  <div class="f"><label for="dCode">الكود الوظيفي</label><input id="dCode" inputmode="numeric"></div>
   <div class="f"><label>أيام الدوام</label><div class="days" id="dDays"></div></div>
   <div class="f"><label>الشفت الأول</label><div class="shift"><input type="time" id="s1a"><span>إلى</span><input type="time" id="s1b"><span></span></div></div>
   <div class="f"><label>الشفت الثاني (اختياري)</label><div class="shift"><input type="time" id="s2a"><span>إلى</span><input type="time" id="s2b"><button class="x" id="s2x" type="button">مسح</button></div></div>
@@ -328,7 +327,7 @@ function fromSeed(j) {
 
 /* ---------- العرض ---------- */
 const allDocs = () => (S.board?.departments || []).flatMap(p => p.doctors.map(d => ({ ...d, dep: p, fl: d.floor || p.floor })));
-const match = d => !S.q || [d.name, d.dep.name, d.ext, d.code, d.room, floorName(d.fl)].some(v => String(v || "").includes(S.q));
+const match = d => !S.q || [d.name, d.dep.name, d.ext, d.room, floorName(d.fl)].some(v => String(v || "").includes(S.q));
 const myName = () => { let n = 0; try { n = +localStorage.getItem("saba_dev_no") || 0; } catch {} const a = S.me?.name || ""; return n ? `${a} ${arNum(n)}` : a; };
 
 function render() {
@@ -384,12 +383,12 @@ function render() {
     const notes = S.by === "dep" ? (g.dep?.notes ? `<span class="note">${esc(g.dep.notes)}</span>` : "") : "";
     const act = S.edit && g.dep ? `<span class="act"><button class="mini" data-adddoc="${esc(g.dep.id)}">+ طبيب</button><button class="mini" data-dep="${esc(g.dep.id)}">القسم</button></span>` : "";
     return `<section class="grp"><div class="gh"><b>${esc(g.title)}</b><span class="tag gray">${g.items.length}</span>${notes}${act}</div>
-      <table><thead><tr><th>الطبيب</th><th>${S.by === "floor" ? "القسم" : "الدور"}</th><th>الدوام</th><th>الأيام</th><th>غرفة</th><th>تحويلة</th><th>كود</th><th>كشفية</th>${S.edit ? '<th class="edit-col"></th>' : ""}</tr></thead><tbody>
+      <table><thead><tr><th>الطبيب</th><th>${S.by === "floor" ? "القسم" : "الدور"}</th><th>الدوام</th><th>الأيام</th><th>غرفة</th><th>تحويلة</th><th>كشفية</th>${S.edit ? '<th class="edit-col"></th>' : ""}</tr></thead><tbody>
       ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && activeShift(d, t);
         return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : on ? ' <span class="tag green">متواجد</span>' : ""}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
         <td data-l="${S.by === "floor" ? "القسم" : "الدور"}">${esc(S.by === "floor" ? d.dep.name : floorName(d.fl))}</td>
         <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}</td>
-        <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كود">${esc(d.code || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
+        <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
         ${S.edit ? `<td class="edit-col"><button class="mini" data-doc="${esc(d.id)}">تعديل</button></td>` : ""}</tr>`; }).join("")}
       </tbody></table></section>`;
   }).join("") || '<div class="panel empty">ما لقيت شي بهالبحث.</div>';
@@ -419,7 +418,7 @@ function openDoc(docId, depId) {
   floorOpts($("#dFloor"));
   const dep = b.departments.find(p => p.id === editDoc.depId);
   $("#dFloor").value = d?.fl || dep?.floor || "G";
-  $("#dName").value = d?.name || ""; $("#dRoom").value = d?.room || ""; $("#dExt").value = d?.ext || ""; $("#dFee").value = d?.fee || ""; $("#dCode").value = d?.code || "";
+  $("#dName").value = d?.name || ""; $("#dRoom").value = d?.room || ""; $("#dExt").value = d?.ext || ""; $("#dFee").value = d?.fee || "";
   const wd = d?.workdays || [0, 1, 2, 3, 4, 6];
   $("#dDays").innerHTML = WEEK.map(i => `<label><input type="checkbox" value="${i}" ${wd.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("");
   const sh = d?.shifts || [];
@@ -445,7 +444,7 @@ $("#dSave").onclick = async () => {
   let depId = $("#dDep").value, newDep = null;
   if (depId === "__new") { const n = $("#dNewDep").value.trim(); if (!n) return $("#dErr").textContent = "اكتب اسم القسم الجديد"; newDep = { id: uid(), name: n, floor: $("#dFloor").value, notes: "", doctors: [] }; depId = newDep.id; }
   const fl = $("#dFloor").value;
-  const rec = { name, room: $("#dRoom").value.trim(), ext: $("#dExt").value.trim(), fee: $("#dFee").value.trim(), code: $("#dCode").value.trim(), workdays, shifts };
+  const rec = { name, room: $("#dRoom").value.trim(), ext: $("#dExt").value.trim(), fee: $("#dFee").value.trim(), workdays, shifts };
   const id = editDoc.id || uid();
   const ok = await save(b => {
     if (newDep) b.departments.push(newDep);
