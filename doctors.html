@@ -193,7 +193,8 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
   <div id="groups"></div>
 
   <section class="panel" id="logPanel" hidden style="margin-top:22px">
-    <div class="ph"><h2>آخر التعديلات</h2></div>
+    <div class="ph"><h2>آخر التعديلات</h2><button class="act" id="restore" hidden>↩ رجّع النسخة السابقة</button></div>
+    <div class="empty" id="prevInfo" hidden style="background:var(--ice-2);border-radius:12px;padding:8px 12px;margin-bottom:8px"></div>
     <div class="log" id="logList"></div>
   </section>
 </main>
@@ -271,7 +272,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { backend, arNum, DEMO } from "./shared.js?v=20261022c";
+import { backend, arNum, DEMO } from "./shared.js?v=20261022d";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const toast = t => { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); };
@@ -396,9 +397,28 @@ function render() {
       </tbody></table></section>`;
   }).join("") || '<div class="panel empty">ما لقيت شي بهالبحث.</div>';
   // السجل
-  $("#logPanel").hidden = !S.edit || S.view !== "table" || !(b.log || []).length;
+  $("#logPanel").hidden = !S.edit || !(b.log || []).length;
+  if (S.edit) loadPrev();
   $("#logList").innerHTML = (b.log || []).map(l => `${new Date(l.at).toLocaleString("ar-SA-u-ca-gregory", { timeZone: "Asia/Riyadh", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} — <b>${esc(l.by)}</b>: ${esc(l.what)}`).join("<br>");
 }
+
+/* ---------- النسخة السابقة (تنحفظ تلقائياً مع كل تعديل) ---------- */
+let prevAt = -1;
+async function loadPrev() {
+  if (prevAt === S.board?.updatedAt) return; prevAt = S.board?.updatedAt;
+  try {
+    const p = await api.getBoardPrev?.();
+    $("#restore").hidden = !p; $("#prevInfo").hidden = !p;
+    if (p) $("#prevInfo").innerHTML = `النسخة السابقة محفوظة — قبل «${esc(p.replacedBy || "آخر تعديل")}» (${new Date(p.savedAt).toLocaleString("ar-SA-u-ca-gregory", { timeZone: "Asia/Riyadh", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })})`;
+  } catch (e) { console.warn(e); }
+}
+$("#restore").onclick = async () => {
+  const b = $("#restore");
+  if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "متأكد؟ اضغط مرة ثانية"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "↩ رجّع النسخة السابقة"; }, 4000); return; }
+  b.dataset.sure = ""; b.textContent = "↩ رجّع النسخة السابقة";
+  try { await api.restoreBoard(myName()); prevAt = -1; toast("رجعت النسخة السابقة ✓ — وتقدر ترجع لهذي بنفس الزر"); }
+  catch (e) { console.error(e); toast(e?.code === "no_prev" ? "ما فيه نسخة سابقة" : "ما قدرت أرجّعها — تأكد من الاتصال"); }
+};
 
 /* ---------- التعديل ---------- */
 const save = async (mut, what) => {

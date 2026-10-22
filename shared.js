@@ -662,12 +662,26 @@ async function liveBackend(role) {
     /* --- جداول الأطباء (مستند واحد لكل فرع) --- */
     watchBoard(cb, onErr) { return FS.onSnapshot(FS.doc(db, "board", "bawadi"), d => cb(d.exists() ? d.data() : null), onErr); },
     // التعديل داخل معاملة على آخر نسخة (لو جهازين عدّلوا بنفس اللحظة ما يضيع تعديل أحد)
+    // كل تعديل: النسخة الحالية تنحفظ كـ«نسخة سابقة» (وحدة بس — اللي قبلها تنمسح)
     saveBoard: (mutate, by, what) => FS.runTransaction(db, async tx => {
-      const ref = FS.doc(db, "board", "bawadi"), cur = (await tx.get(ref)).data() || null;
+      const ref = FS.doc(db, "board", "bawadi"), prevRef = FS.doc(db, "board", "bawadi_prev"), cur = (await tx.get(ref)).data() || null;
       const next = mutate(cur ? structuredClone(cur) : null);
       next.log = [{ at: Date.now(), by: by || "", what: what || "" }, ...(cur?.log || [])].slice(0, 60);
       next.updatedAt = Date.now(); next.updatedBy = by || "";
+      if (cur?.departments?.length) tx.set(prevRef, { ...cur, savedAt: Date.now(), replacedBy: what || "" });
       tx.set(ref, next);
+    }),
+    async getBoardPrev() { const d = await FS.getDoc(FS.doc(db, "board", "bawadi_prev")); return d.exists() ? d.data() : null; },
+    // رجوع للنسخة السابقة (والحالية تصير هي السابقة — فتقدر ترجع لها لو غيّرت رأيك)
+    restoreBoard: by => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(db, "board", "bawadi"), prevRef = FS.doc(db, "board", "bawadi_prev");
+      const cur = (await tx.get(ref)).data(), prev = (await tx.get(prevRef)).data();
+      if (!prev?.departments?.length) throw Object.assign(new Error("no_prev"), { code: "no_prev" });
+      const { savedAt, replacedBy, ...p } = prev;
+      p.log = [{ at: Date.now(), by: by || "", what: "رجّع النسخة السابقة" }, ...(cur?.log || [])].slice(0, 60);
+      p.updatedAt = Date.now(); p.updatedBy = by || "";
+      tx.set(ref, p);
+      if (cur?.departments?.length) tx.set(prevRef, { ...cur, savedAt: Date.now(), replacedBy: "رجوع للنسخة السابقة" });
     }),
     botTest: phone => FS.setDoc(FS.doc(db, "bot", "control"), { cmd: "test", phone, at: FS.serverTimestamp() }),
     saveDoctorPhones: (phones, names) => FS.setDoc(FS.doc(db, "bot", "doctors"), { phones, names, at: FS.serverTimestamp() }),
@@ -817,8 +831,16 @@ function demoBackend() {
     async claimDeviceNo() { const n = (+localStorage.getItem(KEY + "_devs") || 0) + 1; localStorage.setItem(KEY + "_devs", n); return n; },
     async exportAll() { return load(); },
     watchBoard(cb) { const f = () => { try { cb(JSON.parse(localStorage.getItem(KEY + "_board") || "null")); } catch { cb(null); } }; listeners.push(f); f(); return () => { listeners = listeners.filter(x => x !== f); }; },
+    async getBoardPrev() { return JSON.parse(localStorage.getItem(KEY + "_board_prev") || "null"); },
+    async restoreBoard(by) {
+      const cur = JSON.parse(localStorage.getItem(KEY + "_board") || "null"), prev = JSON.parse(localStorage.getItem(KEY + "_board_prev") || "null");
+      if (!prev) throw Object.assign(new Error("no_prev"), { code: "no_prev" });
+      const { savedAt, replacedBy, ...p } = prev; p.log = [{ at: Date.now(), by, what: "رجّع النسخة السابقة" }, ...(cur?.log || [])].slice(0, 60);
+      localStorage.setItem(KEY + "_board", JSON.stringify(p)); if (cur) localStorage.setItem(KEY + "_board_prev", JSON.stringify({ ...cur, savedAt: Date.now(), replacedBy: "رجوع للنسخة السابقة" })); fire();
+    },
     async saveBoard(mutate, by, what) {
       const cur = JSON.parse(localStorage.getItem(KEY + "_board") || "null"), next = mutate(cur ? structuredClone(cur) : null);
+      if (cur) localStorage.setItem(KEY + "_board_prev", JSON.stringify({ ...cur, savedAt: Date.now(), replacedBy: what || "" }));
       next.log = [{ at: Date.now(), by: by || "", what: what || "" }, ...(cur?.log || [])].slice(0, 60); next.updatedAt = Date.now(); next.updatedBy = by || "";
       localStorage.setItem(KEY + "_board", JSON.stringify(next)); fire(); bc?.postMessage(1);
     },

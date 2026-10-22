@@ -12,7 +12,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.7.3";
+const VERSION = "1.7.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -550,7 +550,7 @@ async function backupWeekly() {
     if (lastF && Date.now() - fs.statSync(`${dir}/${lastF}`).mtimeMs < 6.5 * DAY) return;
     const conv = v => v?.toMillis ? v.toMillis() : v;
     const dump = async name => (await db.collection(name).get()).docs.map(d => ({ id: d.id, ...Object.fromEntries(Object.entries(d.data()).map(([k, v]) => [k, conv(v)])) }));
-    const data = { at: new Date().toISOString(), requests: await dump("requests"), fixes: await dump("fixes") };
+    const data = { at: new Date().toISOString(), requests: await dump("requests"), fixes: await dump("fixes"), board: await dump("board") };
     const { gzipSync } = await import("node:zlib");
     const name = `saba-${new Date().toISOString().slice(0, 10)}.json.gz`;
     fs.writeFileSync(`${dir}/${name}`, gzipSync(JSON.stringify(data)));
