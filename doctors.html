@@ -196,6 +196,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
     <div class="ph"><h2>آخر التعديلات</h2><button class="act" id="restore" hidden>↩ رجّع النسخة السابقة</button></div>
     <div class="empty" id="prevInfo" hidden style="background:var(--ice-2);border-radius:12px;padding:8px 12px;margin-bottom:8px"></div>
     <div class="log" id="logList"></div>
+    <div class="btns" style="margin-top:10px;align-items:center;font-size:13px;color:var(--muted)">استبدال الجدول كامل من ملف (النسخة الحالية تنحفظ كسابقة): <input type="file" id="repFile" accept=".json,application/json"></div>
   </section>
 </main>
 
@@ -558,6 +559,15 @@ $("#impFile").onchange = async e => {
     if (!b.departments.length) throw new Error("empty");
     if (await save(cur => cur && cur.departments?.length ? cur : b, "استيراد بيانات الأطباء")) toast(`انستورد ${b.departments.flatMap(p => p.doctors).length} طبيب ✓`);
   } catch (err) { console.error(err); toast("الملف مو صحيح — اختر saba-doctors-data.json"); }
+};
+
+$("#repFile").onchange = async e => {
+  const f = e.target.files?.[0]; if (!f) return;
+  try {
+    const nb = fromSeed(JSON.parse(await f.text())); if (!nb.departments.length) throw new Error("empty");
+    if (await save(() => nb, "استبدال الجدول من ملف")) toast(`انستبدل الجدول (${nb.departments.flatMap(p => p.doctors).length} طبيب) ✓`);
+  } catch (err) { console.error(err); toast("الملف مو صحيح — اختر saba-doctors-data.json"); }
+  e.target.value = "";
 };
 
 /* ---------- التشغيل ---------- */
