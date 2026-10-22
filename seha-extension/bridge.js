@@ -62,13 +62,10 @@
     if (e.source !== window || e.data?.type !== "SABA_DOC_ALERT" || !e.data.ev?.id) return;
     const ev = e.data.ev;
     try {
+      // كل تبويب يمرّر التنبيه، والتكرار ينشال في alert.js (حسب رقم التنبيه) — ما نخسر تنبيه لو وصلت مع بعض
       const { sabaDocSeen: seen = [] } = await chrome.storage.local.get("sabaDocSeen");
       if (seen.includes(ev.id)) return;
-      await chrome.storage.local.set({ sabaDocClaim: { id: ev.id, tab: TAB } });
-      await new Promise(r => setTimeout(r, 150 + Math.random() * 150));
-      const { sabaDocClaim: c, sabaDocSeen: s2 = [] } = await chrome.storage.local.get(["sabaDocClaim", "sabaDocSeen"]);
-      if (c?.tab !== TAB || s2.includes(ev.id)) return;              // تبويب ثاني تكفّل فيه
-      await chrome.storage.local.set({ sabaDocAlert: { ...ev, shownAt: Date.now() }, sabaDocSeen: [...s2, ev.id].slice(-150) });
+      await chrome.storage.local.set({ sabaDocAlert: { ...ev, shownAt: Date.now(), via: TAB }, sabaDocSeen: [...seen, ev.id].slice(-150) });
     } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ }
   });
 

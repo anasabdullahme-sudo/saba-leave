@@ -720,6 +720,7 @@ async function liveBackend(role) {
     /* --- المراجع: متابعة الطلب + رقم البوت --- */
     async getTrack(key) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "track", key)); return d.exists() ? (d.data().items || {}) : null; },
     async getBotWa() { try { const d = await FS.getDoc(FS.doc(db, "public", "bot")); return d.exists() ? String(d.data().wa || "") : ""; } catch { return ""; } },
+    async getBotSeen() { try { const d = await FS.getDoc(FS.doc(db, "public", "bot")); return d.exists() ? (d.data().seen ?? null) : null; } catch { return null; } },
     async getFix(id) { await api.ensureAnon(); const d = await FS.getDoc(FS.doc(db, "fixes", id)); return d.exists() ? { id: d.id, ...d.data() } : null; },
     async answerFix(id, answer) { await api.ensureAnon(); await FS.updateDoc(FS.doc(db, "fixes", id), { status: "answered", answer, answeredAt: FS.serverTimestamp() }); },
     /* --- تنظيف الصور الشهري (للمسؤول) --- */

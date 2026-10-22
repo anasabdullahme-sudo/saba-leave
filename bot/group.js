@@ -109,20 +109,47 @@ async function aiParse(text, quoted) {
   return null;
 }
 
-// احتياط بدون Gemini: الأنواع الواضحة بس
+// احتياط بدون Gemini: الأنواع الواضحة، سطر سطر (الاسم من السطر اللي قبله أو من الرسالة المقتبسة)
+const lev1 = (a, b) => { if (Math.abs(a.length - b.length) > 1) return false; let i = 0, j = 0, e = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++e > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } } return e + (a.length - i) + (b.length - j) <= 1; };
+function fuzzyPick(s) {
+  const L = docs();
+  const w = norm(s).split(" ").filter(t => t.length >= 2 && !STOP.has(t)).flatMap(t => t.length > 3 && t.startsWith("ل") ? [t, t.slice(1)] : [t]);   // «لسحر» → سحر
+  for (let i = 0; i < w.length - 1; i++) { const d = matchDoctor(w[i] + " " + w[i + 1]); if (d) return d; }
+  for (const t of w) { if (t.length < 3) continue; const d = matchDoctor(t); if (d) return d; }
+  for (const t of w) { if (t.length < 4) continue; const f = L.filter(d => deAl(norm(d.dep)) === deAl(t)); if (f.length === 1) return f[0]; }   // «دكتور العيون»
+  for (const t of w) { if (t.length < 5) continue; const f = L.filter(d => norm(shortName(d.name)).split(" ").map(deAl).some(x => x.length >= 5 && lev1(x, deAl(t)))); if (f.length === 1) return f[0]; }   // «السجيدي» ≈ السنجيدي
+  return null;
+}
 function ruleParse(text, quoted) {
-  const n = norm(text);
-  const kind = /وقف|لحد يطلع|لا احد يدخل|محد يدخل/.test(n) ? (/مواعيد/.test(n) ? "appointments_only" : "stop")
+  const timeIn = n => { const m = /(\d{1,2})(?::(\d{2}))?/.exec(n); return m ? `${String(+m[1]).padStart(2, "0")}:${m[2] || "00"}` : ""; };
+  const kindOf = n => /مواعيد فقط|فقط مواعيد/.test(n) ? "appointments_only"
+    : /وقف|لحد يطلع|لا احد يدخل|محد يدخل|خلاص/.test(n) ? "stop"
     : /غير متواجد|ما بيجي|يعتذر عن الحضور|مو موجود اليوم/.test(n) ? "absent_today"
+    : /انتظار/.test(n) ? "busy"
     : /رجع|كمل استقبال/.test(n) ? "resume"
-    : /فاضي|دخلوا له|دخلوا لها|حولوا له|حولوا لها/.test(n) ? "free"
-    : /متاخر|بيتاخر|حيتاخر/.test(n) ? "late"
-    : /موجود|متواجد/.test(n) ? "present" : "";
-  if (!kind) return [];
-  // نجرب كل كلمتين متتاليتين ثم كل كلمة لحالها
-  const pick = s => { const w = norm(s).split(" ").filter(t => t.length >= 2 && !STOP.has(t)); for (let i = 0; i < w.length - 1; i++) { const d = matchDoctor(w[i] + " " + w[i + 1]); if (d) return d; } for (const t of w) { if (t.length < 3) continue; const d = matchDoctor(t); if (d) return d; } return null; };
-  const d = pick(text) || (quoted ? pick(quoted) : null);
-  return d ? [{ doctor_id: d.id, name: shortName(d.name), kind, delay_minutes: /ساعه/.test(n) ? 60 : 20 }] : [];
+    : /تاخر/.test(n) ? "late"
+    : /يمشي|يخلص دوامه|يطلع الساعه/.test(n) ? "leaves_at"
+    : /يجي من|يبدا من|دوامه من|دوام اليوم من/.test(n) ? "starts_at"
+    : /فاضي|دخلوا|حولوا ل/.test(n) ? "free"
+    : /موجود|متواجد|الين|لين/.test(n) ? "present" : "";
+  const evs = []; let last = quoted ? fuzzyPick(quoted) : null, unknown = false;
+  for (const line of String(text).split(/\n+/)) {
+    const n = norm(line); if (!n || /^سابا ?1$/.test(n)) continue;
+    const d = fuzzyPick(line) || null, kind = kindOf(n);
+    if (d) last = d;
+    if (!kind) continue;
+    const who = d || last;
+    if (!who) { unknown = true; continue; }
+    const tm = timeIn(n), e = { doctor_id: who.id, name: shortName(who.name), kind };
+    const rg = /(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/.exec(latin(line));          // «من ٤-١٠» = دوام اليوم من 4 إلى 10
+    if (rg && (kind === "present" || kind === "starts_at")) { e.kind = "starts_at"; e.at_time = `${String(+rg[1]).padStart(2, "0")}:${rg[2] || "00"}`; e.until_time = `${String(+rg[3]).padStart(2, "0")}:${rg[4] || "00"}`; evs.push(e); continue; }
+    if (kind === "late") e.delay_minutes = /ساعه/.test(n) ? 60 : 20;
+    if (kind === "busy") e.waiting = +((/(\d+)\s*انتظار/.exec(n) || [])[1] || 0);
+    if (["stop", "leaves_at", "starts_at"].includes(kind) && tm) e.at_time = tm;
+    if (kind === "present" && tm) e.until_time = tm;
+    evs.push(e);
+  }
+  return Object.assign(evs, { unknown });
 }
 
 /* ---------- تطبيق الأحداث ---------- */
@@ -147,18 +174,23 @@ async function apply(evs, ctx) {
       if (e.kind === "vacation") { if (d && e.start_date) { vacs.push({ d, e }); applied.push("vacation"); } continue; }
       const key = d ? d.id : "x:" + norm(e.name);
       if (!d && e.kind !== "present") continue;                         // طبيب مو في الجدول: نقبل بس «موجود» (مؤقت)
-      const at = Date.now(), atMin = toMin(e.at_time), untilMin = toMin(e.until_time);
+      // أوقات بدون ص/م: «٩:٤٥» الساعة 8 بالليل = 21:45، و«موجود إلى ١» = 1 بعد نص الليل
+      const pm = m => (m != null && m < 720 && m < t.m - 30 && m + 720 > t.m - 30) ? m + 720 : m;
+      const nextDay = m => (m != null && m < t.m - 30) ? m + 1440 : m;
+      const at = Date.now(), atMin = pm(toMin(e.at_time)), untilMin = nextDay(pm(toMin(e.until_time)));
       const name = d ? shortName(d.name) : e.name, dep = d ? d.dep : (e.dept || "");
       let info = "";
       if (e.kind === "stop" && atMin != null && atMin > t.m + 1) {      // «الساعة 9:45 وقف له» → نجدوله
+        cur.scheduled = cur.scheduled.filter(x => x.key !== key);         // رسالة مكررة → جدولة وحدة
         cur.scheduled.push({ id: uid(), min: atMin, key, kind: "stop", name, dep, by: ctx.by });
         cur.st[key] = { kind: "stop_at", from: atMin, at, by: ctx.by };
         cur.events.push({ id: uid(), at, kind: "stop_at", doctorId: d?.id || "", name, dep, info: `يوقف الساعة ${hm(atMin)}`, title: "🕐 بيوقف الاستقبال", color: "orange", by: ctx.by });
         applied.push("stop_at"); continue;
       }
+      if (["resume", "absent_today", "stop"].includes(e.kind)) cur.scheduled = cur.scheduled.filter(x => x.key !== key);
       if (e.kind === "resume") delete cur.st[key];
       else if (e.kind === "late") { const from = atMin ?? (t.m + (e.delay_minutes || 30)); cur.st[key] = { kind: "late", from, at, by: ctx.by }; info = `يوصل تقريباً ${hm(from)}`; }
-      else if (e.kind === "leaves_at") { cur.st[key] = { kind: "leaves", until: atMin ?? untilMin, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : ""; }
+      else if (e.kind === "leaves_at") { cur.st[key] = { kind: "leaves", until: nextDay(atMin) ?? untilMin, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : ""; }
       else if (e.kind === "starts_at") { cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by }; info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
@@ -236,8 +268,10 @@ export async function handleGroupMessage(m) {
   const by = m.pushName || "القروب";
   let evs = await aiParse(text, quoted);
   if (evs == null) evs = ruleParse(text, quoted);
-  if (!evs.length) return;
+  if (!evs.length) { if (evs.unknown) { try { await getSock()?.sendMessage(jid, { react: { text: "❓", key: m.key } }); } catch {} } return; }
   const applied = await apply(evs, { text, by });
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");
-  if (applied.length) { try { await getSock()?.sendMessage(jid, { react: { text: "✅", key: m.key } }); } catch {} }
+  // ✅ فهمها وطبّقها — ❓ فهم إنها عن طبيب بس ما عرف مين (يكتبون الاسم الثاني أو يردّون على رسالة فيها الاسم)
+  const react = applied.length ? "✅" : "❓";
+  try { await getSock()?.sendMessage(jid, { react: { text: react, key: m.key } }); } catch {}
 }

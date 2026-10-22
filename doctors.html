@@ -170,6 +170,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
     <div class="btns"><input type="file" id="impFile" accept=".json,application/json"></div>
   </div>
 
+  <div id="botWarn" hidden style="background:#FFF4E5;color:#8A4B00;border:1px solid #F5D9A8;border-radius:14px;padding:10px 14px;margin-bottom:12px;font-size:14px;font-weight:600"></div>
   <div class="grid" id="dash">
     <section class="panel">
       <div class="ph"><i class="live"></i><h2>متواجدين الآن</h2><span class="n" id="nowN">0</span></div>
@@ -611,7 +612,10 @@ document.addEventListener("click", async e => {
 $("#addVac").onclick = openVac; $("#addCov").onclick = () => openCov(null); $("#addDoc").onclick = () => openDoc(null);
 function setEdit(on) {
   S.edit = on; $("#btnEdit").classList.toggle("on", on); $("#btnEdit").textContent = on ? "✓ خلصت التعديل" : "🔒 دخول للتعديل";
-  ["#addVac", "#addDoc"].forEach(s => $(s).hidden = !on); $("#who").textContent = on ? myName() : ""; render();
+  ["#addVac", "#addDoc"].forEach(s => $(s).hidden = !on); $("#who").textContent = on ? myName() : "";
+  if (on && !inboxUnsub) inboxUnsub = api.watchInbox?.(l => { S.inbox = l; if (S.edit) render(); });
+  if (!on && inboxUnsub) { inboxUnsub(); inboxUnsub = null; S.inbox = []; }
+  render();
 }
 let loggedBefore = false;
 $("#btnEdit").onclick = async () => {
@@ -648,10 +652,19 @@ const api = await backend("staff");
 api.onAuth(user => { S.me = user; if (S.edit && !(user && user.role === "admin")) setEdit(false); });
 api.watchBoard(b => { S.err = ""; S.board = b; render(); }, e => { console.error(e); S.err = e?.code === "permission-denied" ? "قواعد Firebase تحتاج تحديث عشان تظهر الجداول (العرض بدون تسجيل دخول)." : "تعذّر التحميل — تأكد من الاتصال."; render(); });
 api.watchToday?.(t => { S.today = t; render(); });
-api.watchInbox?.(l => { S.inbox = l; if (S.edit) render(); });
+let inboxUnsub = null;
+// صحة البوت: لو وقف، تحديثات القروب ما توصل — ننبّه الموظفين عشان ما يعتمدون على حالات قديمة
+async function checkBot() {
+  try { const seen = await api.getBotSeen?.(); if (seen == null) return;
+    const old = Date.now() - seen > 15 * 60000; $("#botWarn").hidden = !old;
+    if (old) $("#botWarn").textContent = `⚠ تحديثات قروب الاستقبال متوقفة حالياً (البوت مو شغال من ${new Date(seen).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" })}) — تأكدوا من القروب مباشرة`;
+  } catch {}
+}
+checkBot(); setInterval(checkBot, 5 * 60000);     // الاقتراحات للمسؤول بس — نشترك بعد الدخول
 // تنبيهات القروب: الإضافة تعرضها فوق أي صفحة؛ وبدون الإضافة تطلع هنا تحت يسار
 let extOn = false;
-addEventListener("message", e => { if (e.source === window && e.data?.type === "SABA_EXT_READY") extOn = true; });
+// الإضافة القديمة (قبل 1.4.0) ما توصّل التنبيهات → نعرضها هنا
+addEventListener("message", e => { if (e.source === window && e.data?.type === "SABA_EXT_READY") { const v = String(e.data.version || "0").split(".").map(Number); extOn = v[0] > 1 || (v[0] === 1 && (v[1] || 0) >= 4); } });
 window.postMessage({ type: "SABA_EXT_PING" }, location.origin);
 relayDoctorAlerts(api, ev => { if (!extOn) pageAlert(ev); });
 function pageAlert(ev) {
@@ -659,6 +672,7 @@ function pageAlert(ev) {
   box.innerHTML = `<i></i><div><b>${esc(ev.title)}</b><span>${new Date(ev.at).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" })}</span><strong>د. ${esc(ev.name)}</strong><small>${esc([ev.info, ev.dep, ev.ext ? "تحويلة " + ev.ext : ""].filter(Boolean).join(" · "))}</small></div><button aria-label="إغلاق">✕</button>`;
   box.querySelector("button").onclick = () => box.remove();
   $("#dalWrap").append(box); setTimeout(() => box.remove(), 5000);
+  while ($("#dalWrap").children.length > 3) $("#dalWrap").firstElementChild.remove();   // سيل رسائل → آخر 3 بس
 }
 const waitMe = email => new Promise(res => { let n = 0; const t = setInterval(() => { if ((S.me && (S.me.email || "").toLowerCase() === email.toLowerCase()) || ++n > 40) { clearInterval(t); res(S.me); } }, 150); });
 $("#login").onclick = async () => {

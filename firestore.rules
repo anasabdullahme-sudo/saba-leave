@@ -83,7 +83,7 @@ service cloud.firestore {
 
     // جداول الأطباء (مستند لكل فرع + نسخة سابقة وحدة + حالات اليوم من القروب يكتبها البوت + اقتراحات) — العرض مفتوح للكل، والتعديل للمسؤول بس، وما ينحذف
     match /board/{branch} {
-      allow read: if true;
+      allow read: if branch != 'bawadi_inbox' || isAdmin();          // الاقتراحات فيها نص رسائل القروب — للمسؤول بس
       allow create, update: if isAdmin() && (
         (branch in ['bawadi', 'bawadi_prev'] && request.resource.data.departments is list && request.resource.data.departments.size() > 0)
         || branch == 'bawadi_inbox');

@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.8.0";
+const VERSION = "1.8.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -63,7 +63,7 @@ async function connect() {
       connected = true; me = sock.user?.id || "";
       await setStatus({ state: "connected", qr: null, me });
       // رقم البوت للعامة (زر «استفسر واتساب» في صفحة المراجع)
-      db.doc("public/bot").set({ wa: String(me).split(/[:@]/)[0], at: TS() }).catch(() => {});
+      db.doc("public/bot").set({ wa: String(me).split(/[:@]/)[0], at: TS(), seen: Date.now() }, { merge: true }).catch(() => {});
       log.info({ me }, "واتساب متصل");
       drain();
     }
@@ -72,7 +72,7 @@ async function connect() {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
         log.warn("انفك الربط — بنطلع باركود جديد");
-        db.doc("public/bot").set({ wa: "", at: TS() }).catch(() => {});
+        db.doc("public/bot").set({ wa: "", at: TS() }, { merge: true }).catch(() => {});
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         await setStatus({ state: "qr", qr: null, me: "" });
         setTimeout(connect, 1500);
@@ -645,6 +645,9 @@ async function main() {
 
   // نبض كل دقيقتين ونص عشان اللوحة تعرف إن البوت شغال (كل نبضة = قراءة عند كل لوحة مفتوحة، فما نكثّر)
   setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 150000);
+  // نبض عام (صفحة الأطباء تقراه كل 5 دقائق — لو وقف تطلع «تحديثات القروب متوقفة»)
+  const pub = () => connected && db.doc("public/bot").set({ seen: Date.now() }, { merge: true }).catch(() => {});   // بس لو واتساب متصل (غيره ما توصل رسائل القروب)
+  pub(); setInterval(pub, 5 * 60000);
 
   startTrackSync();
   watchDoctors();
