@@ -7,11 +7,12 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } from "baileys";
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { getSecurityRules } from "firebase-admin/security-rules";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.7.2";
+const VERSION = "1.7.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -506,6 +507,23 @@ async function applyFix(fref) {
   if (res) log.info(res, "تطبّق تعديل المريض");
 }
 
+/* ---------- قواعد Firestore: البوت ينشر نسخة المستودع لو تغيّرت (بدل ما المسؤول يلصقها يدوي) ---------- */
+async function deployRules() {
+  try {
+    const src = fs.readFileSync(new URL("./firestore.rules", import.meta.url), "utf8");
+    const sr = getSecurityRules();
+    const cur = await sr.getFirestoreRuleset().catch(() => null);
+    const curSrc = cur?.source?.[0]?.content || "";
+    if (curSrc.trim() === src.trim()) { log.info("قواعد Firestore محدّثة"); return; }
+    await sr.releaseFirestoreRulesetFromSource(src);
+    await setStatus({ rules: { at: TS(), ok: true } });
+    log.info("انشرت قواعد Firestore الجديدة");
+  } catch (e) {
+    await setStatus({ rules: { at: TS(), ok: false, err: String(e?.message || e).slice(0, 300) } });
+    log.error({ err: String(e?.message || e) }, "فشل نشر قواعد Firestore — الصقها يدوي من الكونسول");
+  }
+}
+
 /* ---------- جداول أطباء البوادي: أول مرة بس (لو الجدول فاضي) ننسخ البيانات المجهزة ---------- */
 async function seedBoard() {
   try {
@@ -629,7 +647,7 @@ async function main() {
   startTrackSync();
   watchDoctors();
   startFixApplier();
-  seedBoard();
+  deployRules().then(seedBoard);
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {
