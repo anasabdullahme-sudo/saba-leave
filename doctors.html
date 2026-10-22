@@ -145,7 +145,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
   </div>
   <span class="who" id="who"></span>
   <button class="pill-btn" id="btnEdit">🔒 دخول للتعديل</button>
-  <a class="pill-btn" href="./staff.html">لوحة الإجازات ←</a>
+  <a class="pill-btn" href="./home.html">الرئيسية</a><a class="pill-btn" href="./staff.html">لوحة الإجازات ←</a>
 </div></header>
 
 
@@ -541,6 +541,7 @@ $("#impFile").onchange = async e => {
 
 /* ---------- التشغيل ---------- */
 try { S.by = localStorage.getItem("saba_docs_by") === "dep" ? "dep" : "floor"; } catch {}
+if (location.hash === "#table") { S.view = "table"; $$(".views button").forEach(x => x.classList.toggle("on", x.dataset.view === "table")); }
 $$(".seg button[data-by]").forEach(x => x.classList.toggle("on", x.dataset.by === S.by));
 const api = await backend("staff");
 // العرض مفتوح بدون تسجيل دخول — التعديل للمسؤول بس
