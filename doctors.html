@@ -49,6 +49,12 @@ main{max-width:1240px;margin:0 auto;padding:22px 20px 70px}
 .ph .act{margin-inline-start:auto;font-size:13px;font-weight:600;color:var(--blue)}
 .live{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(14,159,110,.15)}
 .now-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+#nowList{display:grid;gap:14px;grid-template-columns:1fr}
+.dg{border-top:1px solid var(--line);padding-top:10px}.dg:first-child{border-top:0;padding-top:0}
+.dgh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dgh b{font-size:15px;color:var(--navy)}.dgh span{font-size:12.5px;color:var(--muted)}
+.dgh i{font-style:normal;font-size:12px;font-weight:700;background:#E2F6EE;color:#0A7A55;border-radius:99px;padding:1px 8px}
+.dgl{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
 .doc{border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:grid;gap:3px;background:var(--ice-2)}
 .doc .nm{font-weight:600;font-size:15px}
 .doc .meta{font-size:12.5px;color:var(--muted)}
@@ -334,7 +340,10 @@ function render() {
   $("#nowN").textContent = now.length;
   const card = (d, line) => `<div class="doc"><span class="nm">د. ${esc(d.name)}</span><span class="meta">${esc(d.dep.name)} · ${esc(floorName(d.fl))}${d.room ? " · غرفة " + esc(d.room) : ""}</span>
     <span class="ext">${d.ext ? `<span>☎ ${esc(d.ext)}</span>` : ""}${d.fee ? `<span>${esc(d.fee)} ريال</span>` : ""}</span>${line}</div>`;
-  $("#nowList").innerHTML = now.map(d => card(d, `<span class="until">متواجد لين ${hm(activeShift(d, t).e)}</span>`)).join("")
+  // مقسّمين حسب القسم (الأسنان لحالهم، الباطنية لحالهم…) بترتيب الأدوار
+  const byDep = new Map(); now.forEach(d => { if (!byDep.has(d.dep.id)) byDep.set(d.dep.id, []); byDep.get(d.dep.id).push(d); });
+  $("#nowList").innerHTML = [...byDep.values()].map(l => `<div class="dg"><div class="dgh"><b>${esc(l[0].dep.name)}</b><span>${esc(floorName(l[0].dep.floor))}</span><i>${l.length}</i></div>
+    <div class="dgl">${l.map(d => card(d, `<span class="until">متواجد لين ${hm(activeShift(d, t).e)}</span>`)).join("")}</div></div>`).join("")
     || `<div class="empty">${t.wd === 5 ? "يوم الجمعة — ما فيه دوام." : "ما فيه أحد متواجد الحين."}</div>`;
   const soon = docs.filter(d => !onVacation(d, t.iso) && !activeShift(d, t) && startsSoon(d, t)).filter(match);
   $("#soonWrap").hidden = !soon.length;
