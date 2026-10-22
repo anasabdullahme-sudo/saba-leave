@@ -81,10 +81,10 @@ service cloud.firestore {
     match /bot/status { allow read: if isStaff(); allow write: if false; }
     match /bot/control { allow read: if isStaff(); allow write: if isAdmin(); }
 
-    // جداول الأطباء (مستند لكل فرع) — الموظفين يقرون ويعدّلون، وما ينحذف
+    // جداول الأطباء (مستند لكل فرع) — العرض مفتوح للكل، والتعديل للمسؤول بس، وما ينحذف
     match /board/{branch} {
-      allow read: if isStaff();
-      allow create, update: if isStaff() && branch in ['bawadi']
+      allow read: if true;
+      allow create, update: if isAdmin() && branch in ['bawadi']
         && request.resource.data.departments is list && request.resource.data.departments.size() > 0;
       allow delete: if false;
     }

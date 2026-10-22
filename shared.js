@@ -760,8 +760,8 @@ function demoBackend() {
       if (key) try { localStorage.setItem(KEY + "_dup", JSON.stringify([...JSON.parse(localStorage.getItem(KEY + "_dup") || "[]"), key].slice(-500))); } catch {}
       return id;
     },
-    onAuth(cb) { const u = sessionStorage.getItem(KEY + "_u"); cb(u ? { uid: "demo", email: u, name: u.split("@")[0] } : null); api._authCb = cb; return () => {}; },
-    async login(e) { sessionStorage.setItem(KEY + "_u", e || "staff@saba.sa"); api._authCb?.({ uid: "demo", email: e, name: (e || "staff").split("@")[0] }); },
+    onAuth(cb) { const u = sessionStorage.getItem(KEY + "_u"); cb(u ? { uid: "demo", email: u, name: u.split("@")[0], role: "admin" } : null); api._authCb = cb; return () => {}; },
+    async login(e) { sessionStorage.setItem(KEY + "_u", e || "staff@saba.sa"); api._authCb?.({ uid: "demo", email: e, name: (e || "staff").split("@")[0], role: "admin" }); },
     async logout() { sessionStorage.removeItem(KEY + "_u"); api._authCb?.(null); },
     watchPending(cb) {
       let known = null; const everSeen = new Set();
