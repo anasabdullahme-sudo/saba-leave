@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>سياسة الخصوصية — أداة سابا</title>
+<style>
+:root{--bg:#F5F8FB;--fg:#0B2B47;--mut:#5B7690;--card:#fff;--line:#DCE6EF}
+@media (prefers-color-scheme:dark){:root{--bg:#0E1A26;--fg:#E6EEF5;--mut:#9FB3C6;--card:#15263A;--line:#24384D}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.8 "IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif}
+main{max-width:760px;margin:0 auto;padding:32px 16px}
+.c{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:22px 0 4px}p,li{color:var(--mut)}
+.en{direction:ltr;text-align:left;margin-top:28px;border-top:1px solid var(--line);padding-top:18px}
+</style>
+</head>
+<body><main><div class="c">
+<h1>سياسة الخصوصية — أداة سابا (Saba Seha)</h1>
+<p>آخر تحديث: 24 أكتوبر 2026</p>
+
+<h2>لمن الأداة</h2>
+<p>أداة داخلية لموظفي الاستقبال في مجمع عيادات سابا — فرع البوادي، جدة. ليست موجّهة للعامة.</p>
+
+<h2>ماذا تفعل</h2>
+<ul>
+<li>تعبّئ نموذج الإجازة المرضية في منصة صحة من طلب يفتحه الموظف في لوحة سابا. الأداة لا تضغط «تحقق» ولا «حفظ»؛ الموظف يراجع ويحفظ بنفسه.</li>
+<li>تعرض تنبيهات صغيرة عن حالة الأطباء (وقف استقبال، غياب، تأخير…) في زاوية الشاشة لمدة 5 ثوانٍ.</li>
+<li>تعرض بجانب خانة الطبيب في نظام أثير الدور والعيادة والتحويلة وحالة الدوام.</li>
+</ul>
+
+<h2>البيانات</h2>
+<ul>
+<li>تقرأ الأداة جدول الأطباء وحالاتهم من قاعدة بيانات سابا (Firebase). هذه بيانات تشغيلية عامة، لا تحتوي بيانات مرضى.</li>
+<li>بيانات طلب الإجازة تُنقل محلياً داخل المتصفح من لوحة سابا إلى نموذج صحة فقط، وتُحفظ مؤقتاً في تخزين المتصفح المحلي ثم تُمسح.</li>
+<li>لا تجمع الأداة سجل التصفح، ولا تقرأ محتوى المواقع الأخرى، ولا ترسل أي بيانات لأي طرف ثالث، ولا تستخدم إعلانات أو تحليلات.</li>
+<li>وجود الأداة على كل المواقع هو فقط لإظهار التنبيه في التبويب المفتوح أمام الموظف.</li>
+</ul>
+
+<h2>التواصل</h2>
+<p>إدارة الاستقبال — مجمع عيادات سابا، فرع البوادي.</p>
+
+<div class="en">
+<h2>Privacy policy (English)</h2>
+<p>Saba Seha is an internal tool for reception staff at Saba Clinics (Al-Bawadi branch, Jeddah). It fills the sick-leave form on the Seha platform from a request the staff member opens on the Saba dashboard (it never clicks verify or save), shows short doctor-status notifications, and shows doctor floor/clinic/extension/status next to the doctor field in the Athir system.</p>
+<p>It reads the doctors' schedule and status from Saba's Firebase database (operational data, no patient data). Leave-request details are passed locally inside the browser to the Seha form only, kept temporarily in local extension storage and then cleared. The extension does not collect browsing history, does not read other websites' content, does not sell or transfer data to third parties, and uses no ads or analytics. It runs on all sites only to display the notification on the tab in front of the staff member.</p>
+</div>
+</div></main></body></html>

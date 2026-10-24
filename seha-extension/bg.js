@@ -1,27 +1,12 @@
-// تحديث تلقائي للأداة: برنامج صغير على الجهاز (update.ps1) ينزّل الملفات الجديدة في مجلد الأداة،
-// وهنا الأداة تتأكد كل 15 دقيقة: لو فيه نسخة أحدث على الموقع تعيد تحميل نفسها (وتشتغل في التبويبات المفتوحة بدون تحديث الصفحة)
-const SITE = "https://anasabdullahme-sudo.github.io/saba-leave/";
-const newer = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
-
-async function check() {
-  try {
-    const r = await fetch(SITE + "ext-version.json?t=" + Date.now(), { cache: "no-store" });
-    if (!r.ok) return;
-    const { version } = await r.json();
-    const cur = chrome.runtime.getManifest().version;
-    await chrome.storage.local.set({ sabaExtLatest: { version, at: Date.now() } });
-    if (!newer(version, cur)) return;
-    // ما نعيد التحميل وسط رفع إجازة في صحة (طلب مفتوح من أقل من 30 دقيقة)
-    const { sabaReq, sabaReloadTry: t = {} } = await chrome.storage.local.get(["sabaReq", "sabaReloadTry"]);
-    if (sabaReq && Date.now() - (sabaReq.sentAt || 0) < 30 * 60000) return;
-    // الملفات على الجهاز ممكن لسى ما تحدّثت — نحاول مرة كل 30 دقيقة لنفس النسخة
-    if (t.v === version && Date.now() - t.at < 30 * 60000) return;
-    await chrome.storage.local.set({ sabaReloadTry: { v: version, at: Date.now() } });
-    chrome.runtime.reload();
-  } catch { /* بدون نت */ }
+// تحديث تلقائي من متجر كروم: أول ما تنزل نسخة جديدة نطبّقها (إذا ما فيه رفع إجازة شغّال في صحة)،
+// وبعد التحديث نشغّل السكربتات الجديدة في التبويبات المفتوحة بدون ما الموظف يحدّث الصفحة
+async function safeToReload() {
+  const { sabaReq } = await chrome.storage.local.get("sabaReq");
+  return !(sabaReq && Date.now() - (sabaReq.sentAt || 0) < 30 * 60000);
 }
+let pending = false;
+chrome.runtime.onUpdateAvailable.addListener(async () => { pending = true; if (await safeToReload()) chrome.runtime.reload(); });
 
-// بعد التحديث: نشغّل السكربتات الجديدة في التبويبات المفتوحة (القديمة انقطعت)
 async function reinject() {
   const groups = chrome.runtime.getManifest().content_scripts || [];
   const tabs = await chrome.tabs.query({});
@@ -34,8 +19,12 @@ async function reinject() {
     }
   }
 }
+chrome.runtime.onInstalled.addListener(d => { if (d.reason === "update") reinject(); });
 
-chrome.runtime.onInstalled.addListener(d => { if (d.reason === "update" || d.reason === "install") reinject(); check(); });
-chrome.runtime.onStartup.addListener(check);
-chrome.alarms.create("saba-update", { periodInMinutes: 15 });
-chrome.alarms.onAlarm.addListener(a => { if (a.name === "saba-update") check(); });
+// نسأل المتجر كل ساعة (بدل ما ننتظر كروم ساعات)، ولو فيه تحديث معلّق نطبّقه أول ما يصير آمن
+chrome.alarms.create("saba-update", { periodInMinutes: 60 });
+chrome.alarms.onAlarm.addListener(async a => {
+  if (a.name !== "saba-update") return;
+  if (pending && await safeToReload()) return chrome.runtime.reload();
+  try { chrome.runtime.requestUpdateCheck(() => {}); } catch { /* نسخة محمّلة يدوي */ }
+});
