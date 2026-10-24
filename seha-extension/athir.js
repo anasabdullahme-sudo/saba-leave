@@ -1,0 +1,124 @@
+// أثير (saba.athir.net): لما الموظف يختار طبيب في «كشف جديد» يطلع جنب خانة الطبيب: الدور، العيادة، التحويلة، وحالته الحين
+(() => {
+  if (window.top !== window && !document.querySelector("select")) return;
+  const URL_BASE = "https://firestore.googleapis.com/v1/projects/saba-leave/databases/(default)/documents/board/";
+  const WD = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+  const FLOOR_DEF = { B: "عيادة التجميل (بيوتي)", G: "الدور الأرضي", 1: "الدور الأول", 2: "الدور الثاني", 3: "الدور الثالث", 4: "الدور الرابع", 5: "الدور الخامس" };
+  let board = null, today = null, lastFetch = 0, host = null, box = null, field = null, lastSig = "";
+
+  /* ---------- البيانات (جدول البوادي — قراءة عامة) ---------- */
+  const dec = v => v == null ? null : "stringValue" in v ? v.stringValue : "integerValue" in v ? Number(v.integerValue) : "doubleValue" in v ? v.doubleValue
+    : "booleanValue" in v ? v.booleanValue : "nullValue" in v ? null : "arrayValue" in v ? (v.arrayValue.values || []).map(dec)
+    : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, dec(x)])) : "timestampValue" in v ? Date.parse(v.timestampValue) : null;
+  const getDoc = async name => { const r = await fetch(URL_BASE + name); if (!r.ok) return null; const j = await r.json(); return dec({ mapValue: { fields: j.fields || {} } }); };
+  // نقرأ من قاعدة البيانات بس لما تنفتح خانة الطبيب، ونشارك النسخة بين التبويبات (الجدول كل 10 دقائق، حالات اليوم كل دقيقتين)
+  let busy = false;
+  async function load() {
+    if (busy || Date.now() - lastFetch < 20000) return; busy = true; lastFetch = Date.now();
+    try {
+      const { sabaBoardCache: c = {} } = await chrome.storage.local.get("sabaBoardCache");
+      const needB = !c.board || Date.now() - (c.at || 0) > 10 * 60000, needT = Date.now() - (c.tAt || 0) > 2 * 60000;
+      const [b, t] = await Promise.all([needB ? getDoc("bawadi") : c.board, needT ? getDoc("bawadi_today") : c.today]);
+      if (b?.departments) board = b; today = t || null;
+      if (needB || needT) chrome.storage.local.set({ sabaBoardCache: { board: board || c.board, at: needB ? Date.now() : c.at, today, tAt: needT ? Date.now() : c.tAt } });
+    } catch { /* بدون نت — نكمل بالنسخة المحفوظة */ }
+    busy = false; lastSig = ""; tick();
+  }
+
+  /* ---------- مطابقة اسم أثير (الاسم الكامل | التخصص) مع جدول البوادي ---------- */
+  const norm = s => String(s || "").replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const deAl = t => t.length > 4 && t.startsWith("ال") ? t.slice(2) : t;
+  const toks = s => norm(s).split(" ").filter(t => t.length > 1 && !["د", "دكتور", "دكتوره", "اخصائي", "اخصائيه", "استشاري", "استشاريه"].includes(t)).map(deAl);
+  const near = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a)));
+  const docs = () => (board?.departments || []).flatMap(p => (p.doctors || []).map(d => ({ ...d, dep: p, fl: d.floor || p.floor })));
+  function matchAthir(text) {
+    const full = toks(String(text).split("|")[0]);
+    if (!full.length) return null;
+    const scored = docs().map(d => { const bt = toks(String(d.name).split(/\s*[–-]\s*/)[0]); const hit = bt.filter(t => full.some(f => near(f, t))).length; return [d, hit, bt.length, bt[0] && near(bt[0], full[0])]; })
+      .filter(([, hit, n, first]) => first && (hit >= 2 || (n === 1 && hit === 1))).sort((a, b) => b[1] - a[1]);
+    return scored.length && (scored.length === 1 || scored[0][1] > scored[1][1]) ? scored[0][0] : null;
+  }
+
+  /* ---------- حالة الطبيب الحين (نفس منطق صفحة الأطباء) ---------- */
+  function nowR() {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(new Date()).map(x => [x.type, x.value]));
+    return { m: +p.hour * 60 + +p.minute, wd: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday], iso: `${p.year}-${p.month}-${p.day}` };
+  }
+  const hm = m => { const h = Math.floor(m / 60) % 24, mi = m % 60; return `${h % 12 || 12}${mi ? ":" + String(mi).padStart(2, "0") : ""}${h < 12 ? "ص" : "م"}`; };
+  const shiftsFor = (d, wd) => d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []);
+  function active(d, t) {
+    if ((d.workdays || []).includes(t.wd)) for (const s of shiftsFor(d, t.wd)) if (s.e > s.s ? (t.m >= s.s && t.m < s.e) : t.m >= s.s) return s;
+    const y = (t.wd + 6) % 7; if ((d.workdays || []).includes(y)) for (const s of shiftsFor(d, y)) if (s.e <= s.s && t.m < s.e) return s;
+    return null;
+  }
+  function status(d) {
+    const t = nowR();
+    const vac = (board.vacations || []).find(v => v.doctorId === d.id && v.start <= t.iso && (!v.end || v.end >= t.iso));
+    if (vac) return ["vac", `في إجازة${vac.end ? " لين " + vac.end.split("-").reverse().slice(0, 2).join("/") : ""}`];
+    const s = today?.date === t.iso ? today.st?.[d.id] : null, a = active(d, t);
+    if (s?.kind === "stop") return ["red", "⛔ وقف استقبال الحالات"];
+    if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
+    if (s?.kind === "appt") return ["amber", "مواعيد فقط"];
+    if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)}`];
+    if (s?.kind === "busy") return ["amber", `زحمة${s.count ? " — " + s.count + " بالانتظار" : ""}`];
+    if (s?.kind === "free" || s?.kind === "present") return ["green", "متواجد الحين"];
+    if (a) return ["green", `متواجد لين ${hm(a.e)}`];
+    const next = (d.workdays || []).includes(t.wd) && shiftsFor(d, t.wd).filter(x => x.s > t.m).sort((x, y) => x.s - y.s)[0];
+    return ["gray", next ? `خارج الدوام — يبدأ ${hm(next.s)}` : "خارج الدوام اليوم"];
+  }
+
+  /* ---------- البطاقة جنب خانة الطبيب ---------- */
+  function ensureBox() {
+    if (host && document.documentElement.contains(host)) return;
+    host = document.createElement("div"); host.id = "saba-athir-doc";
+    host.style.cssText = "all:initial;position:fixed;z-index:2147483646;display:none";
+    const root = host.attachShadow({ mode: "open" });
+    const CSS = `.b{direction:rtl;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;background:#fff;border:1px solid #DCEBF4;border-inline-start:5px solid #00A6E2;border-radius:12px;padding:7px 12px;box-shadow:0 8px 22px -12px rgba(0,55,101,.45);display:grid;gap:3px;min-width:220px;max-width:340px;text-align:right}
+      .r1{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:700;color:#003765;flex-wrap:wrap}
+      .r1 span{background:#EAF6FC;border-radius:8px;padding:1px 8px}
+      .r2{font-size:12.5px;font-weight:600}.green{color:#0A7A55}.red{color:#B4232A}.amber,.vac{color:#9A5B00}.gray{color:#5B7690}
+      .no{font-size:12.5px;color:#5B7690}`;
+    try { const sh = new CSSStyleSheet(); sh.replaceSync(CSS); root.adoptedStyleSheets = [sh]; root.innerHTML = '<div class="b"></div>'; } catch { root.innerHTML = `<style>${CSS}</style><div class="b"></div>`; }
+    box = root.querySelector(".b");
+    document.documentElement.append(host);
+  }
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function place() {
+    if (!host || host.style.display === "none" || !field) return;
+    const vis = field.offsetParent ? field : (field.nextElementSibling?.classList?.contains("select2") || field.nextElementSibling?.className?.includes?.("chosen") ? field.nextElementSibling : field.parentElement);
+    const r = (vis || field).getBoundingClientRect();
+    if (!r.width) { host.style.display = "none"; return; }
+    const w = host.offsetWidth || 260;
+    host.style.top = Math.max(4, r.top + r.height / 2 - (host.offsetHeight || 50) / 2) + "px";
+    host.style.left = Math.max(4, r.left - w - 12) + "px";               // يسار الخانة (الصفحة عربية)
+  }
+
+  // خانة الطبيب: select عنوانها «الطبيب» أو خياراتها «الاسم | التخصص»
+  function findField() {
+    const sels = [...document.querySelectorAll("select")];
+    const byOpts = sels.filter(s => [...s.options].filter(o => /\|/.test(o.text)).length >= 2);
+    return byOpts[0] || null;
+  }
+  function tick() {
+    field = findField();
+    if (!field) { if (host) host.style.display = "none"; return; }
+    const o = field.options[field.selectedIndex], txt = o && o.value && !/اختر/.test(o.text) ? o.text.trim() : "";
+    if (!txt) { if (host) host.style.display = "none"; lastSig = ""; return; }
+    if (!board) { load(); return; }
+    const t = nowR(), sig = txt + "|" + t.m + "|" + (today?.date || "") + (board?.updatedAt || "");
+    if (sig !== lastSig) {
+      lastSig = sig; ensureBox();
+      const d = matchAthir(txt);
+      if (!d) box.innerHTML = `<div class="no">د. ${esc(txt.split("|")[0].trim())} — مو موجود في جدول البوادي</div>`;
+      else {
+        const fl = board.floorNames?.[d.fl] || FLOOR_DEF[d.fl] || "الدور " + d.fl, [cls, st] = status(d);
+        box.innerHTML = `<div class="r1"><span>${esc(fl)}</span>${d.room ? `<span>عيادة ${esc(d.room)}</span>` : ""}${d.ext ? `<span>☎ ${esc(d.ext)}</span>` : ""}</div><div class="r2 ${cls}">${esc(st)}</div>`;
+      }
+      host.style.display = "block";
+    }
+    place();
+  }
+  setInterval(() => { if (document.visibilityState === "visible") tick(); }, 500);       // select2 ما يطلق change عادي، فنراقب القيمة
+  addEventListener("scroll", place, true); addEventListener("resize", place);
+  setInterval(() => { if (field && document.visibilityState === "visible") load(); }, 60000);
+})();

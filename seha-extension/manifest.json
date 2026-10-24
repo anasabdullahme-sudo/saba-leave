@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "سابا ← صحة",
   "short_name": "Saba Seha",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "تعبئة نموذج الإجازات في منصة صحة تلقائياً من لوحة رفع الإجازات في سابا.",
   "permissions": [
     "storage"
@@ -55,6 +55,20 @@
         "alert.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://saba.athir.net/*",
+        "https://*.athir.net/*"
+      ],
+      "js": [
+        "athir.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
+  ],
+  "host_permissions": [
+    "https://firestore.googleapis.com/*"
   ]
 }
