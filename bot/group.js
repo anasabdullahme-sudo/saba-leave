@@ -120,7 +120,33 @@ function fuzzyPick(s) {
   for (const t of w) { if (t.length < 5) continue; const f = L.filter(d => norm(shortName(d.name)).split(" ").map(deAl).some(x => x.length >= 5 && lev1(x, deAl(t)))); if (f.length === 1) return f[0]; }   // «السجيدي» ≈ السنجيدي
   return null;
 }
+// إجازة بتواريخ (بدون Gemini): «اجازة من الان الى يوم 30»، «المباشرة السبت 31»، «من يوم السبت … اجازة لمدة اسبوع»
+const WDN = { "الاحد": 0, "الاثنين": 1, "الثلاثاء": 2, "الاربعاء": 3, "الخميس": 4, "الجمعه": 5, "السبت": 6 };
+const isoAdd = (iso, n) => { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+function dayToIso(day, fromIso) {                       // «يوم 30» → أقرب 30 جاي (هالشهر أو اللي بعده)
+  const [y, m, d] = fromIso.split("-").map(Number);
+  const dt = day >= d ? new Date(Date.UTC(y, m - 1, day)) : new Date(Date.UTC(y, m, day));
+  return dt.toISOString().slice(0, 10);
+}
+function vacationRule(text) {
+  const n = norm(text), t = nowR();
+  if (!/اجاز/.test(n) || /كل يوم|كل اسبوع/.test(n)) return null;
+  let start = t.iso;
+  const sw = /من (?:يوم )?(الاحد|الاثنين|الثلاثاء|الاربعاء|الخميس|الجمعه|السبت)/.exec(n);
+  if (sw) { const w = WDN[sw[1]]; start = isoAdd(t.iso, (w - t.wd + 7) % 7); }
+  else if (/بكره|بكرا|من الغد/.test(n)) start = isoAdd(t.iso, 1);
+  let end = "";
+  const to = /(?:الى|الي|لين|حتى) (?:يوم )?(\d{1,2})(?!\d|:)/.exec(n), back = /المباشره[^\d]{0,20}(\d{1,2})(?!\d)/.exec(n);
+  if (to) end = dayToIso(+to[1], start);
+  else if (back) end = isoAdd(dayToIso(+back[1], start), -1);
+  else if (/اسبوعين/.test(n)) end = isoAdd(start, 13);
+  else if (/اسبوع/.test(n)) end = isoAdd(start, 6);
+  else { const dn = /لمده (\d+) (?:يوم|ايام)/.exec(n); if (dn) end = isoAdd(start, +dn[1] - 1); else if (/شهر/.test(n)) end = isoAdd(start, 29); }
+  return end && end >= start ? { start_date: start, end_date: end } : null;
+}
 function ruleParse(text, quoted) {
+  const vac = vacationRule(text);
+  if (vac) { const d = fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null); return d ? [{ doctor_id: d.id, name: shortName(d.name), kind: "vacation", ...vac }] : Object.assign([], { unknown: true }); }
   const timeIn = n => { const m = /(\d{1,2})(?::(\d{2}))?/.exec(n); return m ? `${String(+m[1]).padStart(2, "0")}:${m[2] || "00"}` : ""; };
   const kindOf = n => /مواعيد فقط|فقط مواعيد/.test(n) ? "appointments_only"
     : /وقف|لحد يطلع|لا احد يدخل|محد يدخل|خلاص/.test(n) ? "stop"
@@ -255,8 +281,10 @@ async function isOurGroup(jid) {
   return false;
 }
 
+const done = new Set();
 export async function handleGroupMessage(m) {
   const jid = m.key?.remoteJid || "";
+  if (m.key?.id) { if (done.has(m.key.id)) return; done.add(m.key.id); if (done.size > 2000) done.clear(); }
   if (!(await isOurGroup(jid))) return;
   const msg = m.message || {};
   if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;

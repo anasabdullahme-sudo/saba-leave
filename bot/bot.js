@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.8.1";
+const VERSION = "1.8.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -50,6 +50,8 @@ async function connect() {
   });
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", ({ messages, type }) => {
+    // رسائل القروب اللي وصلت والبوت طافي (append) — نعالج الأحدث من 6 ساعات
+    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) handleGroupMessage(m).catch(() => {}); } return; }
     if (type !== "notify") return;
     for (const m of messages || []) onIncoming(m).catch(e => log.warn({ err: String(e?.message || e) }, "رسالة واردة"));
   });
