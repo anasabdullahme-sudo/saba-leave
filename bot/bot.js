@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.8.4";
+const VERSION = "1.8.5";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -592,11 +592,14 @@ async function cleanupImages() {
       if (t > now - 2 * DAY) break;
       if (t < cutoff || (trim && total > TARGET_MB * 1e6)) { del.push(d.id); total -= d.get("size") || 0; }
     }
-    for (let i = 0; i < del.length; i += 200) {
-      const b = db.batch();
-      for (const id of del.slice(i, i + 200)) { b.delete(db.doc(`imageData/${id}`)); b.delete(db.doc(`images/${id}`)); }
-      await b.commit();
+    // دفعات صغيرة (حجم المستندات الممسوحة يتحسب على حد الدفعة 10MB — الكبيرة ترجع «Transaction too big»)
+    const sizeOf = Object.fromEntries(imgs.docs.map(d => [d.id, d.get("size") || 300000]));
+    let b = db.batch(), n = 0, bytes = 0;
+    for (const id of del) {
+      b.delete(db.doc(`imageData/${id}`)); b.delete(db.doc(`images/${id}`)); n += 2; bytes += sizeOf[id] * 1.4;
+      if (n >= 60 || bytes > 4e6) { await b.commit(); b = db.batch(); n = 0; bytes = 0; }
     }
+    if (n) await b.commit();
     const mb = Math.round(total / 1e6);
     await setStatus({ storage: { mb, maxMb: 1024, images: imgs.size - del.length, deleted: del.length, at: TS() } });
     log.info({ beforeMb: Math.round(before / 1e6), afterMb: mb, deleted: del.length }, "تنظيف الصور");

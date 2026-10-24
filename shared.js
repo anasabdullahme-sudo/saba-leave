@@ -732,14 +732,15 @@ async function liveBackend(role) {
         const fx = await FS.getDocs(FS.query(FS.collection(db, "fixes"), FS.where("status", "in", ["open", "answered"])));
         fx.docs.forEach(d => { const p = d.data().answer?.imagePath; if (String(p || "").startsWith("fs:")) keep.add(p.slice(3)); });
         const old = await FS.getDocs(FS.query(FS.collection(db, "images"), FS.where("createdAt", "<", FS.Timestamp.fromMillis(cutoffMs))));
-        return old.docs.filter(d => !keep.has(d.id)).map(d => ({ id: d.id, size: d.data().size || 0 }));
+        return old.docs.filter(d => !keep.has(d.id)).map(d => ({ id: d.id, size: d.data().size || 0 }));   // size = حجم الصورة (base64 أكبر بـ 1.37 تقريباً)
       },
       async cleanupImages(cutoffMs, onProgress) {
         const list = await api.oldImages(cutoffMs);
-        let b = FS.writeBatch(db), n = 0, done = 0;
+        // دفعات صغيرة: Firestore يرفض الدفعة لو مجموع حجم المستندات الممسوحة كبير («invalid-argument: Transaction too big»)
+        let b = FS.writeBatch(db), n = 0, bytes = 0, done = 0;
         for (const im of list) {
-          b.delete(FS.doc(db, "imageData", im.id)); b.delete(FS.doc(db, "images", im.id)); n += 2; done++;
-          if (n >= 400) { await b.commit(); b = FS.writeBatch(db); n = 0; onProgress?.(done / list.length); }
+          b.delete(FS.doc(db, "imageData", im.id)); b.delete(FS.doc(db, "images", im.id)); n += 2; bytes += (im.size || 300000) * 1.4; done++;
+          if (n >= 60 || bytes > 4e6) { await b.commit(); b = FS.writeBatch(db); n = 0; bytes = 0; onProgress?.(done / list.length); }
         }
         if (n) await b.commit();
         onProgress?.(1);
