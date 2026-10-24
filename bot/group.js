@@ -197,7 +197,11 @@ async function apply(evs, ctx) {
       const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
       if (e.kind === "new_doctor" && d) continue;                       // موجود أصلاً في الجدول
       if (["new_doctor", "moved", "schedule_change"].includes(e.kind)) { inbox.push({ id: uid(), at: Date.now(), kind: e.kind, name: e.name, dept: e.dept || "", room: e.room || "", branch: e.branch || "", date: e.start_date || "", doctorId: d?.id || "", text: ctx.text.slice(0, 300), by: ctx.by }); applied.push(e.kind); continue; }
-      if (e.kind === "vacation") { if (d && e.start_date) { vacs.push({ d, e }); applied.push("vacation"); } continue; }
+      if (e.kind === "vacation") {                                       // التواريخ من Gemini، ولو ناقصة نحسبها من نص الرسالة
+        const r = vacationRule(ctx.text) || {}; e.start_date = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : (r.start_date || t.iso);
+        e.end_date = /^\d{4}-\d{2}-\d{2}$/.test(e.end_date || "") ? e.end_date : (r.end_date || "");
+        if (d) { vacs.push({ d, e }); applied.push("vacation"); } continue;
+      }
       const key = d ? d.id : "x:" + norm(e.name);
       if (!d && e.kind !== "present") continue;                         // طبيب مو في الجدول: نقبل بس «موجود» (مؤقت)
       // أوقات بدون ص/م: «٩:٤٥» الساعة 8 بالليل = 21:45، و«موجود إلى ١» = 1 بعد نص الليل
