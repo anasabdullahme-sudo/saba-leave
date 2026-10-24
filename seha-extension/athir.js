@@ -26,10 +26,12 @@
   }
 
   /* ---------- مطابقة اسم أثير (الاسم الكامل | التخصص) مع جدول البوادي ---------- */
-  const norm = s => String(s || "").replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const norm = s => String(s || "").replace(/[ً-ْـ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/ؤ/g, "و").replace(/ئ/g, "ي").replace(/ء/g, "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
   const deAl = t => t.length > 4 && t.startsWith("ال") ? t.slice(2) : t;
   const toks = s => norm(s).split(" ").filter(t => t.length > 1 && !["د", "دكتور", "دكتوره", "اخصائي", "اخصائيه", "استشاري", "استشاريه"].includes(t)).map(deAl);
-  const near = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a)));
+  // حرف زايد/ناقص/مختلف مسموح في الأسماء: نرمين ≈ نيرمين
+  const lev1 = (a, b) => { if (Math.abs(a.length - b.length) > 1) return false; let i = 0, j = 0, e = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++e > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } } return e + (a.length - i) + (b.length - j) <= 1; };
+  const near = (a, b) => a === b || (a.length >= 4 && b.length >= 4 && lev1(a, b)) || (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a)));
   const docs = () => (board?.departments || []).flatMap(p => (p.doctors || []).map(d => ({ ...d, dep: p, fl: d.floor || p.floor })));
   function matchAthir(text) {
     const full = toks(String(text).split("|")[0]);

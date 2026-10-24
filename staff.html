@@ -1224,7 +1224,7 @@ function fixDupMsg(e) {
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null, sehaWarned = null;
-const EXT_LATEST = "1.5.1", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
+const EXT_LATEST = "1.5.2", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
 const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 let extWarned = false;
 $("#toolDl").href = EXT_ZIP; $("#toolVer").textContent = EXT_LATEST;
