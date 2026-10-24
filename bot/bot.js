@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.8.3";
+const VERSION = "1.8.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -288,7 +288,7 @@ async function aiReply(key, text, facts) {
   for (const model of CHAT_MODELS) {
     try {
       const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 20000);
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal });
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": GEMINI_KEY }, body: JSON.stringify(body), signal: ctl.signal });
       clearTimeout(tm);
       if (!res.ok) { log.warn({ model, status: res.status, err: (await res.text()).slice(0, 200) }, "Gemini"); continue; }
       const j = await res.json();

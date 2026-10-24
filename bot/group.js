@@ -99,7 +99,7 @@ async function aiParse(text, quoted) {
   for (const model of models) {
     try {
       const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 20000);
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${gemini}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal });
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": gemini }, body: JSON.stringify(body), signal: ctl.signal });
       clearTimeout(tm);
       if (!res.ok) { log.warn({ model, status: res.status }, "Gemini قروب"); continue; }
       const j = await res.json();
