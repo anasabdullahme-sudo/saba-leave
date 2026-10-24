@@ -2,10 +2,12 @@
   "manifest_version": 3,
   "name": "سابا ← صحة",
   "short_name": "Saba Seha",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "تعبئة نموذج الإجازات في منصة صحة تلقائياً من لوحة رفع الإجازات في سابا.",
   "permissions": [
-    "storage"
+    "storage",
+    "alarms",
+    "scripting"
   ],
   "icons": {
     "16": "icon16.png",
@@ -69,6 +71,10 @@
     }
   ],
   "host_permissions": [
-    "https://firestore.googleapis.com/*"
-  ]
+    "https://firestore.googleapis.com/*",
+    "https://anasabdullahme-sudo.github.io/*"
+  ],
+  "background": {
+    "service_worker": "bg.js"
+  }
 }

@@ -94,6 +94,7 @@
   /* ---------- البطاقة جنب خانة الطبيب ---------- */
   function ensureBox() {
     if (host && document.documentElement.contains(host)) return;
+    document.getElementById("saba-athir-doc")?.remove();
     host = document.createElement("div"); host.id = "saba-athir-doc";
     host.style.cssText = "all:initial;position:fixed;z-index:2147483646;display:none";
     const root = host.attachShadow({ mode: "open" });
@@ -142,7 +143,8 @@
     }
     place();
   }
-  setInterval(() => { if (document.visibilityState === "visible") tick(); }, 500);       // select2 ما يطلق change عادي، فنراقب القيمة
+  const alive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
+  const iv = setInterval(() => { if (!alive()) { clearInterval(iv); return; } if (document.visibilityState === "visible") tick(); }, 500);       // select2 ما يطلق change عادي، فنراقب القيمة
   addEventListener("scroll", place, true); addEventListener("resize", place);
   setInterval(() => { if (field && document.visibilityState === "visible") load(); }, 60000);
 })();

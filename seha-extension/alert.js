@@ -6,6 +6,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   function ensure() {
     if (host && document.documentElement.contains(host)) return;
+    document.getElementById("saba-doc-alerts")?.remove();
     host = document.createElement("div"); host.id = "saba-doc-alerts";
     host.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:2147483647;all:initial;position:fixed;left:16px;bottom:16px;z-index:2147483647";
     const root = host.attachShadow({ mode: "open" });

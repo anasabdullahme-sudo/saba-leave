@@ -7,6 +7,8 @@
   if (window.__sabaSeha) return; window.__sabaSeha = true;
   // صحة ممكن تفتح نموذج الإجازة داخل إطار (iframe): اللوحة في الصفحة الرئيسية، والتعبئة تشتغل في كل إطار
   const TOP = window === window.top;
+  // بعد التحديث التلقائي النسخة القديمة من السكربت «تنقطع» — نوقفها عشان ما تشتغل نسختين
+  const alive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
   const FID = Math.random().toString(36).slice(2, 8);
 
   // ---------- إعدادات يمكن تعديلها ----------
@@ -407,6 +409,7 @@
   }
 
   // ---------- اللوحة العائمة (Shadow DOM حتى ما تتأثر بتصميم صحة) ----------
+  if (TOP) document.getElementById("saba-seha-host")?.remove();            // نسخة قديمة من الأداة قبل التحديث التلقائي
   const host = document.createElement("div"); host.id = "saba-seha-host";
   host.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:2147483646;";
   const root = host.attachShadow({ mode: "open" });
@@ -758,11 +761,11 @@
     } finally { navBusy = false; }
   }
   // الصفحة الرئيسية أحياناً تحمّل بدون تغييرات نلقطها — نحاول كل ثانيتين لمدة دقيقتين بعد وصول الطلب
-  setInterval(() => { if (TOP && auto && navActive() && !document.hidden) openAddForm(); }, 2000);
+  setInterval(() => { if (alive() && TOP && auto && navActive() && !document.hidden) openAddForm(); }, 2000);
 
   // القائمة تتحدث كل دقيقة من اللوحة — لو وقفت نبيّن تنبيه
   let lastStale = null;
-  setInterval(() => { if (!TOP || req || minimized) return; const st = queueStale(); if (st !== lastStale) { lastStale = st; render(); } }, 20000);
+  setInterval(() => { if (!alive() || !TOP || req || minimized) return; const st = queueStale(); if (st !== lastStale) { lastStale = st; render(); } }, 20000);
 
   // ---------- تشغيل ----------
   chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert"], d => {
@@ -801,7 +804,8 @@
 
   // صحة تطبيق صفحة واحدة: نراقب تغيّر الصفحة وظهور خانات جديدة
   let deb;
-  new MutationObserver(muts => {
+  const mo = new MutationObserver(muts => {
+    if (!alive()) { mo.disconnect(); return; }
     if (muts.every(m => host.contains(m.target) || m.target === host)) return;
     clearTimeout(deb);
     deb = setTimeout(() => {
@@ -811,7 +815,8 @@
       const acc = $(".acc"); if (req && acc) { const st = accountState(req).state; if (!acc.classList.contains(st)) render(); }
       if (req && /حسابات صحة طبي/.test(document.body.innerText)) highlightPicker(req);
     }, 450);
-  }).observe(document.body, { childList: true, subtree: true });
-  setInterval(() => { if (auto && fillActive() && shadowHosts.length && !document.hidden) { fill(req); updateDots(); } }, 2000);
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+  setInterval(() => { if (alive() && auto && fillActive() && shadowHosts.length && !document.hidden) { fill(req); updateDots(); } }, 2000);
   addEventListener("hashchange", () => setTimeout(() => render(), 500));
 })();
