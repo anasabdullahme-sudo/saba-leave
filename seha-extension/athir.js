@@ -51,20 +51,42 @@
     const y = (t.wd + 6) % 7; if ((d.workdays || []).includes(y)) for (const s of shiftsFor(d, y)) if (s.e <= s.s && t.m < s.e) return s;
     return null;
   }
+  // «بعد ساعة و20 دقيقة»
+  const left = mins => { mins = Math.max(1, Math.round(mins)); const h = Math.floor(mins / 60), m = mins % 60;
+    const H = h === 1 ? "ساعة" : h === 2 ? "ساعتين" : h <= 10 ? `${h} ساعات` : `${h} ساعة`, M = m === 1 ? "دقيقة" : m === 2 ? "دقيقتين" : m <= 10 ? `${m} دقائق` : `${m} دقيقة`;
+    return h && m ? `${H} و${M}` : h ? H : M; };
+  const isoAdd = (iso, n) => { const x = new Date(iso + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  // أقرب بداية دوام (اليوم أو الأيام الجاية، ونتخطى أيام الإجازة)
+  function nextStart(d, t) {
+    for (let i = 0; i < 8; i++) {
+      const wd = (t.wd + i) % 7, iso = isoAdd(t.iso, i);
+      if (!(d.workdays || []).includes(wd)) continue;
+      if ((board.vacations || []).some(v => v.doctorId === d.id && v.start <= iso && (!v.end || v.end >= iso))) continue;
+      const st = shiftsFor(d, wd).map(x => x.s).filter(x => i > 0 || x > t.m).sort((a, b) => a - b)[0];
+      if (st != null) return { day: i, wd, s: st, mins: i * 1440 + st - t.m };
+    }
+    return null;
+  }
+  function whenTxt(n) {
+    if (!n) return "خارج الدوام";
+    if (n.day === 0) return `دوامه يبدأ ${hm(n.s)} — بعد ${left(n.mins)}`;
+    return `دوامه ${n.day === 1 ? "بكرة" : WD[n.wd]} ${hm(n.s)}`;
+  }
   function status(d) {
     const t = nowR();
     const vac = (board.vacations || []).find(v => v.doctorId === d.id && v.start <= t.iso && (!v.end || v.end >= t.iso));
-    if (vac) return ["vac", `في إجازة${vac.end ? " لين " + vac.end.split("-").reverse().slice(0, 2).join("/") : ""}`];
+    if (vac) { const n = vac.end ? nextStart(d, t) : null; return ["vac", `في إجازة${vac.end ? " لين " + vac.end.split("-").reverse().slice(0, 2).join("/") : ""}${n && n.day > 0 ? " · يرجع " + (n.day === 1 ? "بكرة" : WD[n.wd]) + " " + hm(n.s) : ""}`]; }
     const s = today?.date === t.iso ? today.st?.[d.id] : null, a = active(d, t);
     if (s?.kind === "stop") return ["red", "⛔ وقف استقبال الحالات"];
     if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
     if (s?.kind === "appt") return ["amber", "مواعيد فقط"];
-    if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)}`];
+    if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
+    if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)} (بعد ${left(s.from - t.m)})`];
     if (s?.kind === "busy") return ["amber", `زحمة${s.count ? " — " + s.count + " بالانتظار" : ""}`];
     if (s?.kind === "free" || s?.kind === "present") return ["green", "متواجد الحين"];
-    if (a) return ["green", `متواجد لين ${hm(a.e)}`];
-    const next = (d.workdays || []).includes(t.wd) && shiftsFor(d, t.wd).filter(x => x.s > t.m).sort((x, y) => x.s - y.s)[0];
-    return ["gray", next ? `خارج الدوام — يبدأ ${hm(next.s)}` : "خارج الدوام اليوم"];
+    if (a) { const endIn = (a.e > a.s ? a.e : a.e + (t.m >= a.s ? 1440 : 0)) - t.m; return ["green", `✓ متواجد الحين — لين ${hm(a.e)}${endIn <= 60 ? ` (باقي ${left(endIn)})` : ""}`]; }
+    const n = nextStart(d, t);
+    return [n && n.day === 0 && n.mins <= 60 ? "amber" : "gray", whenTxt(n)];
   }
 
   /* ---------- البطاقة جنب خانة الطبيب ---------- */
