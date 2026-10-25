@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.8.5";
+const VERSION = "1.8.6";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -543,6 +543,33 @@ async function seedBoard() {
   } catch (e) { log.error({ err: String(e?.message || e) }, "فشل استيراد جداول الأطباء"); }
 }
 
+/* ---------- إضافات جاهزة للجدول (board-patches.json): كل إجازة تنضاف مرة وحدة بس ----------
+   لو انحذفت بعدين من الصفحة ما ترجع (نحفظ أرقامها في patched) */
+async function applyPatches() {
+  try {
+    const p = JSON.parse(fs.readFileSync(new URL("./board-patches.json", import.meta.url), "utf8"));
+    const added = await db.runTransaction(async tx => {
+      const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data();
+      if (!cur || !(cur.departments || []).length) return [];
+      const done = new Set([...(cur.patched || []), ...(cur.vacations || []).map(v => v.id)]);
+      const docs = cur.departments.flatMap(d => d.doctors || []);
+      const todo = (p.vacations || []).filter(v => !done.has(v.id));
+      if (!todo.length) return [];
+      const next = structuredClone(cur);
+      for (const v of todo) {
+        const d = docs.find(x => x.id === v.doctorId) || docs.find(x => v.code && String(x.code) === String(v.code));
+        (next.vacations ||= []).push({ ...v, doctorId: d?.id || v.doctorId, name: d?.name || v.name });
+      }
+      next.patched = [...(cur.patched || []), ...todo.map(v => v.id)].slice(-300);
+      next.log = [{ at: Date.now(), by: "البوت", what: `إجازات: ${todo.map(v => v.name.split(" –")[0]).join("، ")}` }, ...(cur.log || [])].slice(0, 60);
+      next.updatedAt = Date.now(); next.updatedBy = "البوت";
+      tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إضافة إجازات" }); tx.set(ref, next);
+      return todo;
+    });
+    if (added.length) log.info({ n: added.length }, "انضافت إجازات للجدول");
+  } catch (e) { log.error({ err: String(e?.message || e) }, "فشل إضافة الإجازات"); }
+}
+
 /* ---------- نسخة احتياطية أسبوعية (بدون الصور) على قرص Railway ----------
    كل الطلبات وطلبات التعديل → /data/backups/saba-YYYY-MM-DD.json.gz — نحتفظ بآخر 8 نسخ */
 async function backupWeekly() {
@@ -657,7 +684,7 @@ async function main() {
   startTrackSync();
   watchDoctors();
   startFixApplier();
-  deployRules().then(seedBoard);
+  deployRules().then(seedBoard).then(applyPatches);
   initGroup({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
