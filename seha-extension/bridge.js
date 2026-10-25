@@ -2,19 +2,25 @@
 (() => {
   const isBoard = () => /لوحة الإجازات|لوحة رفع الإجازات/.test(document.title) || !!document.querySelector("#sehaDrawer");
   const post = msg => window.postMessage(msg, location.origin);
+  // بعد تحديث/إعادة تحميل الإضافة تبقى النسخة القديمة في الصفحة بدون اتصال — نوقفها بهدوء بدل الأخطاء
+  const ac = new AbortController(), on = { signal: ac.signal };
+  let timer = 0;
+  const alive = () => { try { if (chrome.runtime?.id) return true; } catch {} ac.abort(); clearInterval(timer); return false; };
+  const listen = fn => window.addEventListener("message", e => { if (!alive()) return; try { const r = fn(e); r?.catch?.(() => {}); } catch { alive(); } }, on);
 
   function forwardDone() {
+    if (!alive()) return;
     chrome.storage.local.get("sabaDone", ({ sabaDone }) => {
       if (sabaDone) post({ type: "SABA_SEHA_DONE", id: sabaDone.id, ref: sabaDone.ref, psl: sabaDone.psl || "", at: sabaDone.at });
     });
   }
   function announce() {
-    if (!isBoard()) return;
+    if (!isBoard() || !alive()) return;
     post({ type: "SABA_EXT_READY", version: chrome.runtime.getManifest().version });
     forwardDone(); // لو فيه "تم" وصل واللوحة كانت مقفلة
   }
 
-  window.addEventListener("message", e => {
+  listen(e => {
     if (e.source !== window || !e.data || typeof e.data !== "object") return;
     const m = e.data;
     if (m.type === "SABA_EXT_PING") announce();
@@ -29,14 +35,14 @@
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaDone?.newValue) forwardDone(); });
   // الطلب المفتوح في صحة بهالجهاز → اللوحة تحجزه («مفتوح عند فلان» عند الباقين)
-  const active = () => chrome.storage.local.get("sabaReq", ({ sabaReq: r }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id }); });
+  const active = () => alive() && chrome.storage.local.get("sabaReq", ({ sabaReq: r }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id }); });
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local" || !ch.sabaReq || !isBoard()) return;
     const o = ch.sabaReq.oldValue, n = ch.sabaReq.newValue;
     if (o?.id && o.id !== n?.id) post({ type: "SABA_RELEASE", id: o.id });
     if (n?.id) active();
   });
-  setInterval(() => { try { active(); } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ } }, 120000);
+  timer = setInterval(() => { try { active(); } catch { alive(); } }, 120000);
   chrome.storage.onChanged.addListener((ch, area) => { const a = area === "local" && ch.sabaAlert?.newValue; if (a && isBoard()) post({ type: "SABA_SEHA_ALERT", labels: a.labels || [], at: a.at }); });
 
   // طلب تعديل من داخل صحة → لوحة سابا (تبويب واحد بس يتكفّل فيه)
@@ -51,14 +57,14 @@
     if (c2?.tab !== TAB) return;
     post({ type: "SABA_FIX_REQ", ...fr });
   });
-  window.addEventListener("message", e => {
+  listen(e => {
     if (e.source !== window || e.data?.type !== "SABA_FIX_RES") return;
     const { type, ...res } = e.data;
     chrome.storage.local.set({ sabaFixRes: res }); chrome.storage.local.remove("sabaFixReq");
   });
 
   // تنبيه طبيب من قروب الاستقبال → كل تبويبات كروم (alert.js يعرضه في الصفحة اللي قدامك)
-  window.addEventListener("message", async e => {
+  listen(async e => {
     if (e.source !== window || e.data?.type !== "SABA_DOC_ALERT" || !e.data.ev?.id) return;
     const ev = e.data.ev;
     try {
@@ -69,6 +75,6 @@
     } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ }
   });
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce); else announce();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce, on); else announce();
   setTimeout(announce, 1500);
 })();
