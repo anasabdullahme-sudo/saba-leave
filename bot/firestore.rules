@@ -90,6 +90,17 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // زر الطبيب (من أثير): الطبيب يرسل حالته بس (وقف/أستقبل/انتظار/مواعيد) — البوت يقرأها ويطبّقها ويحذفها
+    match /signals/{id} {
+      allow create: if autoId(id)
+        && request.resource.data.keys().hasOnly(['doctorId', 'kind', 'at', 'pc'])
+        && request.resource.data.doctorId is string && request.resource.data.doctorId.matches('^[A-Za-z0-9]{3,20}$')
+        && request.resource.data.kind in ['stop', 'free', 'busy', 'appt']
+        && request.resource.data.at is int
+        && (!('pc' in request.resource.data) || (request.resource.data.pc is string && request.resource.data.pc.size() <= 40));
+      allow read, update, delete: if false;
+    }
+
     // قائمة الموظفين — تُضاف من الكونسول فقط
     match /staff/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;

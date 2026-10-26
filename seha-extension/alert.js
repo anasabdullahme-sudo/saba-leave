@@ -50,6 +50,6 @@
     shown.add(ev.id);
     if (document.visibilityState !== "visible") return;                  // التبويب اللي قدامك بس
     if (Date.now() - (ev.shownAt || ev.at) > 60000) return;
-    show(ev);
+    chrome.storage.local.get("sabaDoctorMe", r => { if (!r.sabaDoctorMe) show(ev); });   // جهاز طبيب: ما نزعجه بتنبيهات الاستقبال
   });
 })();

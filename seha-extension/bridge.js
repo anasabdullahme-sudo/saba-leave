@@ -75,6 +75,19 @@
     } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ }
   });
 
+  // صفحة «ربط جهاز الطبيب» في موقعنا بس → نحفظ مين الطبيب على هالجهاز (زر الحالة في أثير)
+  const OURS = location.hostname === "anasabdullahme-sudo.github.io" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  listen(async e => {
+    if (!OURS || e.source !== window || !/^SABA_DOCTOR_(SET|GET)$/.test(e.data?.type || "")) return;
+    if (e.data.type === "SABA_DOCTOR_SET") {
+      const d = e.data.doctor;
+      if (d === null) await chrome.storage.local.remove("sabaDoctorMe");
+      else if (d && /^[A-Za-z0-9]{3,20}$/.test(d.id) && typeof d.name === "string") await chrome.storage.local.set({ sabaDoctorMe: { id: d.id, name: d.name.slice(0, 60), at: Date.now() } });
+    }
+    const { sabaDoctorMe: me = null } = await chrome.storage.local.get("sabaDoctorMe");
+    post({ type: "SABA_DOCTOR_ME", doctor: me, version: chrome.runtime.getManifest().version });
+  });
+
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce, on); else announce();
   setTimeout(announce, 1500);
 })();

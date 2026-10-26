@@ -17,6 +17,28 @@ export function initGroup(opts) {
   db.doc("board/bawadi_today").onSnapshot(d => { today = d.exists ? d.data() : null; }, e => log.warn({ e: String(e) }, "today"));
   db.doc("bot/status").get().then(d => { groupJid = d.get("group")?.jid || ""; }).catch(() => {});
   setInterval(runScheduled, 30000);
+  listenSignals();
+}
+
+/* ---------- زر الطبيب في أثير → signals/{id} → نفس مسار رسائل القروب ---------- */
+const SIG = { stop: ["stop", "⛔ أوقف استقبال الحالات"], free: ["free", "✅ رجع يستقبل حالات"], busy: ["busy", "⏳ عنده انتظار — بلّغوا اللي ما عندهم موعد"], appt: ["appointments_only", "📅 مواعيد فقط — لا تدخّلون حالات بدون موعد"] };
+const lastSig = new Map();
+function listenSignals() {
+  db.collection("signals").onSnapshot(snap => {
+    for (const ch of snap.docChanges()) if (ch.type === "added") handleSignal(ch.doc.ref).catch(e => log.warn({ e: String(e) }, "signal"));
+  }, e => log.warn({ e: String(e) }, "signals"));
+}
+async function handleSignal(ref) {
+  const s = await db.runTransaction(async tx => { const d = await tx.get(ref); if (!d.exists) return null; tx.delete(ref); return d.data(); });   // نسخة وحدة بس تطبّقه
+  if (!s || !SIG[s.kind] || !board) return;
+  if (Math.abs(Date.now() - (s.at || 0)) > 15 * 60000) return;                     // قديم (البوت كان طافي)
+  const d = docs().find(x => x.id === s.doctorId); if (!d) return;
+  const k = d.id + s.kind; if (Date.now() - (lastSig.get(k) || 0) < 20000) return; lastSig.set(k, Date.now());
+  const [kind, txt] = SIG[s.kind];
+  await apply([{ kind, doctor_id: d.id, name: shortName(d.name) }], { text: "", by: "د. " + shortName(d.name) + " (زر)" });
+  log.info({ doctor: d.name, kind }, "زر الطبيب");
+  // نكتب في القروب بعد كذا عشان اللي ما عندهم الأداة يدرون
+  try { const jid = groupJid || await findGroup(); if (jid) await getSock()?.sendMessage(jid, { text: `د. ${shortName(d.name)} — ${txt}` }); } catch {}
 }
 
 /* ---------- أدوات ---------- */
@@ -270,6 +292,14 @@ async function runScheduled() {
       tx.set(ref, cur);
     });
   } catch (e) { log.warn({ err: String(e?.message || e) }, "مجدول القروب"); }
+}
+
+async function findGroup() {
+  try {
+    const all = await getSock()?.groupFetchAllParticipating(); if (!all) return "";
+    for (const [jid, g] of Object.entries(all)) { subjects.set(jid, g.subject || ""); if (await isOurGroup(jid)) return jid; }
+  } catch {}
+  return "";
 }
 
 /* ---------- الرسالة الواردة من القروب ---------- */

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "سابا ← صحة",
   "short_name": "Saba Seha",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "description": "أداة داخلية لموظفي استقبال مجمع عيادات سابا: تعبئة نموذج الإجازات في منصة صحة، تنبيهات حالة الأطباء، وبطاقة الطبيب في نظام أثير.",
   "permissions": [
     "storage",
@@ -68,6 +68,16 @@
       ],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://saba.athir.net/*",
+        "https://*.athir.net/*"
+      ],
+      "js": [
+        "doctor.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "host_permissions": [

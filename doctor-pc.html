@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ربط جهاز الطبيب</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F3F7FA;--card:#fff;--fg:#0B2B47;--mut:#5B7690;--line:#DCE6EF;--pri:#003765;--acc:#00A6E2;--ok:#0E9F6E;--bad:#E5383B}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0E1A26;--card:#15263A;--fg:#E6EEF5;--mut:#9FB3C6;--line:#24384D;--pri:#5DB8F0}}
+:root[data-theme="dark"]{--bg:#0E1A26;--card:#15263A;--fg:#E6EEF5;--mut:#9FB3C6;--line:#24384D;--pri:#5DB8F0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 "IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.st{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.st b{font-size:17px}
+.btn{all:unset;cursor:pointer;padding:8px 14px;border-radius:10px;font-weight:600;border:1px solid var(--line);background:var(--bg)}
+.btn.red{color:var(--bad)}
+input{width:100%;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);margin-bottom:12px}
+.dep{margin-top:10px}.dep h3{font-size:13.5px;color:var(--mut);margin:12px 4px 6px;font-weight:600}
+.docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
+.d{all:unset;cursor:pointer;padding:9px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--line);font-weight:600}
+.d small{display:block;color:var(--mut);font-weight:400;font-size:12.5px}
+.d:hover{border-color:var(--acc)}.d.on{border-color:var(--ok);box-shadow:0 0 0 2px var(--ok) inset}
+.warn{color:var(--bad);font-weight:600}.ok{color:var(--ok);font-weight:700}
+ol{margin:6px 0 0;padding-inline-start:20px;color:var(--mut)}
+</style>
+</head>
+<body><main>
+<h1>ربط جهاز الطبيب</h1>
+<p class="sub">مرة وحدة على كمبيوتر الطبيب: اختر اسمه، وبعدها يطلع له زر «حالتي» في أثير يوقف منه الاستقبال أو يرجّعه.</p>
+
+<div class="card" id="state">⏳ يتأكد من الأداة…</div>
+
+<div class="card" id="pick" hidden>
+  <input id="q" placeholder="ابحث باسم الطبيب أو القسم" autocomplete="off">
+  <div id="list">⏳ يحمّل الأطباء…</div>
+</div>
+
+<div class="card">
+  <b>طريقة الاستخدام للطبيب</b>
+  <ol>
+    <li>في أثير تحت يمين يطلع زر <b>«حالتي»</b>.</li>
+    <li>يضغطه ويختار: ⛔ وقف استقبال · ✅ أستقبل حالات · ⏳ عندي انتظار · 📅 مواعيد فقط.</li>
+    <li>يطلع تنبيه عند الاستقبال، ويتحدث جدول المتواجدين، وتنكتب رسالة في قروب الاستقبال.</li>
+  </ol>
+</div>
+</main>
+<script>
+const BASE = "https://firestore.googleapis.com/v1/projects/saba-leave/databases/(default)/documents/";
+const dec = v => v == null ? null : "stringValue" in v ? v.stringValue : "integerValue" in v ? Number(v.integerValue) : "doubleValue" in v ? v.doubleValue
+  : "booleanValue" in v ? v.booleanValue : "arrayValue" in v ? (v.arrayValue.values || []).map(dec)
+  : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, dec(x)])) : null;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const norm = s => String(s || "").replace(/[ً-ْـ]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").toLowerCase();
+const $ = s => document.querySelector(s);
+let me = null, ext = false, version = "", board = null;
+
+function renderState() {
+  const el = $("#state");
+  if (!ext) { el.innerHTML = `<span class="warn">الأداة مو مثبتة على هذا الجهاز (أو تحتاج تحديث).</span><br>ثبّت أداة «سابا ← صحة» من متجر كروم، وبعدها حدّث هذي الصفحة.`; $("#pick").hidden = true; return; }
+  $("#pick").hidden = false;
+  el.innerHTML = me
+    ? `<div class="st"><span class="ok">✓ هذا الجهاز مربوط بـ</span><b>د. ${esc(me.name)}</b><span style="flex:1"></span><button class="btn red" id="unlink">فك الربط</button></div>`
+    : `<div class="st"><b>هذا الجهاز مو مربوط بطبيب.</b> اختر اسم الطبيب تحت.</div>`;
+  $("#unlink")?.addEventListener("click", () => { if (confirm("أشيل زر الطبيب من هذا الجهاز؟")) post({ type: "SABA_DOCTOR_SET", doctor: null }); });
+  renderList();
+}
+function renderList() {
+  if (!board) return;
+  const q = norm($("#q").value.trim());
+  const html = (board.departments || []).map(p => {
+    const ds = (p.doctors || []).filter(d => !q || norm(d.name + " " + p.name).includes(q));
+    return ds.length ? `<div class="dep"><h3>${esc(p.name)}</h3><div class="docs">${ds.map(d => `<button class="d${me?.id === d.id ? " on" : ""}" data-id="${esc(d.id)}">د. ${esc(String(d.name).split(/\s*[–-]\s*/)[0])}<small>${esc([d.room ? "غرفة " + d.room : "", d.ext ? "☎ " + d.ext : ""].filter(Boolean).join(" · "))}</small></button>`).join("")}</div></div>` : "";
+  }).join("");
+  $("#list").innerHTML = html || "ما فيه نتائج";
+  $("#list").querySelectorAll(".d").forEach(b => b.onclick = () => {
+    const d = board.departments.flatMap(p => p.doctors || []).find(x => x.id === b.dataset.id);
+    const name = String(d.name).split(/\s*[–-]\s*/)[0];
+    if (confirm(`أربط هذا الجهاز بـ د. ${name}؟`)) post({ type: "SABA_DOCTOR_SET", doctor: { id: d.id, name } });
+  });
+}
+const post = m => window.postMessage(m, location.origin);
+window.addEventListener("message", e => {
+  if (e.source !== window || e.data?.type !== "SABA_DOCTOR_ME") return;
+  ext = true; me = e.data.doctor; version = e.data.version || ""; renderState();
+});
+$("#q").addEventListener("input", renderList);
+(async () => {
+  try { const r = await fetch(BASE + "board/bawadi"); board = dec({ mapValue: { fields: (await r.json()).fields || {} } }); }
+  catch { $("#list").textContent = "ما قدرت أحمّل الأطباء — تأكد من النت"; }
+  renderList();
+})();
+post({ type: "SABA_DOCTOR_GET" }); setTimeout(() => post({ type: "SABA_DOCTOR_GET" }), 1200);
+setTimeout(() => { if (!ext) renderState(); }, 2500);
+</script>
+</body></html>
