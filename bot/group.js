@@ -17,6 +17,7 @@ export function initGroup(opts) {
   db.doc("board/bawadi_today").onSnapshot(d => { today = d.exists ? d.data() : null; }, e => log.warn({ e: String(e) }, "today"));
   db.doc("bot/status").get().then(d => { groupJid = d.get("group")?.jid || ""; }).catch(() => {});
   setInterval(runScheduled, 30000);
+  setInterval(resetExpired, 60000);
   listenSignals();
 }
 
@@ -207,7 +208,48 @@ const TITLES = {
   late: ["🕐 متأخر", "orange"], leaves_at: ["🕐 يطلع بدري", "orange"], starts_at: ["🕐 دوام اليوم", "blue"], present: ["🟢 موجود", "green"],
   vacation: ["🏖 إجازة", "orange"],
 };
-function fresh(cur, iso) { return cur && cur.date === iso ? structuredClone(cur) : { date: iso, st: {}, extra: [], events: [], scheduled: [] }; }
+// يوم جديد: نبدأ من الصفر، إلا حالة طبيب دوامه لسا ما خلص (مثل دوام 1 بالليل لين 9 الصبح)
+function fresh(cur, iso) {
+  if (cur && cur.date === iso) return structuredClone(cur);
+  const st = Object.fromEntries(Object.entries(cur?.st || {}).filter(([, v]) => v.exp && v.exp > Date.now()));
+  return { date: iso, st, extra: [], events: [], scheduled: [] };
+}
+
+/* ---------- كل حالة تنتهي مع نهاية دوام الطبيب (أو نهاية اليوم) وترجع طبيعي ---------- */
+const riyadhMid = iso => Date.parse(iso + "T00:00:00+03:00");
+function rAt(ms) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(new Date(ms)).map(x => [x.type, x.value]));
+  return { iso: `${p.year}-${p.month}-${p.day}`, m: +p.hour * 60 + +p.minute, wd: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday] };
+}
+const shiftsOn = (d, wd) => !(d.workdays || []).includes(wd) ? [] : (d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []));
+function expFor(d, atMs) {
+  const t = rAt(atMs), mid = riyadhMid(t.iso), endDay = mid + DAY;
+  if (!d) return endDay;
+  const ends = [];
+  for (const s of shiftsOn(d, (t.wd + 6) % 7)) if (s.e <= s.s && t.m < s.e) ends.push(s.e);              // دوام أمس اللي يعدّي نص الليل
+  for (const s of shiftsOn(d, t.wd)) {
+    const e = s.e > s.s ? s.e : s.e + 1440;
+    if (t.m < e) ends.push(e);                                                                            // الدوام الحالي، أو اللي بعده اليوم
+  }
+  if (!ends.length) return endDay;
+  return mid + Math.min(...ends) * 60000;
+}
+function stampExp(cur) {
+  for (const [k, v] of Object.entries(cur.st || {})) if (v && !v.exp) v.exp = expFor(docs().find(x => x.id === k), v.at || Date.now());
+}
+async function resetExpired() {
+  if (!today) return;
+  const t = nowR(), now = Date.now();
+  if (today.date === t.iso && !Object.values(today.st || {}).some(v => v.exp && v.exp <= now)) return;
+  try {
+    await db.runTransaction(async tx => {
+      const ref = db.doc("board/bawadi_today"), raw = (await tx.get(ref)).data(); if (!raw) return;
+      const cur = fresh(raw, t.iso); let changed = raw.date !== t.iso;
+      for (const [k, v] of Object.entries(cur.st)) if (v.exp && v.exp <= now) { delete cur.st[k]; changed = true; }
+      if (changed) tx.set(ref, cur);
+    });
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "تصفير الحالات"); }
+}
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
@@ -258,6 +300,7 @@ async function apply(evs, ctx) {
       applied.push(e.kind);
     }
     cur.events = cur.events.slice(-40);
+    stampExp(cur);
     if (applied.length) tx.set(ref, cur);
   });
   // إجازات بتواريخ → الجدول نفسه (مع حفظ النسخة السابقة)
@@ -289,6 +332,7 @@ async function runScheduled() {
         cur.events.push({ id: uid(), at: Date.now(), kind: "stop", doctorId: d?.id || "", name: s.name, dep: s.dep, room: d?.room || "", ext: d?.ext || "", info: "", title: "⛔ وقف استقبال الحالات", color: "red", by: s.by });
       }
       cur.events = cur.events.slice(-40);
+      stampExp(cur);
       tx.set(ref, cur);
     });
   } catch (e) { log.warn({ err: String(e?.message || e) }, "مجدول القروب"); }
