@@ -603,6 +603,18 @@ document.addEventListener("click", async e => {
     if (x.kind === "new_doctor") {
       const nd = norm2(x.dept); const dep = S.board.departments.find(p => nd && (norm2(p.name).includes(nd) || nd.includes(norm2(p.name)))) || S.board.departments.find(p => /اسنان|أسنان/.test(p.name) && /اسنان|أسنان/.test(x.dept));
       openDoc(null, dep?.id); $("#dName").value = x.name + (x.dept ? " – " + x.dept : ""); $("#dRoom").value = x.room || "";
+      // الأيام والوقت من نص الرسالة («دوامه الاربعاء والخميس من 5 م - 9 م»)
+      const tx = String(x.text || "").replace(/[٠-٩]/g, c => "٠١٢٣٤٥٦٧٨٩".indexOf(c)), nt = norm2(tx);
+      const DN = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["ثلاثا", 2], ["اربعاء", 3], ["اربعا", 3], ["خميس", 4], ["سبت", 6]];
+      const days = [...new Set(DN.filter(([w]) => nt.includes(w)).map(([, i]) => i))];
+      if (days.length) $$("#dDays input").forEach(c => c.checked = days.includes(+c.value));
+      const tm = /(\d{1,2})(?::(\d{2}))?\s*(ص|م|صباح|مساء|العصر|الظهر)?\s*(?:-|–|الى|إلى|لين|حتى)\s*(\d{1,2})(?::(\d{2}))?\s*(ص|م|صباح|مساء|العصر|الظهر)?/.exec(tx);
+      if (tm) {
+        const pmOf = (h, ap, other) => { const a = ap || other; h = +h % 12; return /م|مساء|العصر|الظهر/.test(a || "") || (!a && h < 8) ? h + 12 : h; };
+        const s1 = pmOf(tm[1], tm[3], tm[6]) * 60 + (+tm[2] || 0); let e1 = pmOf(tm[4], tm[6], tm[3]) * 60 + (+tm[5] || 0);
+        if (!tm[6] && e1 <= s1) e1 += 720;
+        $("#s1a").value = toTime(s1); $("#s1b").value = toTime(e1 % 1440);
+      }
     } else if (x.doctorId) openDoc(x.doctorId); else toast("افتح الطبيب من الجدول وعدّله");
   }
   if (t.dataset.delvac) { const v = S.board.vacations.find(x => x.id === t.dataset.delvac); if (v) await save(b => { b.vacations = b.vacations.filter(x => x.id !== v.id); return b; }, `شال إجازة د. ${v.name}`); }

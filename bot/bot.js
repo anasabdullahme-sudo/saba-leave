@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.9.1";
+const VERSION = "1.9.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -550,18 +550,26 @@ async function applyPatches() {
     const p = JSON.parse(fs.readFileSync(new URL("./board-patches.json", import.meta.url), "utf8"));
     const added = await db.runTransaction(async tx => {
       const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data();
+      const ib = db.doc("board/bawadi_inbox"), inbox = (await tx.get(ib)).data();             // كل القراءات قبل الكتابة
       if (!cur || !(cur.departments || []).length) return [];
       const done = new Set([...(cur.patched || []), ...(cur.vacations || []).map(v => v.id)]);
       const docs = cur.departments.flatMap(d => d.doctors || []);
       const todo = (p.vacations || []).filter(v => !done.has(v.id));
-      if (!todo.length) return [];
+      const newDocs = (p.doctors || []).filter(x => !done.has(x.id) && !docs.some(d => d.id === x.doctor.id));
+      if (!todo.length && !newDocs.length) return [];
       const next = structuredClone(cur);
-      for (const v of todo) {
+      for (const x of newDocs) {
+        const dep = next.departments.find(q => q.id === x.depId); if (!dep) continue;
+        (dep.doctors ||= []).push(x.doctor); todo.push({ id: x.id, name: x.doctor.name, isDoc: true });
+        if (x.dropInbox && inbox?.items) inbox.items = inbox.items.filter(i => !(i.kind === "new_doctor" && String(i.name).includes(x.dropInbox)));
+      }
+      if (inbox?.items && newDocs.some(x => x.dropInbox)) tx.set(ib, inbox);
+      for (const v of todo.filter(v => !v.isDoc)) {
         const d = docs.find(x => x.id === v.doctorId) || docs.find(x => v.code && String(x.code) === String(v.code));
         (next.vacations ||= []).push({ ...v, doctorId: d?.id || v.doctorId, name: d?.name || v.name });
       }
       next.patched = [...(cur.patched || []), ...todo.map(v => v.id)].slice(-300);
-      next.log = [{ at: Date.now(), by: "البوت", what: `إجازات: ${todo.map(v => v.name.split(" –")[0]).join("، ")}` }, ...(cur.log || [])].slice(0, 60);
+      next.log = [{ at: Date.now(), by: "البوت", what: todo.map(v => (v.isDoc ? "طبيب جديد: " : "إجازة: ") + v.name.split(" –")[0]).join("، ") }, ...(cur.log || [])].slice(0, 60);
       next.updatedAt = Date.now(); next.updatedBy = "البوت";
       tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إضافة إجازات" }); tx.set(ref, next);
       return todo;
