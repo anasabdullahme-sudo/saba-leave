@@ -13,7 +13,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.9.2";
+const VERSION = "1.9.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -556,7 +556,8 @@ async function applyPatches() {
       const docs = cur.departments.flatMap(d => d.doctors || []);
       const todo = (p.vacations || []).filter(v => !done.has(v.id));
       const newDocs = (p.doctors || []).filter(x => !done.has(x.id) && !docs.some(d => d.id === x.doctor.id));
-      if (!todo.length && !newDocs.length) return [];
+      const ups = (p.updates || []).filter(u => !done.has(u.id));
+      if (!todo.length && !newDocs.length && !ups.length) return [];
       const next = structuredClone(cur);
       for (const x of newDocs) {
         const dep = next.departments.find(q => q.id === x.depId); if (!dep) continue;
@@ -564,12 +565,20 @@ async function applyPatches() {
         if (x.dropInbox && inbox?.items) inbox.items = inbox.items.filter(i => !(i.kind === "new_doctor" && String(i.name).includes(x.dropInbox)));
       }
       if (inbox?.items && newDocs.some(x => x.dropInbox)) tx.set(ib, inbox);
+      // نسخ بيانات (غرفة/تحويلة/كشفية) من طبيب لطبيب — بس الخانات الفاضية
+      const nd = next.departments.flatMap(d => d.doctors || []);
+      for (const u of ups) {
+        const t = nd.find(d => d.id === u.doctorId), src = nd.find(d => d.id === u.copyFrom); if (!t || !src) continue;
+        for (const f of u.fields || []) if (!t[f] && src[f]) t[f] = src[f];
+        todo.push({ id: u.id, name: t.name, isDoc: true, upd: true });
+      }
+      if (!todo.length) return [];
       for (const v of todo.filter(v => !v.isDoc)) {
         const d = docs.find(x => x.id === v.doctorId) || docs.find(x => v.code && String(x.code) === String(v.code));
         (next.vacations ||= []).push({ ...v, doctorId: d?.id || v.doctorId, name: d?.name || v.name });
       }
       next.patched = [...(cur.patched || []), ...todo.map(v => v.id)].slice(-300);
-      next.log = [{ at: Date.now(), by: "البوت", what: todo.map(v => (v.isDoc ? "طبيب جديد: " : "إجازة: ") + v.name.split(" –")[0]).join("، ") }, ...(cur.log || [])].slice(0, 60);
+      next.log = [{ at: Date.now(), by: "البوت", what: todo.map(v => (v.upd ? "تعديل: " : v.isDoc ? "طبيب جديد: " : "إجازة: ") + v.name.split(" –")[0]).join("، ") }, ...(cur.log || [])].slice(0, 60);
       next.updatedAt = Date.now(); next.updatedBy = "البوت";
       tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إضافة إجازات" }); tx.set(ref, next);
       return todo;

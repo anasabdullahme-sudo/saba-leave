@@ -70,5 +70,17 @@
         ]
       }
     }
+  ],
+  "updates": [
+    {
+      "id": "p2710u1",
+      "doctorId": "sqf1027",
+      "copyFrom": "jr2t4gw",
+      "fields": [
+        "room",
+        "ext",
+        "fee"
+      ]
+    }
   ]
 }
