@@ -6,13 +6,14 @@ const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
 const DAY = 864e5;
 
-let db, log, getSock, gemini, models;
+let db, log, getSock, gemini, models, admins = [];
 let groupJid = "";                       // نعرفه من اسم القروب أول مرة
 const subjects = new Map();             // jid → اسم القروب (كاش)
 let board = null, today = null;         // نسخ محلية (onSnapshot)
 
 export function initGroup(opts) {
   ({ db, log, getSock, gemini, models } = opts);
+  admins = String(opts.admin || "").split(/[,\s]+/).map(p => latin(p).replace(/\D/g, "").replace(/^(00)?966/, "").replace(/^0/, "")).filter(p => /^5\d{8}$/.test(p));
   db.doc("board/bawadi").onSnapshot(d => { board = d.exists ? d.data() : null; }, e => log.warn({ e: String(e) }, "board"));
   db.doc("board/bawadi_today").onSnapshot(d => { today = d.exists ? d.data() : null; }, e => log.warn({ e: String(e) }, "today"));
   db.doc("bot/status").get().then(d => { groupJid = d.get("group")?.jid || ""; }).catch(() => {});
@@ -93,9 +94,10 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
   starts_at = دوامه اليوم يبدأ/يجي من الساعة X (at_time)، ولو ذكر النهاية حط until_time
   present = موجود/متواجد (until_time لو "موجود إلى/لين X")
   vacation = إجازة بتواريخ (start_date, end_date بصيغة YYYY-MM-DD؛ "المباشرة السبت 31" يعني end_date = يوم 30)
-  new_doctor = طبيب جديد بيباشر (start_date، room لو ذكرت)
+  new_doctor = طبيب جديد بيباشر أو طبيب مو في القائمة ومعه دوامه (start_date، room لو ذكرت)
   moved = انتقل لفرع ثاني (branch)
-  schedule_change = تغيير دوام ثابت لأكثر من يوم
+  schedule_change = تغيير دوام ثابت لأكثر من يوم (أو «دوامه فقط الأربعاء والخميس من 5 إلى 9»)
+  لـ new_doctor و schedule_change: days = أيام الدوام أرقام (الأحد=0، الإثنين=1، الثلاثاء=2، الأربعاء=3، الخميس=4، السبت=6) لو ذكرت، from_time/to_time = بداية ونهاية الدوام، room/ext/fee لو ذكرت. يوم المباشرة (يباشر السبت) مو من أيام الدوام — لا تحطه في days
 - الأوقات بصيغة 24 ساعة HH:MM. في العيادة الأرقام 1-11 بدون ص/م غالباً مساءً إلا لو واضح الصباح (مثل 8 صباحاً، 9 الصبح). "١٠" بالليل = 22:00.
 - لو الرسالة رد (فيه رسالة مقتبسة) استخدم المقتبسة لتعرف الطبيب المقصود.
 - رسالة بدون طبيب معيّن، أو تحية، أو نقطة "." → events فاضية.
@@ -115,7 +117,8 @@ async function aiParse(text, quoted) {
       responseSchema: { type: "OBJECT", properties: { events: { type: "ARRAY", items: { type: "OBJECT", properties: {
         doctor_id: { type: "STRING" }, name: { type: "STRING" }, dept: { type: "STRING" }, kind: { type: "STRING", enum: KINDS },
         at_time: { type: "STRING" }, until_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" }, waiting: { type: "INTEGER" },
-        start_date: { type: "STRING" }, end_date: { type: "STRING" }, room: { type: "STRING" }, branch: { type: "STRING" }, note: { type: "STRING" } },
+        start_date: { type: "STRING" }, end_date: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" },
+        days: { type: "ARRAY", items: { type: "INTEGER" } }, from_time: { type: "STRING" }, to_time: { type: "STRING" }, branch: { type: "STRING" }, note: { type: "STRING" } },
         required: ["name", "kind"] } } }, required: ["events"] },
     },
   };
@@ -167,7 +170,41 @@ function vacationRule(text) {
   else { const dn = /لمده (\d+) (?:يوم|ايام)/.exec(n); if (dn) end = isoAdd(start, +dn[1] - 1); else if (/شهر/.test(n)) end = isoAdd(start, 29); }
   return end && end >= start ? { start_date: start, end_date: end } : null;
 }
+// «دوامه الاربعاء والخميس من 5 م - 9 م» → { days:[3,4], from:1020, to:1260 }
+const DAYW = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["ثلاثا", 2], ["اربعاء", 3], ["اربعا", 3], ["خميس", 4], ["سبت", 6]];
+function schedOf(text) {
+  const tx = latin(text), n = norm(tx);
+  const days = [...new Set(DAYW.filter(([w]) => n.includes(w)).map(([, i]) => i))].sort();
+  const m = /(\d{1,2})(?::(\d{2}))?\s*(ص|م|صباحا?|مساء|مساءا|العصر|الظهر|الصبح|بالليل)?\s*(?:-|–|الى|إلى|لين|حتى|ل)\s*(\d{1,2})(?::(\d{2}))?\s*(ص|م|صباحا?|مساء|مساءا|العصر|الظهر|الصبح|بالليل)?/.exec(tx);
+  let from = null, to = null;
+  if (m) {
+    const h24 = (h, a, other) => { const ap = a || other || ""; h = +h % 12; return /م|مساء|العصر|الظهر|بالليل/.test(ap) ? h + 12 : /ص|صباح|الصبح/.test(ap) ? h : (h < 8 ? h + 12 : h); };
+    from = h24(m[1], m[3], m[6]) * 60 + (+m[2] || 0); to = h24(m[4], m[6], m[3]) * 60 + (+m[5] || 0);
+    if (!m[6] && to <= from) to += 720; to %= 1440;
+  }
+  return { days, from, to };
+}
+const DAYN = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+// تعديل دائم (دوام/طبيب جديد) يحتاج تطابق كامل: كل كلمة من الاسم المكتوب لازم تكون في اسم الطبيب (سارة النمر ≠ سارة الجارحي)
+const nameToks = x => norm(shortName(x)).split(" ").filter(t => t && !STOP.has(t)).map(deAl);
+function sameName(given, d) {
+  const g = nameToks(given), dn = nameToks(d.name); if (!g.length) return false;
+  return g.every(t => dn.some(x => x === t || (t.length >= 4 && x.length >= 4 && lev1(t, x))));
+}
+function strictFind(given) { const L = docs().filter(d => sameName(given, d)); return L.length === 1 ? L[0] : null; }
+function schedRule(text) {
+  const n = norm(text);
+  if (!/دوام|يداوم|بيداوم/.test(n)) return null;
+  const sc = schedOf(text); if (!sc.days.length && sc.from == null) return null;
+  const raw = latin(text).replace(/[ً-ْـ]/g, "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ");   // الاسم مثل ما انكتب
+  const nm = /(?:^|\s)(?:د|دكتور|دكتورة|دكتوره|الدكتور|الدكتورة|الدكتوره)\s+(\S+(?:\s+\S+)?)(.*?)\s(?:دوام|يداوم|بيداوم)/.exec(raw);
+  if (nm) { const d = strictFind(nm[1]); return d ? { doctor_id: d.id, name: nm[1], kind: "schedule_change" } : { name: nm[1], dept: nm[2].trim(), kind: "new_doctor" }; }
+  const d = fuzzyPick(text);
+  return d && nameToks(d.name).every(t => n.includes(t)) ? { doctor_id: d.id, name: shortName(d.name), kind: "schedule_change" } : null;
+}
+
 function ruleParse(text, quoted) {
+  const sr = schedRule(text); if (sr) return [sr];
   const vac = vacationRule(text);
   if (vac) { const d = fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null); return d ? [{ doctor_id: d.id, name: shortName(d.name), kind: "vacation", ...vac }] : Object.assign([], { unknown: true }); }
   const timeIn = n => { const m = /(\d{1,2})(?::(\d{2}))?/.exec(n); return m ? `${String(+m[1]).padStart(2, "0")}:${m[2] || "00"}` : ""; };
@@ -253,13 +290,22 @@ async function resetExpired() {
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
-  const inbox = [], vacs = [];
+  const inbox = [], vacs = [], upd = [], newDocs = [];
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi_today");
     const cur = fresh((await tx.get(ref)).data(), t.iso);
     for (const e of evs) {
-      const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
-      if (e.kind === "new_doctor" && d) continue;                       // موجود أصلاً في الجدول
+      let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
+      if (e.kind === "new_doctor" || e.kind === "schedule_change") {      // دوام ثابت: موجود → نعدّله، مو موجود → نسأل المسؤول
+        if (d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
+        const sc = /دوام|يداوم/.test(norm(ctx.text)) ? schedOf(ctx.text) : { days: [], from: null, to: null };   // «يباشر السبت» مو أيام دوام
+        const days = (Array.isArray(e.days) && e.days.length ? e.days : sc.days).filter(x => x >= 0 && x <= 6 && x !== 5);
+        const from = toMin(e.from_time) ?? sc.from, to = toMin(e.to_time) ?? sc.to;
+        const sch = { days, shifts: from != null && to != null ? [{ s: from, e: to }] : null, room: e.room || "", ext: e.ext || "", fee: e.fee || "" };
+        if (d && (days.length || sch.shifts || sch.room)) { upd.push({ d, sch }); applied.push("schedule_change"); continue; }
+        if (!d && admins.length) { newDocs.push({ e, sch }); applied.push("new_doctor"); continue; }
+        if (d) { applied.push("known"); continue; }                      // موجود وما فيه شي يتعدل (✅ بدون تغيير)
+      }
       if (["new_doctor", "moved", "schedule_change"].includes(e.kind)) { inbox.push({ id: uid(), at: Date.now(), kind: e.kind, name: e.name, dept: e.dept || "", room: e.room || "", branch: e.branch || "", date: e.start_date || "", doctorId: d?.id || "", text: ctx.text.slice(0, 300), by: ctx.by }); applied.push(e.kind); continue; }
       if (e.kind === "vacation") {                                       // التواريخ من Gemini، ولو ناقصة نحسبها من نص الرسالة
         const r = vacationRule(ctx.text) || {}; e.start_date = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : (r.start_date || t.iso);
@@ -313,7 +359,117 @@ async function apply(evs, ctx) {
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إجازة من القروب" }); tx.set(ref, next);
   });
   if (inbox.length) await db.doc("board/bawadi_inbox").set({ items: FieldValue.arrayUnion(...inbox), at: Date.now() }, { merge: true });
+  if (upd.length) await updateSchedules(upd, ctx);
+  for (const x of newDocs) await askAdmin(x, ctx);
   return applied;
+}
+
+/* ---------- تعديل دوام طبيب موجود (من القروب) ---------- */
+const schedTxt = sch => [sch.days?.length ? sch.days.map(i => DAYN[i]).join("، ") : "", sch.shifts ? sch.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") : ""].filter(Boolean).join(" · ");
+async function updateSchedules(list, ctx) {
+  const done = [];
+  await db.runTransaction(async tx => {
+    const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data(); if (!cur) return;
+    const next = structuredClone(cur);
+    for (const { d, sch } of list) {
+      const t = next.departments.flatMap(p => p.doctors || []).find(x => x.id === d.id); if (!t) continue;
+      if (sch.days?.length) t.workdays = sch.days;
+      if (sch.shifts) { t.shifts = sch.shifts; delete t.alt; }
+      for (const f of ["room", "ext", "fee"]) if (sch[f]) t[f] = sch[f];
+      done.push({ name: shortName(t.name), sch });
+    }
+    if (!done.length) return;
+    next.log = [{ at: Date.now(), by: `البوت (${ctx.by})`, what: `دوام ${done.map(x => "د. " + x.name).join("، ")} من القروب` }, ...(cur.log || [])].slice(0, 60);
+    next.updatedAt = Date.now(); next.updatedBy = "البوت";
+    tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "تعديل دوام من القروب" }); tx.set(ref, next);
+  });
+  for (const x of done) await dmAdmin(`✏️ عدّلت دوام د. ${x.name} في الجدول\n${schedTxt(x.sch)}\n(من رسالة ${ctx.by} في قروب الاستقبال)\n\nلو فيه غلط عدّله من صفحة الأطباء أو رد «تراجع».`);
+}
+
+/* ---------- طبيب مو موجود → رسالة للمسؤول على الخاص: يضيفه أو لا ---------- */
+const adminJids = new Map();
+async function dmAdmin(text) {
+  const sock = getSock(); if (!sock || !admins.length) return false;
+  let ok = false;
+  for (const p of admins) {
+    try {
+      let jid = adminJids.get(p);
+      if (!jid) { const [r] = await sock.onWhatsApp("966" + p); jid = r?.exists ? r.jid : ""; if (jid) adminJids.set(p, jid); }
+      if (jid) { await sock.sendMessage(jid, { text }); ok = true; }
+    } catch (e) { log.warn({ err: String(e?.message || e) }, "رسالة المسؤول"); }
+  }
+  return ok;
+}
+const findDep = name => { const n = norm(name || "").replace(/^ال/, ""); if (!n) return null; return (board?.departments || []).find(p => { const pn = norm(p.name).replace(/^ال/, ""); return pn.includes(n) || n.includes(pn); }) || null; };
+const code3 = () => Array.from({ length: 3 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+async function askAdmin({ e, sch }, ctx) {
+  const name = String(e.name || "").replace(/^(د|دكتور|دكتوره)\.?\s+/, "").trim(); if (!name) return;
+  const dep = findDep(e.dept);
+  const like = dep ? (dep.doctors || []).find(x => x.room || x.fee) : null;            // نفس غرفة/كشفية القسم لو ما انذكرت
+  const item = { code: code3(), at: Date.now(), name, dept: e.dept || "", depId: dep?.id || "", days: sch.days || [], shifts: sch.shifts || [],
+    room: sch.room || like?.room || "", ext: sch.ext || like?.ext || "", fee: sch.fee || like?.fee || "", by: ctx.by, text: ctx.text.slice(0, 300) };
+  const ref = db.doc("bot/pending_doctors");
+  await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; const items = (c.items || []).filter(i => Date.now() - i.at < 7 * DAY && norm(i.name) !== norm(name)); items.push(item); tx.set(ref, { items }); });
+  const fl = dep ? (board.floorNames?.[dep.floor] || { B: "عيادة التجميل (بيوتي)", G: "الدور الأرضي", 1: "الدور الأول", 2: "الدور الثاني", 3: "الدور الثالث", 4: "الدور الرابع", 5: "الدور الخامس" }[dep.floor] || "") : "";
+  const sent = await dmAdmin([
+    `🆕 طبيب مو موجود في الجدول  #${item.code}`,
+    `د. ${name}`,
+    `القسم: ${dep ? dep.name + (fl ? " — " + fl : "") : (e.dept ? e.dept + " (قسم جديد)" : "— ما انذكر")}`,
+    `الأيام: ${item.days.length ? item.days.map(i => DAYN[i]).join("، ") : "— ما انذكرت (بحطه كل الأيام)"}`,
+    `الدوام: ${item.shifts.length ? item.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") : "— ما انذكر"}`,
+    item.room || item.fee ? `الغرفة: ${item.room || "—"}${item.ext ? " · ☎ " + item.ext : ""} · الكشفية: ${item.fee || "—"}${like && !sch.room ? " (نفس القسم)" : ""}` : "",
+    `من رسالة ${ctx.by}: «${ctx.text.slice(0, 120)}»`,
+    "",
+    `أضيفه للجدول؟ رد «نعم» أو «لا»`,
+  ].filter(x => x !== "").join("\n"));
+  if (!sent) await db.doc("board/bawadi_inbox").set({ items: FieldValue.arrayUnion({ id: uid(), at: Date.now(), kind: "new_doctor", name, dept: e.dept || "", room: e.room || "", branch: "", date: "", doctorId: "", text: ctx.text.slice(0, 300), by: ctx.by }), at: Date.now() }, { merge: true });
+}
+
+// رد المسؤول على الخاص: «نعم» / «لا» (ولو فيه أكثر من طلب: يرد على الرسالة نفسها أو يكتب الرمز «نعم K7Q»)
+export async function handleAdminMessage(m, phone, text) {
+  const p = String(phone || "").replace(/^0/, "");
+  if (!admins.includes(p)) return false;
+  const n = norm(text);
+  const yes = /^(نعم|ايوه|ايوا|اي|ايه|اضف|اضفه|ضيف|ضيفه|ضيفها|موافق|تمام|اوكي|ok|1)(?:\s|$)/.test(n) || /^(👍|✅)/.test(text);
+  const no = /^(لا|تجاهل|الغ|الغيه|لاتضيف|لا تضيف|2)(?:\s|$)/.test(n) || /^❌/.test(text);
+  const undo = /^تراجع/.test(n);
+  if (!yes && !no && !undo) return false;
+  if (undo) { await restorePrev(); return true; }
+  const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  const qt = q?.conversation || q?.extendedTextMessage?.text || "";
+  const code = (/#([A-Z0-9]{3})\b/.exec(qt) || /\b([A-Z0-9]{3})\s*$/.exec(latin(text).toUpperCase()) || [])[1];
+  const ref = db.doc("bot/pending_doctors");
+  const c = (await ref.get()).data() || {}, items = (c.items || []).filter(i => Date.now() - i.at < 7 * DAY);
+  if (!items.length) return false;
+  const it = code ? items.find(i => i.code === code) : items.length === 1 ? items[0] : null;
+  if (!it) { await dmAdmin(`عندي ${items.length} أطباء ينتظرون: ${items.map(i => "د. " + i.name + " #" + i.code).join("، ")}\nرد على رسالة الطبيب نفسها بـ «نعم» أو «لا».`); return true; }
+  await ref.set({ items: items.filter(i => i.code !== it.code) });
+  if (no) { await dmAdmin(`تمام، تجاهلت د. ${it.name}.`); return true; }
+  let added = "";
+  await db.runTransaction(async tx => {
+    const bref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(bref)).data(); if (!cur) return;
+    const next = structuredClone(cur);
+    if (next.departments.flatMap(x => x.doctors || []).some(x => norm(shortName(x.name)) === norm(it.name))) { added = "exists"; return; }
+    let dep = next.departments.find(x => x.id === it.depId);
+    if (!dep) { dep = { id: uid().slice(0, 7), name: it.dept || "أخرى", floor: "G", notes: "", doctors: [] }; next.departments.push(dep); }
+    (dep.doctors ||= []).push({ id: uid().slice(0, 7), name: it.name, code: "", ext: it.ext || "", room: it.room || "", fee: it.fee || "",
+      workdays: it.days.length ? it.days : [0, 1, 2, 3, 4, 6], shifts: it.shifts || [] });
+    next.log = [{ at: Date.now(), by: "البوت (موافقة المسؤول)", what: `طبيب جديد: د. ${it.name}` }, ...(cur.log || [])].slice(0, 60);
+    next.updatedAt = Date.now(); next.updatedBy = "البوت";
+    tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "طبيب جديد من القروب" }); tx.set(bref, next);
+    added = dep.name;
+  });
+  await dmAdmin(added === "exists" ? `د. ${it.name} موجود أصلاً في الجدول.` : added ? `✅ انضاف د. ${it.name} في ${added}.\nتقدر تعدّل بياناته من صفحة الأطباء.` : "ما قدرت أضيفه — جرّب من صفحة الأطباء.");
+  return true;
+}
+async function restorePrev() {
+  const prev = (await db.doc("board/bawadi_prev").get()).data();
+  if (!prev?.departments?.length) { await dmAdmin("ما فيه نسخة سابقة أرجع لها."); return; }
+  const { savedAt, replacedBy, ...data } = prev;
+  const cur = (await db.doc("board/bawadi").get()).data();
+  await db.doc("board/bawadi").set({ ...data, log: [{ at: Date.now(), by: "البوت (المسؤول)", what: "تراجع عن آخر تعديل: " + (replacedBy || "") }, ...(cur?.log || [])].slice(0, 60), updatedAt: Date.now(), updatedBy: "البوت" });
+  if (cur) await db.doc("board/bawadi_prev").set({ ...cur, savedAt: Date.now(), replacedBy: "تراجع" });
+  await dmAdmin(`↩️ رجّعت الجدول للنسخة اللي قبل: ${replacedBy || "آخر تعديل"}.`);
 }
 
 // المجدول («9:45 وقف له») يتنفذ في وقته

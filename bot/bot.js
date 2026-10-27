@@ -8,12 +8,12 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
-import { initGroup, handleGroupMessage } from "./group.js";
+import { initGroup, handleGroupMessage, handleAdminMessage } from "./group.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "1.9.3";
+const VERSION = "2.0.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -357,6 +357,7 @@ async function onIncoming(m) {
   let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
   const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
+  if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
   const t = latin(text).toUpperCase();
   const it = readIntent(text, media);
   if (msg.stickerMessage && !text) { it.ok = true; it.social = true; }
@@ -702,7 +703,7 @@ async function main() {
   watchDoctors();
   startFixApplier();
   deployRules().then(seedBoard).then(applyPatches);
-  initGroup({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
+  initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {
