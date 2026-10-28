@@ -1,86 +1,419 @@
 {
-  "vacations": [
-    {
-      "id": "p2610a1",
-      "doctorId": "8o66nhf",
-      "code": "2332",
-      "name": "خالد علام – أخصائي",
-      "start": "2026-10-24",
-      "end": "2026-10-29",
-      "type": "إجازة سنوية"
-    },
-    {
-      "id": "p2610a2",
-      "doctorId": "frniwgd",
-      "code": "2070",
-      "name": "حسين عبدالحميد – أخصائي",
-      "start": "2026-10-31",
-      "end": "2026-11-12",
-      "type": "إجازة سنوية"
-    },
-    {
-      "id": "p2610a3",
-      "doctorId": "6wbjsnw",
-      "code": "1133",
-      "name": "عبدالصمد العشيري – أخصائي",
-      "start": "2026-11-07",
-      "end": "2026-11-22",
-      "type": "إجازة بإذن (بدون راتب)"
-    },
-    {
-      "id": "p2610a4",
-      "doctorId": "zdrud94",
-      "code": "263",
-      "name": "أشرف السنجيدي",
-      "start": "2026-11-08",
-      "end": "2026-11-17",
-      "type": "إجازة بإذن (بدون راتب)"
-    },
-    {
-      "id": "p2610a5",
-      "doctorId": "qstmbi5",
-      "code": "2291",
-      "name": "علياء الوريث – عام اسنان",
-      "start": "2026-11-23",
-      "end": "2026-11-26",
-      "type": "إجازة سنوية"
-    }
-  ],
-  "doctors": [
-    {
-      "id": "p2710d1",
-      "depId": "967ocb1",
-      "dropInbox": "السقاف",
-      "doctor": {
-        "id": "sqf1027",
-        "name": "محمد السقاف – طب أسرة",
-        "code": "",
-        "ext": "",
-        "room": "",
-        "fee": "",
-        "workdays": [
-          3,
-          4
-        ],
-        "shifts": [
-          {
-            "s": 1020,
-            "e": 1260
-          }
-        ]
-      }
-    }
-  ],
-  "updates": [
-    {
-      "id": "p2710u1",
-      "doctorId": "sqf1027",
-      "copyFrom": "jr2t4gw",
-      "fields": [
-        "room",
-        "ext",
-        "fee"
-      ]
-    }
-  ]
+ "vacations": [
+  {
+   "id": "p2610a1",
+   "doctorId": "8o66nhf",
+   "code": "2332",
+   "name": "خالد علام – أخصائي",
+   "start": "2026-10-24",
+   "end": "2026-10-29",
+   "type": "إجازة سنوية"
+  },
+  {
+   "id": "p2610a2",
+   "doctorId": "frniwgd",
+   "code": "2070",
+   "name": "حسين عبدالحميد – أخصائي",
+   "start": "2026-10-31",
+   "end": "2026-11-12",
+   "type": "إجازة سنوية"
+  },
+  {
+   "id": "p2610a3",
+   "doctorId": "6wbjsnw",
+   "code": "1133",
+   "name": "عبدالصمد العشيري – أخصائي",
+   "start": "2026-11-07",
+   "end": "2026-11-22",
+   "type": "إجازة بإذن (بدون راتب)"
+  },
+  {
+   "id": "p2610a4",
+   "doctorId": "zdrud94",
+   "code": "263",
+   "name": "أشرف السنجيدي",
+   "start": "2026-11-08",
+   "end": "2026-11-17",
+   "type": "إجازة بإذن (بدون راتب)"
+  },
+  {
+   "id": "p2610a5",
+   "doctorId": "qstmbi5",
+   "code": "2291",
+   "name": "علياء الوريث – عام اسنان",
+   "start": "2026-11-23",
+   "end": "2026-11-26",
+   "type": "إجازة سنوية"
+  }
+ ],
+ "doctors": [
+  {
+   "id": "p2710d1",
+   "depId": "967ocb1",
+   "dropInbox": "السقاف",
+   "doctor": {
+    "id": "sqf1027",
+    "name": "محمد السقاف – طب أسرة",
+    "code": "",
+    "ext": "",
+    "room": "",
+    "fee": "",
+    "workdays": [
+     3,
+     4
+    ],
+    "shifts": [
+     {
+      "s": 1020,
+      "e": 1260
+     }
+    ]
+   }
+  }
+ ],
+ "updates": [
+  {
+   "id": "p2710u1",
+   "doctorId": "sqf1027",
+   "copyFrom": "jr2t4gw",
+   "fields": [
+    "room",
+    "ext",
+    "fee"
+   ]
+  },
+  {
+   "id": "p2810f00",
+   "doctorId": "gguqlrc",
+   "ifName": "مجدي",
+   "set": {
+    "fullName": "مجدي نصيف سكلا"
+   },
+   "fill": {
+    "code": "1250"
+   }
+  },
+  {
+   "id": "p2810f01",
+   "doctorId": "bxm6z5u",
+   "ifName": "سارة",
+   "set": {
+    "fullName": "ساره فؤاد الشوربجى الجارحى"
+   },
+   "fill": {
+    "code": "2247"
+   }
+  },
+  {
+   "id": "p2810f02",
+   "doctorId": "g62723r",
+   "ifName": "أكرامي",
+   "set": {
+    "fullName": "اكرامي عبدالسلام زيدان الشرقاوي"
+   },
+   "fill": {
+    "code": "1610"
+   }
+  },
+  {
+   "id": "p2810f03",
+   "doctorId": "zdrud94",
+   "ifName": "أشرف",
+   "set": {
+    "fullName": "أشرف محمد عنبر السنجيدي"
+   },
+   "fill": {
+    "code": "263"
+   }
+  },
+  {
+   "id": "p2810f04",
+   "doctorId": "frniwgd",
+   "ifName": "حسين",
+   "set": {
+    "fullName": "حسين عبدالحميد احمد حسن"
+   },
+   "fill": {
+    "code": "2070"
+   }
+  },
+  {
+   "id": "p2810f05",
+   "doctorId": "07jdz91",
+   "ifName": "أسامة",
+   "set": {
+    "fullName": "أسامه يوسف أحمد ربيع"
+   },
+   "fill": {
+    "code": "1054"
+   }
+  },
+  {
+   "id": "p2810f06",
+   "doctorId": "0xz05e1",
+   "ifName": "أمجد",
+   "set": {
+    "fullName": "أمجد حامد محمد كامل"
+   },
+   "fill": {
+    "code": "1073"
+   }
+  },
+  {
+   "id": "p2810f07",
+   "doctorId": "ps0w1ai",
+   "ifName": "رشا",
+   "set": {
+    "fullName": "رشا الوزيري محمد علي"
+   },
+   "fill": {
+    "code": "2099"
+   }
+  },
+  {
+   "id": "p2810f08",
+   "doctorId": "fvd187j",
+   "ifName": "عبدالحليم",
+   "set": {
+    "fullName": "عبدالحليم عبدالحليم قطب قطب"
+   },
+   "fill": {
+    "code": "1136"
+   }
+  },
+  {
+   "id": "p2810f09",
+   "doctorId": "iyyx7yj",
+   "ifName": "نيرمين",
+   "set": {
+    "fullName": "نرمين إبراهيم إبراهيم البشبيشي"
+   },
+   "fill": {
+    "code": "1442"
+   }
+  },
+  {
+   "id": "p2810f10",
+   "doctorId": "zi55ort",
+   "ifName": "أحمد",
+   "set": {
+    "fullName": "أحمد اسماعيل كشاف"
+   },
+   "fill": {
+    "code": "2106"
+   }
+  },
+  {
+   "id": "p2810f11",
+   "doctorId": "arqaeg3",
+   "ifName": "شريف",
+   "set": {
+    "fullName": "شريف فتحي الأتربي"
+   },
+   "fill": {
+    "code": "751"
+   }
+  },
+  {
+   "id": "p2810f12",
+   "doctorId": "5b8y20k",
+   "ifName": "محمد",
+   "set": {
+    "fullName": "محمد محمد فتحي والي"
+   },
+   "fill": {
+    "code": "518"
+   }
+  },
+  {
+   "id": "p2810f13",
+   "doctorId": "sqbnhfj",
+   "ifName": "أحمد",
+   "set": {
+    "fullName": "أحمد عبدالحميد معتوق محمد"
+   },
+   "fill": {
+    "code": "1602"
+   }
+  },
+  {
+   "id": "p2810f14",
+   "doctorId": "fahoql2",
+   "ifName": "رائد",
+   "set": {
+    "fullName": "رائد شعبان السيد علي"
+   },
+   "fill": {
+    "code": "2112"
+   }
+  },
+  {
+   "id": "p2810f15",
+   "doctorId": "b20gvmm",
+   "ifName": "منال",
+   "set": {
+    "fullName": "منال نعيم محمود دويدار"
+   },
+   "fill": {
+    "code": "2007"
+   }
+  },
+  {
+   "id": "p2810f16",
+   "doctorId": "ieyr9ye",
+   "ifName": "إلهام",
+   "set": {
+    "fullName": "الهام جمال الدين ابراهيم شاهين"
+   },
+   "fill": {
+    "code": "2410"
+   }
+  },
+  {
+   "id": "p2810f17",
+   "doctorId": "qstmbi5",
+   "ifName": "علياء",
+   "set": {
+    "fullName": "عليا ابراهيم احمد الوريث"
+   },
+   "fill": {
+    "code": "2291"
+   }
+  },
+  {
+   "id": "p2810f18",
+   "doctorId": "9035sby",
+   "ifName": "وائل",
+   "set": {
+    "fullName": "وائل محمد عبدالله الهجين"
+   },
+   "fill": {
+    "code": "1169"
+   },
+   "rename": "وائل الهجين"
+  },
+  {
+   "id": "p2810f19",
+   "doctorId": "i7pxyfl",
+   "ifName": "مجد",
+   "set": {
+    "fullName": "مجد معيوف فالح العدواني"
+   },
+   "fill": {
+    "code": "2330"
+   }
+  },
+  {
+   "id": "p2810f20",
+   "doctorId": "8o66nhf",
+   "ifName": "خالد",
+   "set": {
+    "fullName": "خالد سعد عثمان علام"
+   },
+   "fill": {
+    "code": "2332"
+   }
+  },
+  {
+   "id": "p2810f21",
+   "doctorId": "3l52c9c",
+   "ifName": "مدحت",
+   "set": {
+    "fullName": "مدحت عبدالحكيم علي محمود"
+   },
+   "fill": {
+    "code": "2197"
+   }
+  },
+  {
+   "id": "p2810f22",
+   "doctorId": "6wbjsnw",
+   "ifName": "عبدالصمد",
+   "set": {
+    "fullName": "عبدالصمد أنور محمود العشيري"
+   },
+   "fill": {
+    "code": "1133"
+   }
+  },
+  {
+   "id": "p2810f23",
+   "doctorId": "nsvukis",
+   "ifName": "سحر",
+   "set": {
+    "fullName": "سحر محمد محمود علي"
+   },
+   "fill": {
+    "code": "1648"
+   }
+  },
+  {
+   "id": "p2810f24",
+   "doctorId": "bgy6izr",
+   "ifName": "حسام",
+   "set": {
+    "fullName": "حسام الدين محمد حامد"
+   },
+   "fill": {
+    "code": "1134"
+   }
+  },
+  {
+   "id": "p2810f25",
+   "doctorId": "8bxxnj4",
+   "ifName": "أسرار",
+   "set": {
+    "fullName": "اسرار احمد احمد"
+   },
+   "fill": {
+    "code": "2280"
+   }
+  },
+  {
+   "id": "p2810f26",
+   "doctorId": "0qaut06",
+   "ifName": "هبة",
+   "set": {
+    "fullName": "هبه عادل عبدالحميد باخريبة",
+    "code": "492"
+   },
+   "fill": {
+    "code": "492"
+   },
+   "rename": "هبة باخريبة"
+  },
+  {
+   "id": "p2810f27",
+   "doctorId": "396cbuc",
+   "ifName": "رشا",
+   "set": {
+    "fullName": "رشا محمود إبراهيم الفيشاوي"
+   },
+   "fill": {
+    "code": "1229"
+   }
+  },
+  {
+   "id": "p2810f28",
+   "doctorId": "bshnxus",
+   "ifName": "إيمان",
+   "set": {
+    "fullName": "إيمان جمال إبراهيم منصور"
+   },
+   "fill": {
+    "code": "2327"
+   }
+  },
+  {
+   "id": "p2810f29",
+   "doctorId": "u4eikim",
+   "ifName": "هيام",
+   "set": {
+    "fullName": "هيام محمد عبدالبصير حلمي"
+   },
+   "fill": {
+    "code": "1782"
+   }
+  }
+ ]
 }

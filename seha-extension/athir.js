@@ -36,7 +36,14 @@
   function matchAthir(text) {
     const full = toks(String(text).split("|")[0]);
     if (!full.length) return null;
-    const scored = docs().map(d => { const bt = toks(String(d.name).split(/\s*[–-]\s*/)[0]); const hit = bt.filter(t => full.some(f => near(f, t))).length; return [d, hit, bt.length, bt[0] && near(bt[0], full[0])]; })
+    const scored = docs().map(d => {
+      const bt = toks(String(d.name).split(/\s*[–-]\s*/)[0]); let hit = bt.filter(t => full.some(f => near(f, t))).length, n = bt.length, first = bt[0] && near(bt[0], full[0]);
+      if (d.fullName) {                                                  // الاسم الكامل من شيت الموظفين: أثير يكتب أجزاء منه (وائل محمد الهجين ⊂ وائل محمد عبدالله الهجين)
+        const ft = toks(d.fullName), fh = full.filter(f => ft.some(t => near(f, t))).length;
+        if (ft[0] && near(ft[0], full[0]) && fh >= Math.min(3, full.length) && fh > hit) { hit = fh; n = full.length; first = true; }
+      }
+      return [d, hit, n, first];
+    })
       .filter(([, hit, n, first]) => first && (hit >= 2 || (n === 1 && hit === 1))).sort((a, b) => b[1] - a[1]);
     return scored.length && (scored.length === 1 || scored[0][1] > scored[1][1]) ? scored[0][0] : null;
   }

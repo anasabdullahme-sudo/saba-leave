@@ -108,7 +108,7 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
 async function aiParse(text, quoted) {
   if (!gemini) return null;
   const t = nowR();
-  const list = docs().map(d => `${d.id} | ${shortName(d.name)} | ${d.dep}`).join("\n");
+  const list = docs().map(d => `${d.id} | ${shortName(d.name)}${d.fullName ? " (" + d.fullName + ")" : ""} | ${d.dep}`).join("\n");
   const body = {
     systemInstruction: { parts: [{ text: PROMPT.replace("{TODAY}", `${t.iso} (${["الأحد","الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][t.wd]})`).replace("{NOW}", hm(t.m)).replace("{LIST}", list) }] },
     contents: [{ role: "user", parts: [{ text: (quoted ? `رسالة مقتبسة (اللي ردّ عليها): «${quoted}»\n` : "") + `الرسالة: «${text}»` }] }],
@@ -188,7 +188,7 @@ const DAYN = ["الأحد", "الإثنين", "الثلاثاء", "الأربع�
 // تعديل دائم (دوام/طبيب جديد) يحتاج تطابق كامل: كل كلمة من الاسم المكتوب لازم تكون في اسم الطبيب (سارة النمر ≠ سارة الجارحي)
 const nameToks = x => norm(shortName(x)).split(" ").filter(t => t && !STOP.has(t)).map(deAl);
 function sameName(given, d) {
-  const g = nameToks(given), dn = nameToks(d.name); if (!g.length) return false;
+  const g = nameToks(given), dn = [...nameToks(d.name), ...(d.fullName ? nameToks(d.fullName) : [])]; if (!g.length) return false;
   return g.every(t => dn.some(x => x === t || (t.length >= 4 && x.length >= 4 && lev1(t, x))));
 }
 function strictFind(given) { const L = docs().filter(d => sameName(given, d)); return L.length === 1 ? L[0] : null; }
