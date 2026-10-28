@@ -75,6 +75,19 @@
     } catch { /* الإضافة تحدّثت — الصفحة تحتاج تحديث */ }
   });
 
+  // صورة التقرير للطلب المفتوح في صحة (اللوحة ترسلها لما يصير الطلب نشط) — نسخة وحدة بس، وتنمسح لما يتغير الطلب
+  listen(async e => {
+    if (e.source !== window || e.data?.type !== "SABA_REQ_IMG" || !e.data.id || typeof e.data.url !== "string" || !isBoard()) return;
+    const { sabaReq: r, sabaReqImg: cur } = await chrome.storage.local.get(["sabaReq", "sabaReqImg"]);
+    if (r?.id !== e.data.id || (cur?.id === e.data.id && cur.url === e.data.url)) return;
+    if (e.data.url.length > 6e6) return;                                  // صورة كبيرة جداً — تنفتح من اللوحة
+    await chrome.storage.local.set({ sabaReqImg: { id: e.data.id, url: e.data.url, pdf: !!e.data.pdf, at: Date.now() } });
+  });
+  chrome.storage.onChanged.addListener((ch, area) => {
+    if (area !== "local" || !ch.sabaReq || !alive()) return;
+    if (!ch.sabaReq.newValue) chrome.storage.local.remove("sabaReqImg");   // انقفل الطلب/انرفع → نمسح الصورة من الجهاز
+  });
+
   // صفحة «ربط جهاز الطبيب» في موقعنا بس → نحفظ مين الطبيب على هالجهاز (زر الحالة في أثير)
   const OURS = location.hostname === "anasabdullahme-sudo.github.io" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   listen(async e => {

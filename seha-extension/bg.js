@@ -28,3 +28,6 @@ chrome.alarms.onAlarm.addListener(async a => {
   if (pending && await safeToReload()) return chrome.runtime.reload();
   try { chrome.runtime.requestUpdateCheck(() => {}); } catch { /* نسخة محمّلة يدوي */ }
 });
+
+// صورة التقرير في تبويب خاص بالإضافة (صفحة صحة ممكن تمنع عرض الصور داخلها)
+chrome.runtime.onMessage.addListener(m => { if (m?.type === "SABA_OPEN_IMG") chrome.tabs.create({ url: chrome.runtime.getURL("viewer.html") }); });

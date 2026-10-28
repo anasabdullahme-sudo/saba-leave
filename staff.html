@@ -1238,7 +1238,7 @@ function fixDupMsg(e) {
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null, sehaWarned = null;
-const EXT_LATEST = "1.8.1", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
+const EXT_LATEST = "1.8.2", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
 const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 let extWarned = false;
 $("#toolDl").href = EXT_ZIP; $("#toolVer").textContent = EXT_LATEST;
@@ -1252,6 +1252,18 @@ function renderExtHint() {
     : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — <a href="${EXT_ZIP}" download>نزّل النسخة ${EXT_LATEST}</a> واستبدل ملفاتها، وبعدها ↻ في chrome://extensions`
     : "<b>✓</b> إضافة التعبئة شغالة";
   if (old && !extWarned) { extWarned = true; toast(`إضافة صحة في هالجهاز قديمة (${extVersion}) — نزّل ${EXT_LATEST} من رابط تحت زر صحة`); }
+}
+// صورة التقرير للإضافة (تطلع صغيرة داخل صحة + تنفتح كبيرة) — مرة لكل طلب
+let imgSent = { id: "", at: 0 };
+async function sendReqImg(id) {
+  if (imgSent.id === id && Date.now() - imgSent.at < 5 * 60000) return;
+  const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id); if (!x?.imagePath) return;
+  imgSent = { id, at: Date.now() };
+  try {
+    const url = await api.imageUrl(x.imagePath);
+    const pdf = /\.pdf(\?|$)|^data:application\/pdf/i.test(x.imagePath || "") || /^data:application\/pdf/i.test(url);
+    window.postMessage({ type: "SABA_REQ_IMG", id, url, pdf }, location.origin);
+  } catch (e) { imgSent = { id: "", at: 0 }; console.warn("صورة الطلب للإضافة", e); }
 }
 function sehaPayload(x) {
   const pick = k => x[k] || "";
@@ -1302,7 +1314,7 @@ addEventListener("message", async e => {
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
-  if (m.type === "SABA_ACTIVE" && m.id && (S.pending.some(r => r.id === m.id) || S.held.some(r => r.id === m.id))) { (S.sentSeha ||= new Set()).add(m.id); claimReq(m.id); }
+  if (m.type === "SABA_ACTIVE" && m.id && (S.pending.some(r => r.id === m.id) || S.held.some(r => r.id === m.id))) { (S.sentSeha ||= new Set()).add(m.id); claimReq(m.id); sendReqImg(m.id); }
   if (m.type === "SABA_RELEASE" && m.id) { S.sentSeha?.delete(m.id); if (S.openId !== m.id) releaseReq(m.id); }
   if (m.type === "SABA_SEHA_ALERT") { chime(); toast(`⚠ صحة غيّرت شي في النموذج: ${(m.labels || []).join("، ") || "خانات ما تتعبّى"} — من قائمة الإضافة اضغط «تقرير فني» وأرسله لـ Claude`, "تمام", () => {}); }
 });

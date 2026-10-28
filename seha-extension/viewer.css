@@ -1,0 +1,10 @@
+:root{color-scheme:light dark}
+body{margin:0;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;background:#0E1A26;color:#E6EEF5}
+header{position:sticky;top:0;display:flex;align-items:center;gap:8px;padding:10px 16px;background:#003765;z-index:2}
+header .sp{flex:1}
+header button{all:unset;cursor:pointer;background:#ffffff1f;border-radius:8px;padding:6px 12px;font-size:14px}
+main{display:grid;place-items:center;padding:16px;min-height:calc(100vh - 60px)}
+main img{max-width:100%;max-height:calc(100vh - 90px);transition:transform .2s;background:#fff;border-radius:6px;cursor:zoom-in}
+main.zoom img{max-width:none;max-height:none;width:180%;cursor:zoom-out}
+main iframe{width:100%;height:calc(100vh - 90px);border:0;background:#fff;border-radius:6px}
+.empty{color:#9FB3C6}

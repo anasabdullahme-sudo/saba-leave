@@ -438,6 +438,11 @@
     details.data summary{font-size:13px;color:#0B2B47;font-weight:600;padding:4px 0}
     .card{padding:8px 10px}
     .card{border:1px solid #DCEBF4;border-radius:12px;padding:10px}
+    .card.withimg{display:flex;gap:10px;align-items:flex-start}
+    .thumb{all:unset;cursor:pointer;flex:none;width:64px;height:84px;border-radius:8px;overflow:hidden;border:1px solid #DCEBF4;background:#F3F7FA;position:relative;display:grid;place-items:center}
+    .thumb img{width:100%;height:100%;object-fit:cover}
+    .thumb .pdf{font-weight:700;color:#B4232A;font-size:13px}
+    .thumb i{position:absolute;bottom:2px;left:2px;font-style:normal;font-size:12px;background:#fff;border-radius:6px;padding:0 3px}
     .nm{font-weight:700;font-size:15px}
     .meta{font-size:12.5px;color:#5B7690;margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 10px}
     .meta .ltr{direction:ltr}
@@ -492,11 +497,11 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
+  let reqImg = null;                       // صورة التقرير للطلب المفتوح (تجي من لوحة سابا)
   let req = null, auto = true, minimized = false, queue = [], queueAt = 0, hidden = {}, showFields = false, fixOpen = false, sehaAlert = null, fxType = null, fxChecked = [], fxNoteVal = "";
   const FIX_FIELDS = [
     { k: "patientName", ar: "الاسم" }, { k: "idNumber", ar: "الهوية" }, { k: "dob", ar: "الميلاد" }, { k: "phone", ar: "الجوال" },
-    { k: "leaveStart", ar: "بداية الإجازة", types: ["sick", "companion"] }, { k: "leaveEnd", ar: "نهاية الإجازة", types: ["sick", "companion"] },
-    { k: "visitDate", ar: "تاريخ الحضور", types: ["attendance"] },
+    // تواريخ الإجازة ما يعدّلها المريض — الموظف يتأكد منها من صورة التقرير
     { k: "companionName", ar: "اسم المرافق", types: ["companion"] }, { k: "companionId", ar: "هوية المرافق", types: ["companion"] },
     { k: "companionDob", ar: "ميلاد المرافق", types: ["companion"] }, { k: "relationship", ar: "القرابة", types: ["companion"] },
     { k: "photo", ar: "صورة التقرير" },
@@ -577,12 +582,14 @@
     const alertHtml = sehaAlert ? `<div class="acc wrong" style="font-weight:600">⚠ صحة أضافت خانة جديدة: ${esc(sehaAlert.labels.join("، "))}<br><span style="font-weight:400">اضغط «تقرير فني» وأرسله لـ Claude عشان أحدّث الإضافة.</span> <button class="lnk" id="alertOk">تمام</button></div>` : "";
     if (!fxType) fxType = req.type;
     const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(fxType));
-    const need = fxType === req.type ? [] : fxType === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : fxType === "attendance" ? ["visitDate"] : req.type === "attendance" ? ["leaveStart", "leaveEnd"] : [];
+    const need = fxType === req.type ? [] : fxType === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : [];
     const lockedNow = queue.find(q => q.id === req.id)?.lockedBy;
     b.innerHTML = `${lockedNow ? `<div class="acc wrong" style="font-weight:600">⚠ ${esc(lockedNow)} فاتح نفس الطلب الحين — تأكدوا مين يرفعه عشان ما ينرفع مرتين</div>` : ""}
-      <div class="card">
-        <div class="nm">${esc(req.patientName)}</div>
+      <div class="card ${reqImg?.id === req.id ? "withimg" : ""}">
+        ${reqImg?.id === req.id ? `<button class="thumb" id="viewImg" title="افتح صورة التقرير">${reqImg.pdf ? '<span class="pdf">PDF</span>' : '<img alt="">'}<i>🔍</i></button>` : ""}
+        <div><div class="nm">${esc(req.patientName)}</div>
         <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>${esc(req.ref || "")}</span></div>
+        ${reqImg?.id === req.id ? `<button class="lnk" id="viewImg2">📄 صورة التقرير — كبّرها</button>` : `<div class="tiny">صورة التقرير تطلع هنا لما تكون لوحة سابا مفتوحة</div>`}</div>
       </div>
       ${alertHtml}
       <div class="acc ${acc.state}">${accTxt}</div>
@@ -645,6 +652,12 @@
       toastLocal(`انسخ التقرير (${fr.length} إطار) — الصقه لـ Claude`);
     };
     $("#closeReq").onclick = () => chrome.storage.local.remove("sabaReq");
+    if (reqImg?.id === req.id) {
+      const open = () => { try { chrome.runtime.sendMessage({ type: "SABA_OPEN_IMG" }); } catch { toastLocal("حدّث الصفحة (F5) وجرّب"); } };
+      $("#viewImg").onclick = open; $("#viewImg2").onclick = open;
+      const im = root.querySelector("#viewImg img");
+      if (im) { im.onerror = () => { im.remove(); }; im.src = reqImg.url; }          // لو صحة منعت عرض الصورة هنا، الزر يفتحها في تبويب
+    }
     $("#done").onclick = () => {
       const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
       chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() }, sabaHidden: hideId(req.id) }, () => {
@@ -768,6 +781,7 @@
   setInterval(() => { if (!alive() || !TOP || req || minimized) return; const st = queueStale(); if (st !== lastStale) { lastStale = st; render(); } }, 20000);
 
   // ---------- تشغيل ----------
+  chrome.storage.local.get("sabaReqImg", d => { reqImg = d.sabaReqImg || null; if (reqImg && req?.id === reqImg.id) render(); });
   chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert"], d => {
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
     if (TOP && d.sabaPos) placeAt(d.sabaPos.x, d.sabaPos.y);
@@ -794,6 +808,7 @@
       else if (!minimized) render(); else updateCount();
     }
     if (ch.sabaHidden) hidden = ch.sabaHidden.newValue || {};
+    if (ch.sabaReqImg && TOP) { reqImg = ch.sabaReqImg.newValue || null; if (req && (!reqImg || reqImg.id === req.id)) render(); }
     if (ch.sabaReq) {
       req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
       if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
