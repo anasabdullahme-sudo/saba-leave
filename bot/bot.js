@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.1.5";
+const VERSION = "2.1.6";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -368,10 +368,10 @@ async function onIncoming(m) {
   const hello = it.greet ? "وعليكم السلام ورحمة الله 🌷\n" : "";
 
   // ---- استفسار مو عن الإجازات → يتحوّل للمسؤول على الخاص، وهو يرد والبوت يوصّل
-  const relay = async () => {
-    const r = await relayToAdmin({ m, jid, phone: senderPhone, name: m.pushName || "", text, media });
+  const relay = async (o = {}) => {
+    const r = await relayToAdmin({ m, jid, phone: senderPhone, name: m.pushName || "", text, media, note: o.note || "" });
     if (!r) return false;
-    if (r.isNew && once("relayack", 30 * 60e3)) await reply(jid, `${hello}وصل استفسارك 🌷 حوّلته لموظف في عيادات سابا وبيرد عليك هنا قريب.`, senderPhone);
+    if (o.ack !== false && r.isNew && once("relayack", 30 * 60e3)) await reply(jid, `${hello}وصل استفسارك 🌷 حوّلته لموظف في عيادات سابا وبيرد عليك هنا قريب.`, senderPhone);
     return true;
   };
   if (relayOn() && !isAdminPhone(senderPhone)) {
@@ -416,6 +416,13 @@ async function onIncoming(m) {
   const name = String(r.patientName || "").trim().split(/\s+/)[0] || "";
   const hi = name ? `أهلاً ${name}` : "أهلاً";
   const kind = TYPE_AR[r.type] || "طلبك";
+  // طلب له أكثر من 24 ساعة وللحين يسأل → البوت يرد عادي، ونسخة للمسؤول يشيك ويرد بنفسه
+  const ageH = (now - ms(r.createdAt)) / 3600e3;
+  if (ageH > 24 && !it.social && relayOn() && !isAdminPhone(senderPhone)) {
+    const ST = { pending: "بالانتظار (ما انرفع)", held: "معلّق", done: "انرفع على صحة" + (r.sehaRef ? " — " + r.sehaRef : "") + " (ينتظر اعتماد الطبيب)" };
+    const age = ageH < 48 ? Math.round(ageH) + " ساعة" : Math.round(ageH / 24) + " أيام";
+    await relay({ ack: false, note: `⏰ طلب ${r.ref || ""} له ${age} — الحالة: ${ST[r.status] || r.status}${r.status === "held" && r.holdNote ? " (" + String(r.holdNote).slice(0, 80) + ")" : ""}` }).catch(e => log.warn({ err: String(e?.message || e) }, "تحويل طلب قديم"));
+  }
   const flag = () => doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
 
   // ---- عنده تعديل مطلوب؟

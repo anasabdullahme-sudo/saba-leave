@@ -36,7 +36,7 @@ export const looksOther = text => !!text && OTHER.test(text) && !LEAVE.test(text
 export async function openFor(jid) { return (await load()).find(i => i.jid === jid && Date.now() - Math.max(i.at, i.lastAdminAt || 0, i.lastPatientAt || 0) < OPEN_MS) || null; }
 
 // نحوّل رسالة المراجع للمسؤول. يرجع true لو انرسلت
-export async function relayToAdmin({ m, jid, phone, name, text, media }) {
+export async function relayToAdmin({ m, jid, phone, name, text, media, note = "" }) {
   if (!relayOn()) return false;
   const sock = getSock(); if (!sock) return false;
   const jids = await adminJidList(); if (!jids.length) return false;
@@ -45,8 +45,8 @@ export async function relayToAdmin({ m, jid, phone, name, text, media }) {
   if (!it) { it = { code: code4(), jid, phone: phone || "", name: name || "", at: Date.now(), msgIds: [] }; items.push(it); }
   it.lastPatientAt = Date.now();
   const head = isNew
-    ? `📨 استفسار مراجع  #${it.code}\n${it.name ? it.name + " — " : ""}${it.phone || "رقم مخفي"}\n\n«${(text || "📎 أرسل ملف/صورة").slice(0, 600)}»\n\n↩️ اسحب هذي الرسالة (رد) واكتب جوابك، وأنا أرسله له.`
-    : `📨 #${it.code} ${it.name || it.phone || ""}:\n«${(text || "📎 ملف/صورة").slice(0, 600)}»`;
+    ? `📨 استفسار مراجع  #${it.code}\n${it.name ? it.name + " — " : ""}${it.phone || "رقم مخفي"}${note ? "\n" + note : ""}\n\n«${(text || "📎 أرسل ملف/صورة").slice(0, 600)}»\n\n↩️ اسحب هذي الرسالة (رد) واكتب جوابك، وأنا أرسله له.`
+    : `📨 #${it.code} ${it.name || it.phone || ""}:${note ? "\n" + note : ""}\n«${(text || "📎 ملف/صورة").slice(0, 600)}»`;
   for (const aj of jids) {
     try {
       const s1 = await sock.sendMessage(aj, { text: head }); if (s1?.key?.id) it.msgIds.push(s1.key.id);
