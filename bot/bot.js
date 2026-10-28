@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.2.0";
+const VERSION = "2.3.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -54,7 +54,7 @@ async function connect() {
     // رسائل القروب اللي وصلت والبوت طافي (append) — نعالج الأحدث من 6 ساعات
     if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) handleGroupMessage(m).catch(() => {}); } return; }
     if (type !== "notify") return;
-    for (const m of messages || []) onIncoming(m).catch(e => log.warn({ err: String(e?.message || e) }, "رسالة واردة"));
+    for (const m of messages || []) bufferIncoming(m);
   });
   sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
@@ -174,6 +174,7 @@ function startTrackSync() {
         const r = ch.doc.data(), id = ch.doc.id;
         if (!r.idNumber || !r.phone) continue;
         const key = trackKey(r.idNumber, r.phone), item = trackItem(r), json = JSON.stringify(item), prev = trackCache.get(id);
+        if (prev && r.status === "done" && JSON.parse(prev.json).state !== "done" && r.inquiryAt && !r.doneNotifiedAt) notifyDone(ch.doc.ref, r).catch(() => {});
         if (prev && prev.key === key && prev.json === json) continue;
         trackCache.set(id, { key, json });
         try {
@@ -185,6 +186,19 @@ function startTrackSync() {
       }
     });
   }, e => log.error({ err: String(e?.message || e) }, "track listener"));
+}
+
+// المراجع اللي سأل عن طلبه: أول ما ينرفع نبشّره بنفسنا (بدل ما يرجع يسأل) — مرة وحدة بس
+async function notifyDone(ref, r) {
+  if (!connected || !sock) return;
+  const num = toJidNumber(r.phone); if (!num) return;
+  await ref.update({ doneNotifiedAt: TS() });
+  const [w] = await sock.onWhatsApp(num); if (!w?.exists) return;
+  const name = String(r.patientName || "").trim().split(/\s+/)[0] || "";
+  const kind = TYPE_AR[r.type] || "إجازتك";
+  const text = `✅ ${name ? name + "، " : ""}${kind} ${r.type === "attendance" ? "انرفع" : "انرفعت"} الحين على منصة صحة${r.sehaRef ? ` (رقم ${r.sehaRef})` : ""}.\nباقي اعتماد الطبيب، وأول ما يعتمدها تطلع لك في تطبيق صحتي ← الإجازات المرضية 🌷`;
+  await reply(w.jid, text, r.phone);
+  log.info({ ref: r.ref }, "بشّرنا المراجع بالرفع");
 }
 
 /* ---------- أرقام الأطباء (يضيفها المسؤول من لوحة الموظفين) ---------- */
@@ -230,7 +244,9 @@ async function reply(jid, text, phone) {
   if (!connected || !sock) return;
   const prev = lastText.get(jid);
   if (prev && prev.text === text && Date.now() - prev.at < 2 * 3600e3) return;     // نفس الرد ما يتكرر خلال ساعتين
+  try { await sock.sendPresenceUpdate("composing", jid); await new Promise(r => setTimeout(r, Math.min(2500, 700 + text.length * 12))); } catch {}   // «يكتب…» مثل الإنسان
   await sock.sendMessage(jid, { text });
+  try { sock.sendPresenceUpdate("paused", jid); } catch {}
   lastReply.set(jid, Date.now()); lastText.set(jid, { text, at: Date.now() }); markOut(jid, phone);
   try { const k = chatKey(jid, phone ? normPhone(phone) : ""), a = chats.get(k) || []; if (!(a.length && a[a.length - 1].role === "model" && a[a.length - 1].text === text)) remember(k, "model", text); } catch {}   // الردود الجاهزة بعد في ذاكرة المحادثة
 }
@@ -253,8 +269,27 @@ function remember(key, role, text) {
   if (!key || !text) return;
   const a = (chats.get(key) || []).filter(x => Date.now() - x.at < 48 * 3600e3);
   a.push({ role, text: String(text).slice(0, 700), at: Date.now() });
-  while (a.length > 14) a.shift();
-  chats.set(key, a);
+  while (a.length > 16) a.shift();
+  chats.set(key, a); saveChat(key);
+}
+// ذاكرة المحادثة تنحفظ في قاعدة البيانات (مستند خاص) عشان ما تضيع لما البوت يعيد التشغيل
+const chatDocId = key => crypto.createHash("sha256").update("saba-chat|" + key).digest("hex").slice(0, 32);
+const chatLoaded = new Set(), chatSaveT = new Map();
+async function loadChat(key) {
+  if (!key || chatLoaded.has(key)) return; chatLoaded.add(key);
+  try {
+    const d = (await db.doc(`chats/${chatDocId(key)}`).get()).data();
+    const old = (d?.msgs || []).filter(x => Date.now() - x.at < 48 * 3600e3), cur = chats.get(key) || [];
+    if (old.length) chats.set(key, [...old, ...cur].sort((a, b) => a.at - b.at).slice(-16));
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "ذاكرة المحادثة"); }
+}
+function saveChat(key) {
+  clearTimeout(chatSaveT.get(key));
+  chatSaveT.set(key, setTimeout(() => { chatSaveT.delete(key); db.doc(`chats/${chatDocId(key)}`).set({ msgs: chats.get(key) || [], at: TS() }).catch(() => {}); }, 3000));
+}
+// آخر المحادثة باختصار — تروح مع أي تحويل للمسؤول عشان ما يحتاج يسأل المراجع من جديد
+function transcript(key, n = 6) {
+  return (chats.get(key) || []).slice(-n).map(x => (x.role === "user" ? "👤 " : "🤖 ") + String(x.text).replace(/\s+/g, " ").slice(0, 140)).join("\n");
 }
 const aiCount = new Map();               // حد يومي لكل شخص (يحمي من الإزعاج والتكلفة)
 function aiAllowed(key) { const d = new Date().toDateString(), c = aiCount.get(key); if (!c || c.d !== d) { aiCount.set(key, { d, n: 1 }); return true; } if (c.n >= 25) return false; c.n++; return true; }
@@ -262,7 +297,11 @@ function aiAllowed(key) { const d = new Date().toDateString(), c = aiCount.get(k
 const AI_RULES = `أنت «مساعد سابا» — رقم واتساب آلي لعيادات سابا الطبية في جدة، مختص فقط بمتابعة طلبات رفع الإجازات المرضية (والمرافق والمشاهد) على منصة صحة.
 طريقة العمل عندنا: المراجع يرفع صورة تقريره من موقعنا ← فريق سابا يرفعه على منصة صحة ← الطبيب يعتمده من حسابه ← بعد الاعتماد تطلع الإجازة في تطبيق «صحتي» ← الإجازات المرضية.
 قواعد مهمة:
-- تكلّم باللهجة السعودية، بلطف واحترام، وباختصار (سطر إلى 4 أسطر)، وإيموجي واحد بالكثير.
+- تكلّم باللهجة السعودية، بلطف واحترام، وباختصار (سطر إلى 4 أسطر)، وإيموجي واحد بالكثير. نادِه باسمه الأول لو تعرفه، ولا تكرر «أهلاً» في كل رد.
+- رد على آخر كلامه بالذات وافهم قصده من المحادثة كلها. لو أرسل كذا رسالة ورا بعض (مثل «؟؟؟» ثم «متى بترفعونه»)، هي سؤال واحد — رد مرة وحدة.
+- لو المراجع متضايق أو مستعجل: ابدأ بجملة قصيرة تقدّر موقفه (مثل «أفهمك، وحقك تستعجل») ثم المعلومة المفيدة، بدون اعتذارات طويلة.
+- لا تعطي وقت محدد للرفع أو الاعتماد ولا تعد بشي ما تقدر تضمنه.
+- الرسائل اللي تبدأ بـ «(الموظف)» في المحادثة كتبها موظف سابا بنفسه — كمّل على كلامه ولا تناقضه.
 - اعتمد فقط على «بيانات الطلب» المعطاة لك. لا تخترع مواعيد ولا مدد ولا تقول إن الطبيب اعتمد إلا إذا مكتوب. لو ما تعرف، قل إن الفريق بيتابع.
 - رد السلام بالسلام، والشكر بالعفو. لو المراجع قال شي ما يحتاج رد (مثل «تمام» أو 👍 بعد ما خلّصتوا) خلّ reply فاضي.
 - لو عنده «تعديل مطلوب»: شجّعه يفتح رابط التعديل ويعبّي الخانات المطلوبة ويضغط «إرسال التعديل». أرسل الرابط لو طلبه أو لو ما انرسل له في المحادثة. لو قال إنه عدّل والتعديل للحين «ما وصل»، قل له بلطف إنه ما وصلنا ولازم يضغط «إرسال التعديل» داخل الرابط.
@@ -348,6 +387,37 @@ function readIntent(text, media) {
 }
 const FLOW = "بعد ما نرفعها على منصة صحة، تحتاج *اعتماد الطبيب*، وأول ما يعتمدها تطلع لك في تطبيق *صحتي* ← الإجازات المرضية.";
 
+/* ---------- تجميع الرسائل: المراجع غالباً يرسل كذا رسالة ورا بعض («???» ثم «متى بترفعونه») ----------
+   ننتظر لين يسكت 6 ثواني (وبحد أقصى 25 ثانية) ونرد مرة وحدة على الكلام كله */
+const bursts = new Map(), loopGuard = new Map();
+const QUIET_MS = 6000, MAX_WAIT_MS = 25000;
+function bufferIncoming(m) {
+  const jid = m.key?.remoteJid || "";
+  const msg = m.message || {};
+  const plainDm = jid && !jid.endsWith("@g.us") && !m.key?.fromMe && !jid.includes("broadcast") && !jid.endsWith("@newsletter");
+  const quoted = msg.extendedTextMessage?.contextInfo?.stanzaId;
+  if (!plainDm || quoted || msg.protocolMessage || msg.reactionMessage || msg.editedMessage) return onIncoming(m).catch(e => log.warn({ err: String(e?.message || e) }, "رسالة واردة"));
+  let b = bursts.get(jid);
+  if (!b) { b = { list: [], first: Date.now(), timer: null }; bursts.set(jid, b); }
+  b.list.push(m);
+  try { sock?.readMessages?.([m.key]); } catch {}                                   // ✓✓ زرقا: شفنا رسالتك
+  clearTimeout(b.timer);
+  const wait = Math.max(0, Math.min(QUIET_MS, MAX_WAIT_MS - (Date.now() - b.first)));
+  b.timer = setTimeout(() => {
+    bursts.delete(jid);
+    onIncoming(mergeBurst(b.list)).catch(e => log.warn({ err: String(e?.message || e) }, "رسالة واردة"));
+  }, wait);
+}
+function mergeBurst(list) {
+  if (list.length === 1) return list[0];
+  const txt = x => { const g = x.message || {}; return (g.conversation || g.extendedTextMessage?.text || g.imageMessage?.caption || g.documentMessage?.caption || "").trim(); };
+  const text = list.map(txt).filter(Boolean).join("\n");
+  const media = [...list].reverse().find(x => { const g = x.message || {}; return g.imageMessage || g.documentMessage || g.audioMessage || g.videoMessage; });
+  const last = list[list.length - 1];
+  if (media) { const c = structuredClone(media); const g = c.message; const k = g.imageMessage ? "imageMessage" : g.documentMessage ? "documentMessage" : null; if (k) g[k].caption = text; c.burst = list.length; return c; }
+  return { ...last, message: { conversation: text }, burst: list.length };
+}
+
 async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
   if (!m.key?.fromMe && jid.endsWith("@g.us")) return handleGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
@@ -359,7 +429,9 @@ async function onIncoming(m) {
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || msg.documentMessage?.caption || "").trim();
   if (!text && !media && !msg.stickerMessage) return;
   const now = Date.now();
-  if (now - (lastReply.get(jid) || 0) < 20000 && !(relayOn() && await openFor(jid).catch(() => null))) return;   // رد واحد كل 20 ثانية (إلا لو يكلم الموظف)
+  // حماية من الحلقات (بوت ثاني يرد علينا): بالكثير 5 دفعات ردود خلال دقيقتين — الرسايل المتتالية أصلاً تتجمّع فوق
+  const hits = (loopGuard.get(jid) || []).filter(t => now - t < 120000); hits.push(now); loopGuard.set(jid, hits);
+  if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
   const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
@@ -400,10 +472,11 @@ async function onIncoming(m) {
     doc = s.docs.sort((a, b) => ms(b.get("createdAt")) - ms(a.get("createdAt")))[0] || null;
   }
   const ck = chatKey(jid, senderPhone);
+  await loadChat(ck);
   if (!doc && GEMINI_KEY) {
     const ai = await aiReply(ck, text, { found: false, track_link: `${SITE_URL}?track` });
     if (ai?.other && !looksLeave(text) && relayOn() && await relay()) { remember(ck, "user", text || "(صورة)"); return; }
-    if (ai?.staff && relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🙋 يحتاج موظف (ما لقيت له طلب)${ai.note ? "\n💬 " + ai.note : ""}` }).catch(() => {});
+    if (ai?.staff && relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🙋 يحتاج موظف (ما لقيت له طلب)${ai.note ? "\n💬 " + ai.note : ""}${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
     if (ai) { remember(ck, "user", text || "(صورة)"); if (ai.reply) { remember(ck, "model", ai.reply); await reply(jid, ai.reply, senderPhone); } return; }
   }
   if (!doc) {
@@ -453,7 +526,7 @@ async function onIncoming(m) {
       remember(ck, "user", text || "(صورة)");
       if (!it.social || ai.notify) doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (ai.note || text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
       if (ai.remindDoctor && r.status === "done") await remindDoctor(doc, r);
-      if (ai.staff && relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🙋 يحتاج موظف — طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${ai.note ? "\n💬 " + ai.note : ""}` }).catch(() => {});
+      if (ai.staff && relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🙋 يحتاج موظف — طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${ai.note ? "\n💬 " + ai.note : ""}${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
       if (fixOpen && ai.reply.includes(r.fixToken)) fref.update({ nudgedAt: TS() }).catch(() => {});
       if (ai.reply) { remember(ck, "model", ai.reply); await reply(jid, ai.reply, senderPhone); }
       lastReply.set(jid + "#st:" + (r.id || r.ref) + ":" + r.status + (fixOpen ? ":fix" : ""), now);   // الحالة انقالت — الرد الجاهز ما يكررها
@@ -468,7 +541,7 @@ async function onIncoming(m) {
   const statusReply = async (msg) => {
     const k = "st:" + (r.id || r.ref) + ":" + r.status + (fixOpen ? ":fix" : "");
     if (now - (lastReply.get(jid + "#" + k) || 0) < 6 * 3600e3) {
-      if (relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🔁 يكرر السؤال عن طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})` }).catch(() => {});
+      if (relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🔁 يكرر السؤال عن طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
       if (once("esc" + k, 3 * 3600e3)) return reply(jid, "وصلت رسالتك 🌷 بلّغت الموظف المختص وبيرد عليك هنا.", senderPhone);
       return;
     }
@@ -640,6 +713,14 @@ async function applyPatches() {
 
 /* ---------- نسخة احتياطية أسبوعية (بدون الصور) على قرص Railway ----------
    كل الطلبات وطلبات التعديل → /data/backups/saba-YYYY-MM-DD.json.gz — نحتفظ بآخر 8 نسخ */
+// ذاكرة المحادثات: نمسح اللي له أكثر من 3 أيام (بيانات مراجعين — ما نخليها)
+async function cleanupChats() {
+  try {
+    const old = await db.collection("chats").where("at", "<", Timestamp.fromMillis(Date.now() - 3 * DAY)).limit(400).get();
+    if (old.empty) return; const b = db.batch(); old.docs.forEach(d => b.delete(d.ref)); await b.commit();
+    log.info({ n: old.size }, "مسحنا ذاكرة محادثات قديمة");
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "تنظيف المحادثات"); }
+}
 async function backupWeekly() {
   try {
     if (!fs.existsSync("/data")) return;
@@ -753,7 +834,8 @@ async function main() {
   watchDoctors();
   startFixApplier();
   deployRules().then(seedBoard).then(applyPatches);
-  initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock });
+  initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock,
+    onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
@@ -762,6 +844,7 @@ async function main() {
     const last = st.storage?.at?.toMillis?.() || 0;
     if (Date.now() - last > 20 * 3600000) await cleanupImages();
     await backupWeekly();
+    await cleanupChats();
   };
   setTimeout(daily, 3 * 60000);
   setInterval(daily, 24 * 3600000);

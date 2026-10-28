@@ -1,6 +1,6 @@
 // استفسارات المراجعين اللي مو عن الإجازات (موافقة تأمين، موعد، دوام طبيب، أسعار…):
 // البوت يحوّلها للمسؤول على الخاص، والمسؤول يرد على رسالة البوت (سحب/رد) → البوت يرسل الرد للمراجع.
-let db, log, getSock, admins = [];
+let db, log, getSock, admins = [], onSent = null;
 const DAY = 864e5, OPEN_MS = 3 * 3600e3;
 const ref = () => db.doc("bot/relay");                       // مستند خاص (القواعد ما تسمح لأحد يقراه غير البوت)
 const latin = s => String(s || "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
@@ -8,7 +8,7 @@ const code4 = () => "P" + Array.from({ length: 3 }, () => "ABCDEFGHJKLMNPQRSTUVW
 const adminJids = new Map();
 
 export function initRelay(o) {
-  ({ db, log, getSock } = o);
+  ({ db, log, getSock } = o); onSent = o.onSent || null;
   admins = String(o.admin || "").split(/[,\s]+/).map(p => latin(p).replace(/\D/g, "").replace(/^(00)?966/, "").replace(/^0/, "")).filter(p => /^5\d{8}$/.test(p));
 }
 export const relayOn = () => admins.length > 0;
@@ -79,6 +79,7 @@ export async function handleAdminRelay(m, phone, text) {
     else if (body.trim()) await sock.sendMessage(it.jid, { text: body.trim() });
     else return true;
     it.lastAdminAt = Date.now(); await save(items);
+    try { onSent?.(it.jid, it.phone, hasMedia ? "(الموظف أرسل ملف/صورة)" : "(الموظف) " + body.trim()); } catch {}
     await sock.sendMessage(m.key.remoteJid, { react: { text: "✅", key: m.key } }).catch(() => {});    // ✅ على رد المسؤول = انرسل
     log.info({ code: it.code }, "رد المسؤول انرسل للمراجع");
   } catch (e) {
