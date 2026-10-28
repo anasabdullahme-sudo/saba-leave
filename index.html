@@ -124,6 +124,8 @@ form{padding:18px}
 .f input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 4px rgba(0,166,226,.15)}
 .f input.ltr{direction:ltr;text-align:right}
 .f.ai input{background:#F1FAFE}
+.f.lock input{background:#EEF3F7;color:#3D5A73;cursor:not-allowed}
+.f.lock span em{opacity:1;background:#E6EDF3;color:#3D5A73}
 .f.bad input{border-color:var(--red);box-shadow:0 0 0 4px rgba(229,56,59,.1)}
 .f input[data-date]{padding-left:54px}
 .f .dp{left:8px;top:35px}
@@ -308,7 +310,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk } from "./shared.js?v=20261024a";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk } from "./shared.js?v=20261028a";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -403,7 +405,7 @@ async function openFixPage(id) {
     companionName: ["اسم المرافق", { req: true }], companionId: ["رقم هوية المرافق", idO], companionDob: ["تاريخ ميلاد المرافق", { ...date, req: true }],
     relationship: ["صلة القرابة", { req: true, ph: "مثال: ابن" }],
   };
-  const keys = (f.fields || []).filter(k => OPT[k]);
+  const keys = (f.fields || []).filter(k => OPT[k] && !["leaveStart", "leaveEnd", "visitDate"].includes(k));   // التواريخ ما يعدّلها المريض
   const wantPhoto = (f.fields || []).includes("photo");
   let h = keys.map(k => F(k, OPT[k][0], OPT[k][1])).join("");
   if (wantPhoto) h += `<div class="f" data-k="photo"><span><i class="lb">صورة التقرير من جديد <b>*</b></i></span>
@@ -625,12 +627,43 @@ function fillFromAI(r) {
   setField("leaveStart", start);
   setField("leaveEnd", isoToDmy(r.leave_end) || addDaysDmy(start, days));
   setField("visitDate", isoToDmy(r.visit_date || r.leave_start));
+  lockDates();
   setField("doctorName", r.doctor_name);
   setField("phone", r.mobile ? normPhone(r.mobile) : "");
   setField("companionName", r.companion_name || r.accompanied_by);
   setField("companionId", digits(r.companion_id).slice(0, 10));
   setField("companionDob", isoToDmy(r.companion_dob));
   setField("relationship", r.relationship);
+}
+
+// تواريخ الإجازة اللي انقرت من التقرير تنقفل — المريض ما يعدّلها أبداً (الموظف يتأكد منها من الصورة)
+const DATE_FIELDS = ["leaveStart", "leaveEnd", "visitDate"];
+function lockDates() {
+  for (const k of DATE_FIELDS) {
+    const i = $(`#form [name="${k}"]`); if (!i || !i.value) continue;
+    const c = i.cloneNode(true); c.readOnly = true; c.tabIndex = -1; c.removeAttribute("required");   // نسخة بدون التقويم والكتابة
+    i.replaceWith(c);
+    const f = c.closest(".f"); f.classList.add("lock"); f.classList.remove("bad");
+    const em = f.querySelector("span em"); if (em) em.textContent = "🔒 من التقرير";
+    f.querySelector(".dp")?.remove();                                                   // زر التقويم
+  }
+}
+// ملاحظة للموظف: التاريخ فيه شي يستاهل يتأكد منه (قلم/شطب، كتبه المريض، الأيام ما تطابق، أو تغيّر عن التقرير)
+function dateFlagFor(fd, ai) {
+  const out = [];
+  if (String(ai.date_altered || "").toLowerCase() === "yes") out.push("⚠ " + (String(ai.date_alter_note || "").trim() || "التاريخ عليه تعديل بالقلم في التقرير"));
+  const aiVal = { leaveStart: isoToDmy(ai.leave_start), leaveEnd: isoToDmy(ai.leave_end) || addDaysDmy(isoToDmy(ai.leave_start), parseInt(latinDigits(ai.leave_days || "").replace(/\D/g, "")) || 0), visitDate: isoToDmy(ai.visit_date || ai.leave_start) };
+  const keys = state.type === "attendance" ? ["visitDate"] : ["leaveStart", "leaveEnd"];
+  const typed = keys.filter(k => fd[k] && !aiVal[k]);
+  if (typed.length) out.push("التاريخ كتبه المريض بنفسه (ما انقرأ من التقرير)");
+  if (keys.some(k => fd[k] && aiVal[k] && fd[k] !== aiVal[k])) out.push("التاريخ المرسل يختلف عن المقروء من التقرير");
+  const days = parseInt(latinDigits(ai.leave_days || "").replace(/\D/g, "")) || 0;
+  if (state.type !== "attendance" && days && fd.leaveStart && fd.leaveEnd) {
+    const ms = d => Date.parse(d.split("/").reverse().join("-") + "T12:00:00Z");
+    const span = Math.round((ms(fd.leaveEnd) - ms(fd.leaveStart)) / 864e5) + 1;
+    if (span > 0 && span !== days) out.push(`عدد الأيام في التقرير ${days} وما يطابق التواريخ (${span})`);
+  }
+  return out.join(" · ").slice(0, 200);
 }
 
 $("#form").addEventListener("submit", async e => {
@@ -668,7 +701,8 @@ $("#form").addEventListener("submit", async e => {
     const ref = makeRef();
     const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
     slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);
-    await withRetry(() => api.createRequest({
+    const flag = dateFlagFor(fd, ai);
+    const create = withFlag => api.createRequest({
       ref, type: state.type,
       patientName: clean(fd.patientName), patientNameEn: clean(ai.patient_name_en), idNumber: latinDigits(fd.idNumber),
       dob: fd.dob, phone: normPhone(fd.phone),
@@ -679,7 +713,10 @@ $("#form").addEventListener("submit", async e => {
       imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: clean(ai.quality, 20),
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
-    }, key));
+      ...(withFlag && flag ? { dateFlag: flag } : {}),
+    }, key);
+    // لو قواعد قاعدة البيانات لسا ما تحدّثت (ما تعرف dateFlag) → نرسل بدونه بدل ما يفشل الطلب
+    await withRetry(() => create(true).catch(e => { if (flag && e?.code === "permission-denied") return create(false); throw e; }));
     clearTimeout(slow);
     $("#refTxt").textContent = ref;
     rememberMe(latinDigits(fd.idNumber), normPhone(fd.phone));

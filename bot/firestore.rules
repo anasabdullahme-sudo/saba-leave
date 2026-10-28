@@ -117,7 +117,7 @@ service cloud.firestore {
              'leaveStart','leaveEnd','leaveDays','visitDate',
              'companionName','companionId','companionDob','relationship',
              'doctorName','doctorId','branch','imagePath','aiFilled','aiQuality',
-             'fileNo','nationality','gender','reason','stampDoctor','docKind',
+             'fileNo','nationality','gender','reason','stampDoctor','docKind','dateFlag',
              'uid','status','createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
@@ -138,6 +138,7 @@ service cloud.firestore {
         && optStr(request.resource.data, 'fileNo', 30) && optStr(request.resource.data, 'nationality', 60)
         && optStr(request.resource.data, 'gender', 20) && optStr(request.resource.data, 'reason', 300)
         && optStr(request.resource.data, 'stampDoctor', 120) && optStr(request.resource.data, 'docKind', 30)
+        && optStr(request.resource.data, 'dateFlag', 200)
         && (!('aiFilled' in request.resource.data) || request.resource.data.aiFilled is bool)
         // الصورة لازم تكون صورة نفس المريض (ما يقدر يربط طلبه بصورة شخص ثاني)
         && (request.resource.data.imagePath.matches('^uploads/' + request.auth.uid + '/[0-9]+\\.(jpg|pdf)$')
@@ -153,7 +154,7 @@ service cloud.firestore {
              'leaveStart','leaveEnd','leaveDays','visitDate',
              'companionName','companionId','relationship','doctorName','doctorId',
              'fileNo','nationality','gender','reason','stampDoctor','type','typeManual',
-             'fixToken','fixAt','imagePath','patientNote'])
+             'fixToken','fixAt','imagePath','patientNote','dateFlag','dateChecked'])
         && request.resource.data.type in ['sick','companion','attendance']
         && request.resource.data.status in ['pending','held','done']
         // المرفوع ما يتعلّق: من "تم الرفع" يا يبقى مرفوع (تعديل) يا يرجع "انتظار" (تراجع)

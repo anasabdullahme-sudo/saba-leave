@@ -285,7 +285,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { backend, arNum, DEMO, relayDoctorAlerts } from "./shared.js?v=20261024a";
+import { backend, arNum, DEMO, relayDoctorAlerts } from "./shared.js?v=20261028a";
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const toast = t => { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); };

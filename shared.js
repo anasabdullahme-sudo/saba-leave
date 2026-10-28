@@ -101,9 +101,7 @@ export const FIX_FIELDS = [
   { k: "idNumber", ar: "رقم الهوية/الإقامة" },
   { k: "dob", ar: "تاريخ الميلاد" },
   { k: "phone", ar: "رقم الجوال" },
-  { k: "leaveStart", ar: "تاريخ بداية الإجازة", types: ["sick", "companion"] },
-  { k: "leaveEnd", ar: "تاريخ نهاية الإجازة", types: ["sick", "companion"] },
-  { k: "visitDate", ar: "تاريخ الحضور", types: ["attendance"] },
+  // تواريخ الإجازة ما يعدّلها المريض أبداً — الموظف يتأكد منها من صورة التقرير
   { k: "companionName", ar: "اسم المرافق", types: ["companion"] },
   { k: "companionId", ar: "هوية المرافق", types: ["companion"] },
   { k: "companionDob", ar: "تاريخ ميلاد المرافق", types: ["companion"] },
@@ -115,11 +113,10 @@ export const fixFieldsFor = type => FIX_FIELDS.filter(f => !f.types || f.types.i
 export function typeSwitchFields(from, to) {
   if (!to || to === from) return [];
   if (to === "companion") return ["companionName", "companionId", "companionDob", "relationship"];
-  if (to === "attendance") return ["visitDate"];
-  if (to === "sick" && from === "attendance") return ["leaveStart", "leaveEnd"];
-  return [];
+  return [];                                     // التواريخ ينقلها الموظف من التقرير، مو المريض
 }
-export const fixLabel = k => (FIX_FIELDS.find(f => f.k === k) || {}).ar || k;
+const DATE_LABELS = { leaveStart: "تاريخ بداية الإجازة", leaveEnd: "تاريخ نهاية الإجازة", visitDate: "تاريخ الحضور" };
+export const fixLabel = k => (FIX_FIELDS.find(f => f.k === k) || {}).ar || DATE_LABELS[k] || k;
 export const fixLink = id => new URL(`./?fix=${id}`, location.href).href;
 export function fixMessage({ name, ref, type, newType, fields, note, link }) {
   const TN = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
@@ -353,7 +350,10 @@ ${list}
 - document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise — IMPORTANT: a drug prescription (Drug Prescription / وصفة طبية / وصفة علاجية, a list of medicines with dosage), lab or radiology results, an invoice/receipt, an appointment card, a referral, or any medical report that does NOT grant leave days is "other", even if it shows the patient and doctor details.
 - For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
 - For attendance: visit_date = the visit date.
-- quality: "good", "blurry" (text hard to read), "cropped" (key fields cut off), or "not_document".`;
+- quality: "good", "blurry" (text hard to read), "cropped" (key fields cut off), or "not_document".
+- date_altered: "yes" if the leave dates or days (Starting from / leave days / end date / visit date) look handwritten, written or corrected with a pen, crossed out, overwritten, scratched, covered with correction fluid, or otherwise manually changed on top of the printed text; "no" if they are cleanly printed.
+- date_alter_note: when date_altered is "yes", a short Arabic note of what you saw (e.g. "تاريخ البداية مكتوب بالقلم فوق المطبوع")، else "".
+- When a date is altered, still read the PRINTED value if visible; if only the handwritten value is readable, use it.`;
 }
 
 /* ==========================================================================
@@ -380,7 +380,7 @@ function blockPage() {
 /* ------------- نسخة التجربة داخل Claude (قاعدة بيانات + قراءة بـ Claude) ------------- */
 const AI_KEYS = ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
   "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
-  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title"];
+  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note"];
 async function artifactBackend() {
   const [db, sample, assets, user] = await Promise.all(["db", "sample", "assets", "user"].map(n => window.claude.use(n).catch(() => null)));
   if (!db) return null;
@@ -500,7 +500,7 @@ async function liveBackend(role) {
     const props = {};
     ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
      "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
-     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title"].forEach(k => props[k] = S.string());
+     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note"].forEach(k => props[k] = S.string());
     props.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] });
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
     const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
@@ -779,7 +779,8 @@ function demoBackend() {
         stamp_doctor_name: "Dr. " + d.en, stamp_doctor_id: d.id, document_kind: type === "companion" ? "companion_leave" : type === "attendance" ? "attendance" : "sick_leave",
         id_number: "1098765432", dob: "1991-03-14", leave_start: new Date().toISOString().slice(0, 10), leave_end: new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10),
         leave_days: "3", visit_date: new Date().toISOString().slice(0, 10), doctor_name: "Dr. " + d.en, doctor_id: d.id,
-        companion_name: type === "companion" ? "عبدالله سعيد الغامدي" : "", companion_id: type === "companion" ? "1022334455" : "", companion_dob: type === "companion" ? "1965-07-02" : "", relationship: type === "companion" ? "ابن" : "", quality: "good" };
+        companion_name: type === "companion" ? "عبدالله سعيد الغامدي" : "", companion_id: type === "companion" ? "1022334455" : "", companion_dob: type === "companion" ? "1965-07-02" : "", relationship: type === "companion" ? "ابن" : "", quality: "good",
+        ...(Math.random() < 0.4 ? { date_altered: "yes", date_alter_note: "تاريخ البداية مكتوب بالقلم فوق المطبوع (تجربة)" } : { date_altered: "no", date_alter_note: "" }) };
     },
     async uploadImage(blob, onProgress) {
       for (let i = 1; i <= 5; i++) { await new Promise(r => setTimeout(r, 120)); onProgress?.(i / 5); }
