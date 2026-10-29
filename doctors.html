@@ -354,7 +354,7 @@ function chip(d, t) {
     case "late": return t.m < s.from ? c("amber", `متأخر — يوصل ${hm(s.from)}`) : "";
     case "leaves": return s.until != null ? c("amber", `يطلع ${hm(s.until)}`) : "";
     case "starts": return s.from != null ? c("blue", `اليوم من ${hm(s.from)}${s.until != null ? " إلى " + hm(s.until) : ""}`) + (s.apptFrom != null && t.m < s.apptFrom ? c("amber", `انتظار لين ${hm(s.apptFrom)}`) : "") : "";
-    case "appt": return c("amber", "مواعيد فقط");
+    case "appt": { const end = s.until ?? activeShift(d, t)?.e; return c("amber", `مواعيد فقط${end != null ? " — لين " + hm(end) : ""}`); }
     case "appt_at": return c("amber", `انتظار لين ${hm(s.from)} · بعدها مواعيد`);
     case "busy": return recent(s, 90) ? c("amber", `⏳ ${s.count ? s.count + " بالانتظار" : "زحمة"}`) : "";
     case "free": return recent(s, 60) ? c("green", "🟢 فاضي") : "";

@@ -88,7 +88,12 @@
     const s = today?.date === t.iso ? today.st?.[d.id] : null, a = active(d, t);
     if (s?.kind === "stop") return ["red", "⛔ وقف استقبال الحالات"];
     if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
-    if (s?.kind === "appt") return ["amber", "مواعيد فقط"];
+    if (s?.kind === "appt") {                                              // مواعيد فقط + متى يخلص دوامه
+      const end = s.until ?? (a ? a.e : null);
+      if (s.until != null && t.m >= s.until) return ["gray", "خلص دوامه اليوم"];
+      return ["amber", `مواعيد فقط${end != null ? " — لين " + hm(end) + (end - t.m <= 60 && end > t.m ? ` (باقي ${left(end - t.m)})` : "") : ""}`];
+    }
+    if (s?.kind === "absent" && s.off) return ["gray", "خلص دوامه اليوم"];
     if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
     if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)} (بعد ${left(s.from - t.m)})`];
     if (s?.kind === "busy") return ["amber", `زحمة${s.count ? " — " + s.count + " بالانتظار" : ""}`];
