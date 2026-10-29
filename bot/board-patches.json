@@ -538,5 +538,14 @@
    "doctorId": "gguqlrc",
    "end": "2026-10-31"
   }
+ ],
+ "plans": [
+  {
+   "id": "pl2910f1",
+   "date": "2026-11-01",
+   "doctorId": "b4524yt",
+   "kind": "remove_doctor",
+   "by": "أنس"
+  }
  ]
 }

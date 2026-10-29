@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.0";
+const VERSION = "2.7.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -703,8 +703,14 @@ async function applyPatches() {
       const newDocs = (p.doctors || []).filter(x => !done.has(x.id) && !docs.some(d => d.id === x.doctor.id));
       const ups = (p.updates || []).filter(u => !done.has(u.id));
       const ves = (p.vacEnds || []).filter(u => !done.has(u.id));
-      if (!todo.length && !newDocs.length && !ups.length && !ves.length) return [];
+      const pls = (p.plans || []).filter(u => !done.has(u.id));
+      if (!todo.length && !newDocs.length && !ups.length && !ves.length && !pls.length) return [];
       const next = structuredClone(cur);
+      if (pls.length) {                                                         // أحداث مجدولة (مثل شيل طبيب يوم معيّن)
+        const pref = db.doc("board/bawadi_plan"), pc = (await tx.get(pref)).data() || {};
+        tx.set(pref, { ...pc, items: [...(pc.items || []), ...pls.map(({ id, ...x }) => ({ id, ...x }))], at: Date.now() });
+        for (const u of pls) todo.push({ id: u.id, name: "", isDoc: true, upd: true, quiet: true });
+      }
       for (const u of ves) {                                                    // نهاية إجازة مفتوحة (يباشر)
         const v = (next.vacations || []).filter(v => v.doctorId === u.doctorId && v.start <= u.end && (!v.end || v.end >= u.end)).sort((a, b) => a.start < b.start ? 1 : -1)[0];
         if (v) v.end = u.end;
