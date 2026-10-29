@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.6.0";
+const VERSION = "2.7.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -702,8 +702,14 @@ async function applyPatches() {
       const todo = (p.vacations || []).filter(v => !done.has(v.id));
       const newDocs = (p.doctors || []).filter(x => !done.has(x.id) && !docs.some(d => d.id === x.doctor.id));
       const ups = (p.updates || []).filter(u => !done.has(u.id));
-      if (!todo.length && !newDocs.length && !ups.length) return [];
+      const ves = (p.vacEnds || []).filter(u => !done.has(u.id));
+      if (!todo.length && !newDocs.length && !ups.length && !ves.length) return [];
       const next = structuredClone(cur);
+      for (const u of ves) {                                                    // نهاية إجازة مفتوحة (يباشر)
+        const v = (next.vacations || []).filter(v => v.doctorId === u.doctorId && v.start <= u.end && (!v.end || v.end >= u.end)).sort((a, b) => a.start < b.start ? 1 : -1)[0];
+        if (v) v.end = u.end;
+        todo.push({ id: u.id, name: v ? v.name : "", isDoc: true, upd: true, quiet: true });
+      }
       for (const x of newDocs) {
         const dep = next.departments.find(q => q.id === x.depId); if (!dep) continue;
         (dep.doctors ||= []).push(x.doctor); todo.push({ id: x.id, name: x.doctor.name, isDoc: true });
