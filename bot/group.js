@@ -83,10 +83,10 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
 - name: اسم الطبيب كما كتب في الرسالة (بدون "د./دكتور").
 - dept: التخصص إذا ذكر (مثل "أسنان أطفال"، "العيون").
 - kind واحد من:
-  stop = وقف استقبال/لا أحد يدخل له/خلاص (ولو فيه وقت مستقبلي "الساعة 9:45 وقف له" حط at_time)
+  stop = وقف استقبال تماماً/لا أحد يدخل له/خلاص (لا انتظار ولا مواعيد) (ولو فيه وقت مستقبلي "الساعة 9:45 وقف له" حط at_time)
   resume = رجع يستقبل/كمل
   free = فاضي/دخلوا له/حولوا له
-  appointments_only = مواعيد فقط / انتظار فقط مواعيد
+  appointments_only = مواعيد فقط / انتظار فقط مواعيد. ولو فيه وقت: «يستقبل انتظار لين الساعة 5» أو «بعد 5 مواعيد فقط» = appointments_only مع at_time 17:00 (من ذاك الوقت مواعيد بس) — هذا مو stop
   busy = زحمة/عنده انتظار (waiting = العدد إذا ذكر)
   absent_today = غير متواجد اليوم / يعتذر عن الحضور اليوم (لا تكتب السبب الصحي أبداً)
   late = متأخر/بيتأخر (delay_minutes تقديرياً: ساعة=60، شوي=20) أو at_time وقت الوصول
@@ -100,6 +100,7 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
   لـ new_doctor و schedule_change: days = أيام الدوام أرقام (الأحد=0، الإثنين=1، الثلاثاء=2، الأربعاء=3، الخميس=4، السبت=6) لو ذكرت، from_time/to_time = بداية ونهاية الدوام، room/ext/fee لو ذكرت. يوم المباشرة (يباشر السبت) مو من أيام الدوام — لا تحطه في days
 - date: لو الحدث ليوم غير اليوم (بكرة/غداً، «الخميس» الجاي، تاريخ) حط تاريخ ذاك اليوم YYYY-MM-DD، وإلا "". مثال «غدا الخميس فقط عيادة د. رائد من ٢-٧» = starts_at مع date = تاريخ بكرة و at_time 14:00 و until_time 19:00 (دوام ذاك اليوم بس، مو تغيير دائم).
 - الأوقات بصيغة 24 ساعة HH:MM. في العيادة الأرقام 1-11 بدون ص/م غالباً مساءً إلا لو واضح الصباح (مثل 8 صباحاً، 9 الصبح). "١٠" بالليل = 22:00.
+- رسالة وحدة ممكن فيها أكثر من حدث لنفس الطبيب، مثل «متواجد اليوم من 2 إلى 7 ويستقبل انتظار لين 5» = starts_at (14:00→19:00) + appointments_only (at_time 17:00).
 - لو الرسالة رد (فيه رسالة مقتبسة) استخدم المقتبسة لتعرف الطبيب المقصود.
 - رسالة بدون طبيب معيّن، أو تحية، أو نقطة "." → events فاضية.
 اليوم: {TODAY} والساعة الآن {NOW} بتوقيت السعودية.
@@ -221,7 +222,12 @@ function dayRule(text) {
   const date = dayOf(text) || (today ? nowR().iso : null); if (!date) return null;
   const d = fuzzyPick(text); if (!d) return null;
   const sc = schedOf(text);
-  if (sc.from != null) return { doctor_id: d.id, name: shortName(d.name), kind: "starts_at", date, at_time: hhmm(sc.from), until_time: sc.to != null ? hhmm(sc.to) : "" };
+  if (sc.from != null) {
+    const out = [{ doctor_id: d.id, name: shortName(d.name), kind: "starts_at", date, at_time: hhmm(sc.from), until_time: sc.to != null ? hhmm(sc.to) : "" }];
+    const w = /انتظار\s*(?:الى|الي|إلى|لين|لحد|حتى|ل)\s*(?:الساعه\s*)?(\d{1,2})(?::(\d{2}))?/.exec(norm(latin(text)));
+    if (w) { let h = +w[1] % 12; if (h < 8) h += 12; out.push({ doctor_id: d.id, name: shortName(d.name), kind: "appointments_only", date, at_time: hhmm(h * 60 + (+w[2] || 0)) }); }
+    return out;
+  }
   if (today) return null;                                                          // «اليوم» بدون وقت → القواعد العادية تحت
   if (/غير متواجد|ما بيجي|مابيجي|ما يجي|مايجي|معتذر|يعتذر|اجازه|غايب|غائب/.test(n)) return { doctor_id: d.id, name: shortName(d.name), kind: "absent_today", date };
   return null;
@@ -229,7 +235,7 @@ function dayRule(text) {
 const hhmm = m => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 function ruleParse(text, quoted) {
-  const dr = dayRule(text); if (dr) return [dr];
+  const dr = dayRule(text); if (dr) return Array.isArray(dr) ? dr : [dr];
   const sr = schedRule(text); if (sr) return [sr];
   const vac = vacationRule(text);
   if (vac) { const d = fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null); return d ? [{ doctor_id: d.id, name: shortName(d.name), kind: "vacation", ...vac }] : Object.assign([], { unknown: true }); }
@@ -300,7 +306,7 @@ function expFor(d, atMs) {
 function stampExp(cur) {
   for (const [k, v] of Object.entries(cur.st || {})) {
     if (!v || v.exp) continue;
-    if (v.kind === "starts" && v.until != null) { const mid = riyadhMid(cur.date || nowR().iso); v.exp = mid + (v.until <= (v.from ?? 0) ? v.until + 1440 : v.until) * 60000; continue; }   // دوام يوم معيّن ينتهي بنهايته
+    if (v.until != null && ["starts", "appt", "present", "leaves"].includes(v.kind)) { const mid = riyadhMid(cur.date || nowR().iso); v.exp = mid + (v.from != null && v.until <= v.from ? v.until + 1440 : v.until) * 60000; continue; }   // لها وقت نهاية → تنتهي فيه
     v.exp = expFor(docs().find(x => x.id === k), v.at || Date.now());
   }
 }
@@ -388,11 +394,18 @@ async function apply(evs, ctx) {
         cur.events.push({ id: uid(), at, kind: "stop_at", doctorId: d?.id || "", name, dep, info: `يوقف الساعة ${hm(atMin)}`, title: "🕐 بيوقف الاستقبال", color: "orange", by: ctx.by });
         applied.push("stop_at"); continue;
       }
-      if (["resume", "absent_today", "stop"].includes(e.kind)) cur.scheduled = cur.scheduled.filter(x => x.key !== key);
+      if (e.kind === "appointments_only" && atMin != null && atMin > t.m + 1) {   // «يستقبل انتظار لين 5» → من 5 مواعيد بس
+        cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "appt"));
+        cur.scheduled.push({ id: uid(), min: atMin, key, kind: "appt", name, dep, by: ctx.by });
+        if (cur.st[key]) cur.st[key].apptFrom = atMin; else cur.st[key] = { kind: "appt_at", from: atMin, at, by: ctx.by };
+        cur.events.push({ id: uid(), at, kind: "appt_at", doctorId: d?.id || "", name, dep, room: d?.room || "", ext: d?.ext || "", info: `يستقبل انتظار لين ${hm(atMin)}، وبعدها مواعيد فقط`, title: "⏳ انتظار لين " + hm(atMin), color: "orange", by: ctx.by });
+        applied.push("appt_at"); continue;
+      }
+      if (["resume", "absent_today", "stop", "starts_at", "free"].includes(e.kind)) cur.scheduled = cur.scheduled.filter(x => x.key !== key || (e.kind === "starts_at" && x.kind === "appt"));
       if (e.kind === "resume") delete cur.st[key];
       else if (e.kind === "late") { const from = atMin ?? (t.m + (e.delay_minutes || 30)); cur.st[key] = { kind: "late", from, at, by: ctx.by }; info = `يوصل تقريباً ${hm(from)}`; }
       else if (e.kind === "leaves_at") { cur.st[key] = { kind: "leaves", until: nextDay(atMin) ?? untilMin, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : ""; }
-      else if (e.kind === "starts_at") { cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by }; info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
+      else if (e.kind === "starts_at") { const ap = cur.scheduled.find(x => x.key === key && x.kind === "appt"); cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by, ...(ap ? { apptFrom: ap.min } : {}) }; info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
         if (!d && !cur.extra.some(x => x.key === key)) cur.extra.push({ key, name, dep, until: untilMin });
@@ -545,8 +558,13 @@ async function runScheduled() {
       const due = cur.scheduled.filter(s => s.min <= t.m); if (!due.length) return;
       cur.scheduled = cur.scheduled.filter(s => s.min > t.m);
       for (const s of due) {
+        const d = docs().find(x => x.id === s.key), prev = cur.st[s.key];
+        if (s.kind === "appt") {
+          cur.st[s.key] = { kind: "appt", at: Date.now(), by: s.by, ...(prev?.until != null ? { until: prev.until, from: prev.from } : {}) };
+          cur.events.push({ id: uid(), at: Date.now(), kind: "appointments_only", doctorId: d?.id || "", name: s.name, dep: s.dep, room: d?.room || "", ext: d?.ext || "", info: "من الحين مواعيد فقط — لا تدخّلون انتظار", title: "📅 مواعيد فقط", color: "orange", by: s.by });
+          continue;
+        }
         cur.st[s.key] = { kind: "stop", at: Date.now(), by: s.by };
-        const d = docs().find(x => x.id === s.key);
         cur.events.push({ id: uid(), at: Date.now(), kind: "stop", doctorId: d?.id || "", name: s.name, dep: s.dep, room: d?.room || "", ext: d?.ext || "", info: "", title: "⛔ وقف استقبال الحالات", color: "red", by: s.by });
       }
       cur.events = cur.events.slice(-40);

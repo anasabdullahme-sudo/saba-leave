@@ -338,7 +338,8 @@ function liveOn(d, t) {
     case "leaves": return s.until != null && t.m >= s.until ? null : base ? { end: s.until ?? base.e } : null;
     case "starts": { const end = s.until ?? (dayEnd(d, t.wd) || 1440); return s.from != null && t.m >= s.from && t.m < end ? { end } : null; }
     case "present": return s.until != null && t.m >= s.until ? null : { end: s.until ?? base?.e ?? null };
-    case "free": case "busy": case "appt": return { end: base?.e ?? null };
+    case "free": case "busy": return { end: base?.e ?? null };
+    case "appt": return s.until != null ? (t.m < s.until ? { end: s.until } : null) : { end: base?.e ?? null };
     default: return base ? { end: base.e } : null;              // stop_at وغيره
   }
 }
@@ -352,8 +353,9 @@ function chip(d, t) {
     case "stop_at": return c("amber", `يوقف ${hm(s.from)}`);
     case "late": return t.m < s.from ? c("amber", `متأخر — يوصل ${hm(s.from)}`) : "";
     case "leaves": return s.until != null ? c("amber", `يطلع ${hm(s.until)}`) : "";
-    case "starts": return s.from != null ? c("blue", `اليوم من ${hm(s.from)}`) : "";
+    case "starts": return s.from != null ? c("blue", `اليوم من ${hm(s.from)}${s.until != null ? " إلى " + hm(s.until) : ""}`) + (s.apptFrom != null && t.m < s.apptFrom ? c("amber", `انتظار لين ${hm(s.apptFrom)}`) : "") : "";
     case "appt": return c("amber", "مواعيد فقط");
+    case "appt_at": return c("amber", `انتظار لين ${hm(s.from)} · بعدها مواعيد`);
     case "busy": return recent(s, 90) ? c("amber", `⏳ ${s.count ? s.count + " بالانتظار" : "زحمة"}`) : "";
     case "free": return recent(s, 60) ? c("green", "🟢 فاضي") : "";
     case "present": return c("green", "موجود");
