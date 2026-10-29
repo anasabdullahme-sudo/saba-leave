@@ -81,6 +81,16 @@
     if (n.day === 0) return `دوامه يبدأ ${hm(n.s)} — بعد ${left(n.mins)}`;
     return `دوامه ${n.day === 1 ? "بكرة" : WD[n.wd]} ${hm(n.s)}`;
   }
+  // إجازة جاية خلال أسبوع: عدّ تنازلي بالأيام («إجازة بعد 3 أيام — من السبت 7/11»)
+  function soonVac(d) {
+    const t = nowR();
+    const v = (board.vacations || []).filter(v => v.doctorId === d.id && v.start > t.iso).sort((a, b) => a.start < b.start ? -1 : 1)[0];
+    if (!v) return "";
+    const days = Math.round((Date.parse(v.start + "T12:00:00Z") - Date.parse(t.iso + "T12:00:00Z")) / 864e5);
+    if (days < 1 || days > 7) return "";
+    const wd = WD[new Date(v.start + "T12:00:00Z").getUTCDay()], dm = v.start.slice(8, 10) + "/" + v.start.slice(5, 7);
+    return `🏖 إجازة ${days === 1 ? "بكرة" : days === 2 ? "بعد يومين" : `بعد ${days} أيام`} — من ${wd} ${dm}${v.end ? " لين " + v.end.slice(8, 10) + "/" + v.end.slice(5, 7) : ""}`;
+  }
   function status(d) {
     const t = nowR();
     const vac = (board.vacations || []).find(v => v.doctorId === d.id && v.start <= t.iso && (!v.end || v.end >= t.iso));
@@ -123,7 +133,7 @@
     const CSS = `.b{direction:rtl;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;background:#fff;border:1px solid #DCEBF4;border-inline-start:5px solid #00A6E2;border-radius:12px;padding:7px 12px;box-shadow:0 8px 22px -12px rgba(0,55,101,.45);display:grid;gap:3px;min-width:220px;max-width:340px;text-align:right}
       .r1{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:700;color:#003765;flex-wrap:wrap}
       .r1 span{background:#EAF6FC;border-radius:8px;padding:1px 8px}
-      .r2{font-size:12.5px;font-weight:600}.green{color:#0A7A55}.red{color:#B4232A}.amber,.vac{color:#9A5B00}.gray{color:#5B7690}
+      .r2{font-size:12.5px;font-weight:600}.r3{font-size:12px;color:#9A5B00;background:#FFF4E5;border-radius:6px;padding:2px 6px;margin-top:2px}.green{color:#0A7A55}.red{color:#B4232A}.amber,.vac{color:#9A5B00}.gray{color:#5B7690}
       .no{font-size:12.5px;color:#5B7690}`;
     try { const sh = new CSSStyleSheet(); sh.replaceSync(CSS); root.adoptedStyleSheets = [sh]; root.innerHTML = '<div class="b"></div>'; } catch { root.innerHTML = `<style>${CSS}</style><div class="b"></div>`; }
     box = root.querySelector(".b");
@@ -159,7 +169,7 @@
       if (!d) box.innerHTML = `<div class="no">د. ${esc(txt.split("|")[0].trim())} — مو موجود في جدول البوادي</div>`;
       else {
         const fl = board.floorNames?.[d.fl] || FLOOR_DEF[d.fl] || "الدور " + d.fl, [cls, st] = status(d);
-        box.innerHTML = `<div class="r1"><span>${esc(fl)}</span>${d.room ? `<span>عيادة ${esc(d.room)}</span>` : ""}${d.ext ? `<span>☎ ${esc(d.ext)}</span>` : ""}</div><div class="r2 ${cls}">${esc(st)}</div>`;
+        box.innerHTML = `<div class="r1"><span>${esc(fl)}</span>${d.room ? `<span>عيادة ${esc(d.room)}</span>` : ""}${d.ext ? `<span>☎ ${esc(d.ext)}</span>` : ""}</div><div class="r2 ${cls}">${esc(st)}</div>${(() => { const sv = soonVac(d); return sv ? `<div class="r3">${esc(sv)}</div>` : ""; })()}`;
       }
       host.style.display = "block";
     }

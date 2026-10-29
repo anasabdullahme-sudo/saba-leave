@@ -362,6 +362,15 @@ function chip(d, t) {
   }
   return "";
 }
+// إجازة جاية خلال أسبوع → «إجازة بعد 3 أيام»
+function soonVac(d, t) {
+  const v = (S.board?.vacations || []).filter(v => (v.doctorId === d.id || (!v.doctorId && v.code && v.code === d.code)) && v.start > t.iso).sort((a, b) => a.start < b.start ? -1 : 1)[0];
+  if (!v) return "";
+  const days = Math.round((Date.parse(v.start + "T12:00:00Z") - Date.parse(t.iso + "T12:00:00Z")) / 864e5);
+  if (days < 1 || days > 7) return "";
+  const lbl = days === 1 ? "بكرة" : days === 2 ? "بعد يومين" : `بعد ${days} أيام`;
+  return ` <span class="tag amber" title="من ${esc(v.start)}${v.end ? " إلى " + esc(v.end) : ""}">🏖 إجازة ${lbl}</span>`;
+}
 const onVacation = (d, iso) => (S.board?.vacations || []).find(v => (v.doctorId === d.id || (!v.doctorId && v.code && v.code === d.code)) && v.start <= iso && (!v.end || v.end >= iso));
 
 /* ---------- الاستيراد من ملف البيانات (مرة وحدة) ---------- */
@@ -402,7 +411,7 @@ function render() {
   $("#nowN").textContent = now.length + extra.length;
   // سطر مختصر لكل طبيب: الاسم + التحويلة، وتحته الغرفة ولين متى
   const nm = d => { const [a, ...r] = d.name.split(/\s*[–-]\s*/); return `د. ${esc(a)}${r.length ? ` <small>${esc(r.join(" – "))}</small>` : ""}`; };
-  const row = (d, line, showDep) => `<div class="dr"><span class="n">${nm(d)}${chip(d, t)}</span><span class="e">${d.ext ? "☎ " + esc(d.ext) : ""}</span>
+  const row = (d, line, showDep) => `<div class="dr"><span class="n">${nm(d)}${chip(d, t)}${soonVac(d, t)}</span><span class="e">${d.ext ? "☎ " + esc(d.ext) : ""}</span>
     <span class="s">${line}${showDep ? " · " + esc(d.dep.name) : ""}${d.fl !== d.dep.floor ? " · " + esc(floorName(d.fl)) : ""}${d.room ? " · غرفة " + esc(d.room) : ""}${d.fee ? " · " + esc(d.fee) + " ريال" : ""}</span></div>`;
   // مقسّمين حسب القسم (الأسنان لحالهم، الباطنية لحالهم…) بترتيب الأدوار
   const byDep = new Map(); now.forEach(d => { if (!byDep.has(d.dep.id)) byDep.set(d.dep.id, []); byDep.get(d.dep.id).push(d); });
@@ -445,7 +454,7 @@ function render() {
     return `<section class="grp"><div class="gh"><b>${esc(g.title)}</b><span class="tag gray">${g.items.length}</span>${notes}${act}</div>
       <table><thead><tr><th>الطبيب</th><th>${S.by === "floor" ? "القسم" : "الدور"}</th><th>الدوام</th><th>الأيام</th><th>غرفة</th><th>تحويلة</th><th>كشفية</th>${S.edit ? '<th class="edit-col"></th>' : ""}</tr></thead><tbody>
       ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && liveOn(d, t), ch = chip(d, t);
-        return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : ch || (on ? ' <span class="tag green">متواجد</span>' : "")}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
+        return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : ch || (on ? ' <span class="tag green">متواجد</span>' : "")}${vac ? "" : soonVac(d, t)}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
         <td data-l="${S.by === "floor" ? "القسم" : "الدور"}">${esc(S.by === "floor" ? d.dep.name : floorName(d.fl))}</td>
         <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}</td>
         <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
