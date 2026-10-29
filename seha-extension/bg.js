@@ -70,6 +70,7 @@ async function showOutside(ev) {
     const w = await chrome.windows.getLastFocused({ populate: true });
     const tab = w?.tabs?.find(t => t.active);
     if (w?.focused && tab && /^https?:/.test(tab.url || "")) return;              // التنبيه الصغير بيطلع في الصفحة
+    if (!chrome.notifications || !(await chrome.permissions.contains({ permissions: ["notifications"] }))) return;   // إشعارات ويندوز اختيارية (ما نطلب صلاحية جديدة في التحديث)
     const meta = [ev.info, ev.dep, ev.room ? "غرفة " + ev.room : "", ev.ext ? "تحويلة " + ev.ext : ""].filter(Boolean).join(" · ");
     chrome.notifications.create("saba-" + ev.id, { type: "basic", iconUrl: "icon128.png", title: `${ev.title || "تحديث"} — د. ${ev.name || ""}`, message: meta || " ", priority: 1 });
   } catch { /* بدون صلاحية الإشعارات */ }

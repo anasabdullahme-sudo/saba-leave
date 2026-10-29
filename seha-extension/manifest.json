@@ -2,13 +2,12 @@
   "manifest_version": 3,
   "name": "سابا ← صحة",
   "short_name": "Saba Seha",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "description": "أداة داخلية لموظفي استقبال مجمع عيادات سابا: تعبئة نموذج الإجازات في منصة صحة، تنبيهات حالة الأطباء، وبطاقة الطبيب في نظام أثير.",
   "permissions": [
     "storage",
     "alarms",
-    "scripting",
-    "notifications"
+    "scripting"
   ],
   "icons": {
     "16": "icon16.png",
@@ -87,5 +86,8 @@
   ],
   "background": {
     "service_worker": "bg.js"
-  }
+  },
+  "optional_permissions": [
+    "notifications"
+  ]
 }
