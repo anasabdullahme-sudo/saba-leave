@@ -173,7 +173,8 @@ function vacationRule(text) {
   return end && end >= start ? { start_date: start, end_date: end } : null;
 }
 // «دوامه الاربعاء والخميس من 5 م - 9 م» → { days:[3,4], from:1020, to:1260 }
-const DAYW = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["ثلاثا", 2], ["اربعاء", 3], ["اربعا", 3], ["خميس", 4], ["سبت", 6]];
+const DAYW = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["ثلاثا", 2], ["اربعاء", 3], ["اربعا", 3], ["خميس", 4], ["جمعه", 5], ["سبت", 6]];
+const PERMANENT = /دائم|دايم|ثابت|بشكل دائم|من الحين وطالع|من اليوم وطالع|كل (يوم|اسبوع)|كل ال(سبت|احد|اثنين|ثلاثاء|اربعاء|خميس)/;
 function schedOf(text) {
   const tx = latin(text), n = norm(tx);
   const days = [...new Set(DAYW.filter(([w]) => n.includes(w)).map(([, i]) => i))].sort();
@@ -199,6 +200,8 @@ function schedRule(text) {
   if (!/دوام|يداوم|بيداوم/.test(n)) return null;
   if (/(^|\s)(غدا|بكره|بكرا|اليوم|الليله|هالاسبوع|هذا الاسبوع)(\s|$)/.test(n)) return null;   // ليوم معيّن، مو تغيير دائم
   const sc = schedOf(text); if (!sc.days.length && sc.from == null) return null;
+  if ((n.match(/(^|\s)(د|دكتور|دكتوره)(\s|$)/g) || []).length > 1) return null;       // جدول لأكثر من طبيب (مثل دوام الجمعة) → مو تعديل دائم
+  if (sc.days.includes(5) && !PERMANENT.test(n)) return null;                         // الجمعة = دوام استثنائي ليوم واحد
   const raw = latin(text).replace(/[ً-ْـ]/g, "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ");   // الاسم مثل ما انكتب
   const nm = /(?:^|\s)(?:د|دكتور|دكتورة|دكتوره|الدكتور|الدكتورة|الدكتوره)\s+(\S+(?:\s+\S+)?)(.*?)\s(?:دوام|يداوم|بيداوم)/.exec(raw);
   if (nm) { const d = strictFind(nm[1]); return d ? { doctor_id: d.id, name: nm[1], kind: "schedule_change" } : { name: nm[1], dept: nm[2].trim(), kind: "new_doctor" }; }
@@ -220,6 +223,9 @@ function dayOf(text) {
 function dayRule(text) {
   const n = norm(text), today = /(^|\s)(اليوم|الليله)(\s|$)/.test(n);
   const date = dayOf(text) || (today ? nowR().iso : null); if (!date) return null;
+  // جدول لأكثر من طبيب (سطر لكل طبيب: «د. إكرامي من ٩ص - ٩م») → دوام كل واحد ذاك اليوم
+  const lines = String(text).split(/\n+/).map(l => ({ l, d: fuzzyPick(l), sc: schedOf(l) })).filter(x => x.d && x.sc.from != null);
+  if (lines.length > 1) return lines.map(x => ({ doctor_id: x.d.id, name: shortName(x.d.name), kind: "starts_at", date, at_time: hhmm(x.sc.from), until_time: x.sc.to != null ? hhmm(x.sc.to) : "" }));
   const d = fuzzyPick(text); if (!d) return null;
   const sc = schedOf(text);
   if (sc.from != null) {
@@ -350,6 +356,18 @@ async function apply(evs, ctx) {
     const cur = fresh((await tx.get(ref)).data(), t.iso);
     for (const e of evs) {
       let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
+      if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
+      if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d) {
+        // «دوام يوم الجمعة …» أو يوم محدد بدون «دائم» → دوام ذاك اليوم بس (مو تغيير الجدول الثابت)
+        const onlyFri = Array.isArray(e.days) && e.days.length && e.days.every(x => x === 5);
+        const oneDay = onlyFri || ((dayOf(ctx.text) || /الجمعه/.test(norm(ctx.text))) && !PERMANENT.test(norm(ctx.text)));
+        if (d && oneDay) {
+          const sc1 = schedOf(ctx.text), a1 = toMin(e.from_time) ?? sc1.from, u1 = toMin(e.to_time) ?? sc1.to;
+          const day = onlyFri || /الجمعه/.test(norm(ctx.text)) ? isoPlus(t.iso, ((5 - t.wd + 7) % 7) || 7) : dayOf(ctx.text);
+          if (a1 != null && day) { e.kind = "starts_at"; e.date = day; e.at_time = hhmm(a1); e.until_time = u1 != null ? hhmm(u1) : ""; }
+          else { applied.push("known"); continue; }
+        }
+      }
       // حدث ليوم ثاني (بكرة/الخميس): نحفظه ويتطبّق أول ما يجي يومه
       const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : "";
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d) {
@@ -364,7 +382,6 @@ async function apply(evs, ctx) {
         continue;
       }
       if (e.kind === "new_doctor" || e.kind === "schedule_change") {      // دوام ثابت: موجود → نعدّله، مو موجود → نسأل المسؤول
-        if (d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
         const sc = /دوام|يداوم/.test(norm(ctx.text)) ? schedOf(ctx.text) : { days: [], from: null, to: null };   // «يباشر السبت» مو أيام دوام
         const days = (Array.isArray(e.days) && e.days.length ? e.days : sc.days).filter(x => x >= 0 && x <= 6 && x !== 5);
         const from = toMin(e.from_time) ?? sc.from, to = toMin(e.to_time) ?? sc.to;
@@ -427,7 +444,13 @@ async function apply(evs, ctx) {
   if (vacs.length) await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data(); if (!cur) return;
     const next = structuredClone(cur);
-    for (const { d, e } of vacs) (next.vacations ||= []).push({ id: uid(), doctorId: d.id, code: d.code || "", name: d.name, start: e.start_date, end: e.end_date || "", type: "إجازة" });
+    const dd = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) / 864e5;
+    for (const { d, e } of vacs) {
+      // نفس الإجازة مسجّلة (من الموارد البشرية أو رسالة قبل)؟ ما نكررها — بس نمدّد النهاية لو أطول
+      const same = (next.vacations ||= []).find(v => v.doctorId === d.id && v.start && e.start_date && (dd(v.start, e.start_date) <= 3 || (v.start <= e.start_date && (!v.end || v.end >= e.start_date))));
+      if (same) { if (e.end_date && same.end && e.end_date > same.end) same.end = e.end_date; continue; }
+      next.vacations.push({ id: uid(), doctorId: d.id, code: d.code || "", name: d.name, start: e.start_date, end: e.end_date || "", type: "إجازة" });
+    }
     next.log = [{ at: Date.now(), by: `البوت (${ctx.by})`, what: `إجازة ${vacs.map(v => "د. " + shortName(v.d.name)).join("، ")} من القروب` }, ...(cur.log || [])].slice(0, 60);
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إجازة من القروب" }); tx.set(ref, next);

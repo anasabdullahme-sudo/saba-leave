@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.4.3";
+const VERSION = "2.4.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -690,6 +690,7 @@ async function applyPatches() {
       for (const u of ups) {
         const t = nd.find(d => d.id === u.doctorId); if (!t) { todo.push({ id: u.id, name: "", skip: true }); continue; }
         if (u.ifName && !nz(t.name).includes(nz(u.ifName))) { todo.push({ id: u.id, name: "", skip: true }); continue; }   // الطبيب تغيّر من الصفحة — ما نلمسه
+        if (u.ifShifts && JSON.stringify((t.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(u.ifShifts)) { todo.push({ id: u.id, name: "", skip: true }); continue; }   // تصحيح بس لو الغلط صار فعلاً
         if (u.copyFrom) { const src = nd.find(d => d.id === u.copyFrom); if (src) for (const f of u.fields || []) if (!t[f] && src[f]) t[f] = src[f]; }
         for (const [k, v] of Object.entries(u.set || {})) t[k] = v;
         for (const [k, v] of Object.entries(u.fill || {})) if (!t[k]) t[k] = v;
