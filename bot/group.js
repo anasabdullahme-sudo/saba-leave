@@ -103,6 +103,7 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
 - رسالة وحدة ممكن فيها أكثر من حدث لنفس الطبيب، مثل «متواجد اليوم من 2 إلى 7 ويستقبل انتظار لين 5» = starts_at (14:00→19:00) + appointments_only (at_time 17:00).
 - لو الرسالة رد (فيه رسالة مقتبسة) استخدم المقتبسة لتعرف الطبيب المقصود.
 - رسالة بدون طبيب معيّن، أو تحية، أو نقطة "." → events فاضية.
+- unclear = true لو الرسالة عن طبيب بس مو متأكد من المقصود (مين الطبيب، الوقت، اليوم، هل هو ليوم واحد أو تغيير دائم، أو فيها شي ما يطابق الأنواع)، واكتب في question سؤال قصير يوضّح وش اللي مو واضح. لو الرسالة واضحة unclear = false.
 اليوم: {TODAY} والساعة الآن {NOW} بتوقيت السعودية.
 قائمة أطباء البوادي (id | الاسم | القسم):
 {LIST}`;
@@ -121,7 +122,7 @@ async function aiParse(text, quoted) {
         at_time: { type: "STRING" }, until_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" }, waiting: { type: "INTEGER" },
         start_date: { type: "STRING" }, end_date: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" },
         date: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, from_time: { type: "STRING" }, to_time: { type: "STRING" }, branch: { type: "STRING" }, note: { type: "STRING" } },
-        required: ["name", "kind"] } } }, required: ["events"] },
+        required: ["name", "kind"] } }, unclear: { type: "BOOLEAN" }, question: { type: "STRING" } }, required: ["events"] },
     },
   };
   for (const model of models) {
@@ -131,7 +132,8 @@ async function aiParse(text, quoted) {
       clearTimeout(tm);
       if (!res.ok) { log.warn({ model, status: res.status }, "Gemini قروب"); continue; }
       const j = await res.json();
-      return (JSON.parse(j?.candidates?.[0]?.content?.parts?.[0]?.text || "{}").events || []).filter(e => KINDS.includes(e.kind) && e.kind !== "none");
+      const out = JSON.parse(j?.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+      return Object.assign((out.events || []).filter(e => KINDS.includes(e.kind) && e.kind !== "none"), { unclear: !!out.unclear, question: String(out.question || "").slice(0, 200) });
     } catch (e) { log.warn({ model, err: String(e?.message || e) }, "Gemini قروب"); }
   }
   return null;
@@ -523,10 +525,61 @@ async function askAdmin({ e, sch }, ctx) {
   if (!sent) await db.doc("board/bawadi_inbox").set({ items: FieldValue.arrayUnion({ id: uid(), at: Date.now(), kind: "new_doctor", name, dept: e.dept || "", room: e.room || "", branch: "", date: "", doctorId: "", text: ctx.text.slice(0, 300), by: ctx.by }), at: Date.now() }, { merge: true });
 }
 
+/* ---------- رسالة قروب مو واضحة → نسأل المسؤول ---------- */
+const KIND_AR = { stop: "وقف استقبال", resume: "رجع يستقبل", free: "فاضي (دخلوا له)", appointments_only: "مواعيد فقط", busy: "زحمة/انتظار", absent_today: "غير متواجد", late: "متأخر", leaves_at: "يطلع بدري", starts_at: "دوام اليوم", present: "متواجد", vacation: "إجازة", new_doctor: "طبيب جديد", moved: "انتقل", schedule_change: "تغيير دوام ثابت" };
+function describeEvs(evs) {
+  return (evs || []).map(e => {
+    const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
+    const a = toMin(e.at_time), u = toMin(e.until_time);
+    const when = [e.date ? "يوم " + e.date.split("-").reverse().slice(0, 2).join("/") : "", a != null ? (e.kind === "starts_at" ? "من " : "الساعة ") + hm(a) : "", u != null ? "إلى " + hm(u) : "", e.start_date ? "من " + e.start_date : "", e.end_date ? "إلى " + e.end_date : ""].filter(Boolean).join(" ");
+    return `• د. ${d ? shortName(d.name) : (e.name || "؟")}: ${KIND_AR[e.kind] || e.kind}${when ? " — " + when : ""}`;
+  }).join("\n");
+}
+async function askClarify(m, text, by, evs) {
+  const code = "Q" + code3().slice(0, 2);
+  const item = { code, at: Date.now(), text: text.slice(0, 600), by, key: m.key ? { remoteJid: m.key.remoteJid, id: m.key.id, participant: m.key.participant || "" } : null, evs: JSON.parse(JSON.stringify(Array.from(evs || []))) };
+  const ref = db.doc("bot/pending_clarify");
+  await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: [...(c.items || []).filter(i => Date.now() - i.at < 12 * 3600e3), item].slice(-20) }); });
+  const sum = describeEvs(evs);
+  return dmAdmin([
+    `🤔 ما فهمت رسالة القروب زين  #${code}`,
+    `من ${by}: «${text.slice(0, 300)}»`,
+    evs?.question ? `\nسؤالي: ${evs.question}` : "",
+    sum ? `\nاللي فهمته:\n${sum}\n\nإذا صح رد «صح».` : "\nما قدرت أطلع منها شي.",
+    `أو اسحب هذي الرسالة واكتب المقصود بكلامك (مثل: د رائد اليوم بس من 2 إلى 7، وانتظار لين 5).`,
+  ].filter(Boolean).join("\n"));
+}
+async function handleClarify(m, text) {
+  const ref = db.doc("bot/pending_clarify");
+  const items = ((await ref.get()).data()?.items || []).filter(i => Date.now() - i.at < 12 * 3600e3);
+  if (!items.length) return false;
+  const ctxi = m.message?.extendedTextMessage?.contextInfo;
+  const qt = ctxi?.quotedMessage?.conversation || ctxi?.quotedMessage?.extendedTextMessage?.text || "";
+  const code = (/#(Q[A-Z0-9]{2})\b/.exec(qt) || [])[1];
+  let it = code ? items.find(i => i.code === code) : null;
+  const n = norm(text);
+  if (/^تراجع/.test(n)) return false;
+  if (!it && !qt && items.length === 1 && Date.now() - items[0].at < 30 * 60000) it = items[0];   // سؤال واحد قريب وما سحب رسالة ثانية → رده عليه
+  if (!it) return false;
+  let evs, how;
+  if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
+  else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await dmAdmin("تمام، تجاهلتها."); return true; }
+  else {
+    evs = await aiParse(text, it.text); if (evs == null) evs = ruleParse(text, it.text); how = "حسب كلامك";
+    if (!evs.length) { await dmAdmin("ما فهمت تصحيحك 🙏 اكتبها بشكل أوضح (اسم الطبيب + وش صار + الوقت)."); return true; }
+  }
+  await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
+  const applied = await apply(evs, { text: text || it.text, by: it.by + " (تصحيح)" });
+  await dmAdmin(applied.length ? `✅ طبّقتها ${how}:\n${describeEvs(evs)}` : "ما انطبق شي — تأكد من اسم الطبيب.");
+  if (applied.length && it.key?.id) { try { await getSock()?.sendMessage(it.key.remoteJid, { react: { text: "✅", key: { ...it.key, participant: it.key.participant || undefined } } }); } catch {} }
+  return true;
+}
+
 // رد المسؤول على الخاص: «نعم» / «لا» (ولو فيه أكثر من طلب: يرد على الرسالة نفسها أو يكتب الرمز «نعم K7Q»)
 export async function handleAdminMessage(m, phone, text) {
   const p = String(phone || "").replace(/^0/, "");
   if (!admins.includes(p)) return false;
+  try { if (await handleClarify(m, text)) return true; } catch (e) { log.warn({ err: String(e?.message || e) }, "تصحيح المسؤول"); }
   const n = norm(text);
   const yes = /^(نعم|ايوه|ايوا|اي|ايه|اضف|اضفه|ضيف|ضيفه|ضيفها|موافق|تمام|اوكي|ok|1)(?:\s|$)/.test(n) || /^(👍|✅)/.test(text);
   const no = /^(لا|تجاهل|الغ|الغيه|لاتضيف|لا تضيف|2)(?:\s|$)/.test(n) || /^❌/.test(text);
@@ -633,6 +686,10 @@ export async function handleGroupMessage(m) {
   const by = m.pushName || "القروب";
   let evs = await aiParse(text, quoted);
   if (evs == null) evs = ruleParse(text, quoted);
+  // البوت مو متأكد → يسأل المسؤول على الخاص قبل ما يطبّق شي (🤔 على الرسالة لين يرد)
+  if ((evs.unclear || (!evs.length && evs.unknown)) && admins.length) {
+    if (await askClarify(m, text, by, evs)) { try { await getSock()?.sendMessage(jid, { react: { text: "🤔", key: m.key } }); } catch {} return; }
+  }
   if (!evs.length) { if (evs.unknown) { try { await getSock()?.sendMessage(jid, { react: { text: "❓", key: m.key } }); } catch {} } return; }
   const applied = await apply(evs, { text, by });
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");

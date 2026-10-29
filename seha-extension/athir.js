@@ -92,6 +92,16 @@
     if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
     if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)} (بعد ${left(s.from - t.m)})`];
     if (s?.kind === "busy") return ["amber", `زحمة${s.count ? " — " + s.count + " بالانتظار" : ""}`];
+    // دوام اليوم بس (من القروب): «اليوم من 2م إلى 7م» + «انتظار لين 5م»
+    if (s?.kind === "starts" && s.from != null) {
+      const end = s.until ?? null;
+      if (t.m < s.from) return ["amber", `اليوم يبدأ ${hm(s.from)} — بعد ${left(s.from - t.m)}`];
+      if (end != null && t.m >= end) return ["gray", "خلص دوامه اليوم"];
+      const walk = s.apptFrom != null ? (t.m < s.apptFrom ? ` · انتظار لين ${hm(s.apptFrom)}` : " · مواعيد فقط") : "";
+      return [s.apptFrom != null && t.m >= s.apptFrom ? "amber" : "green", `✓ متواجد الحين${end != null ? " — لين " + hm(end) : ""}${walk}`];
+    }
+    if (s?.kind === "appt_at") return ["amber", t.m < s.from ? `انتظار لين ${hm(s.from)} · بعدها مواعيد فقط` : "مواعيد فقط"];
+    if (s?.kind === "leaves" && s.until != null) return t.m >= s.until ? ["gray", "طلع"] : ["amber", `متواجد — يطلع ${hm(s.until)}`];
     if (s?.kind === "free" || s?.kind === "present") return ["green", "متواجد الحين"];
     if (a) { const endIn = (a.e > a.s ? a.e : a.e + (t.m >= a.s ? 1440 : 0)) - t.m; return ["green", `✓ متواجد الحين — لين ${hm(a.e)}${endIn <= 60 ? ` (باقي ${left(endIn)})` : ""}`]; }
     const n = nextStart(d, t);
