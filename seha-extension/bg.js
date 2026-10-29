@@ -51,7 +51,12 @@ async function pollAlerts() {
     const r = await fetch(TODAY_URL); if (!r.ok) return;
     const today = dec({ mapValue: { fields: (await r.json()).fields || {} } });
     const c = st.sabaBoardCache || {};
-    await chrome.storage.local.set({ sabaBoardCache: { ...c, today, tAt: Date.now() } });   // بطاقة أثير تستفيد من نفس القراءة
+    // الجدول تعدّل (يدوي من صفحة الأطباء أو من البوت)؟ نحدّثه على طول بدل ما ننتظر 10 دقايق
+    let board = c.board, bAt = c.at;
+    if (today?.boardAt && today.boardAt !== (c.board?.updatedAt || 0)) {
+      try { const rb = await fetch(TODAY_URL.replace(/bawadi_today$/, "bawadi")); if (rb.ok) { const b = dec({ mapValue: { fields: (await rb.json()).fields || {} } }); if (b?.departments) { board = b; bAt = Date.now(); } } } catch {}
+    }
+    await chrome.storage.local.set({ sabaBoardCache: { ...c, board, at: bAt, today, tAt: Date.now() } });   // بطاقة أثير تستفيد من نفس القراءة
     let seen = st.sabaDocSeen || [];
     const fresh = (today?.events || []).filter(e => e?.id && !seen.includes(e.id) && Date.now() - (e.at || 0) < (st.sabaAlertsInit ? 10 : 2) * 60000);
     if (!st.sabaAlertsInit) await chrome.storage.local.set({ sabaAlertsInit: Date.now() });
