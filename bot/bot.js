@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.5.0";
+const VERSION = "2.5.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -664,9 +664,34 @@ async function seedBoard() {
 
 /* ---------- إضافات جاهزة للجدول (board-patches.json): كل إجازة تنضاف مرة وحدة بس ----------
    لو انحذفت بعدين من الصفحة ما ترجع (نحفظ أرقامها في patched) */
+// تعديل على حالات اليوم (مرة وحدة، ويومه بس): دوام اليوم «من–إلى» + من وقت معيّن مواعيد بس
+async function applyTodayPatches(p) {
+  const nowP = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  const iso = `${nowP.year}-${nowP.month}-${nowP.day}`, m = +nowP.hour * 60 + +nowP.minute;
+  const list = (p.today || []).filter(x => x.date === iso); if (!list.length) return;
+  await db.runTransaction(async tx => {
+    const ref = db.doc("board/bawadi_today"), cur = (await tx.get(ref)).data() || { date: iso, st: {}, extra: [], events: [], scheduled: [] };
+    if (cur.date !== iso) Object.assign(cur, { date: iso, st: {}, extra: [], events: [], scheduled: [] });
+    const done = new Set(cur.patched || []); let changed = false;
+    for (const x of list) {
+      if (done.has(x.id)) continue;
+      const mid = Date.parse(iso + "T00:00:00+03:00"), exp = mid + x.until * 60000;
+      cur.scheduled = (cur.scheduled || []).filter(s => s.key !== x.doctorId);
+      if (x.apptFrom != null && m >= x.apptFrom) cur.st[x.doctorId] = { kind: "appt", from: x.from, until: x.until, at: Date.now(), by: x.by, exp };
+      else {
+        cur.st[x.doctorId] = { kind: "starts", from: x.from, until: x.until, ...(x.apptFrom != null ? { apptFrom: x.apptFrom } : {}), at: Date.now(), by: x.by, exp };
+        if (x.apptFrom != null) cur.scheduled.push({ id: Math.random().toString(36).slice(2, 10), min: x.apptFrom, key: x.doctorId, kind: "appt", name: x.name || "", dep: x.dep || "", by: x.by });
+      }
+      cur.patched = [...(cur.patched || []), x.id].slice(-50); changed = true;
+    }
+    if (changed) tx.set(ref, cur);
+  });
+  log.info({ n: list.length }, "تعديل حالات اليوم");
+}
 async function applyPatches() {
   try {
     const p = JSON.parse(fs.readFileSync(new URL("./board-patches.json", import.meta.url), "utf8"));
+    await applyTodayPatches(p).catch(e => log.warn({ err: String(e?.message || e) }, "تعديل حالات اليوم"));
     const added = await db.runTransaction(async tx => {
       const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data();
       const ib = db.doc("board/bawadi_inbox"), inbox = (await tx.get(ib)).data();             // كل القراءات قبل الكتابة
