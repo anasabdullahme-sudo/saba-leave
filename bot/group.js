@@ -424,7 +424,9 @@ async function apply(evs, ctx) {
       if (e.kind === "resume") delete cur.st[key];
       else if (e.kind === "late") { const from = atMin ?? (t.m + (e.delay_minutes || 30)); cur.st[key] = { kind: "late", from, at, by: ctx.by }; info = `يوصل تقريباً ${hm(from)}`; }
       else if (e.kind === "leaves_at") { cur.st[key] = { kind: "leaves", until: nextDay(atMin) ?? untilMin, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : ""; }
-      else if (e.kind === "starts_at") { const ap = cur.scheduled.find(x => x.key === key && x.kind === "appt"); cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by, ...(ap ? { apptFrom: ap.min } : {}) }; info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
+      else if (e.kind === "starts_at") { const ap = cur.scheduled.find(x => x.key === key && x.kind === "appt"); cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by, ...(ap ? { apptFrom: ap.min } : {}) };
+        if (untilMin != null && untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }   // بعد نهايته: «غير متواجد»
+        info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
         if (!d && !cur.extra.some(x => x.key === key)) cur.extra.push({ key, name, dep, until: untilMin });
@@ -635,6 +637,10 @@ async function runScheduled() {
       cur.scheduled = cur.scheduled.filter(s => s.min > t.m);
       for (const s of due) {
         const d = docs().find(x => x.id === s.key), prev = cur.st[s.key];
+        if (s.kind === "off") {                                            // خلص دوامه اليوم (دوام يوم معيّن) — بدون تنبيه
+          cur.st[s.key] = { kind: "absent", off: true, at: Date.now(), by: s.by };
+          continue;
+        }
         if (s.kind === "appt") {
           cur.st[s.key] = { kind: "appt", at: Date.now(), by: s.by, ...(prev?.until != null ? { until: prev.until, from: prev.from } : {}) };
           cur.events.push({ id: uid(), at: Date.now(), kind: "appointments_only", doctorId: d?.id || "", name: s.name, dep: s.dep, room: d?.room || "", ext: d?.ext || "", info: "من الحين مواعيد فقط — لا تدخّلون انتظار", title: "📅 مواعيد فقط", color: "orange", by: s.by });

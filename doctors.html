@@ -349,7 +349,7 @@ function chip(d, t) {
   const c = (cls, txt) => ` <span class="tag ${cls}">${txt}</span>`;
   switch (s.kind) {
     case "stop": return c("red", `⛔ وقف الاستقبال ${new Date(s.at).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" })}`);
-    case "absent": return c("red", "غائب اليوم");
+    case "absent": return s.off ? c("gray", "خلص دوامه اليوم") : c("red", "غائب اليوم");
     case "stop_at": return c("amber", `يوقف ${hm(s.from)}`);
     case "late": return t.m < s.from ? c("amber", `متأخر — يوصل ${hm(s.from)}`) : "";
     case "leaves": return s.until != null ? c("amber", `يطلع ${hm(s.until)}`) : "";

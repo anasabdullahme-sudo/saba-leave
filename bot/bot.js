@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.5.1";
+const VERSION = "2.5.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -682,6 +682,7 @@ async function applyTodayPatches(p) {
         cur.st[x.doctorId] = { kind: "starts", from: x.from, until: x.until, ...(x.apptFrom != null ? { apptFrom: x.apptFrom } : {}), at: Date.now(), by: x.by, exp };
         if (x.apptFrom != null) cur.scheduled.push({ id: Math.random().toString(36).slice(2, 10), min: x.apptFrom, key: x.doctorId, kind: "appt", name: x.name || "", dep: x.dep || "", by: x.by });
       }
+      if (x.until > m) cur.scheduled.push({ id: Math.random().toString(36).slice(2, 10), min: x.until, key: x.doctorId, kind: "off", name: x.name || "", dep: x.dep || "", by: x.by });   // بعد 7: «غير متواجد اليوم»
       cur.patched = [...(cur.patched || []), x.id].slice(-50); changed = true;
     }
     if (changed) tx.set(ref, cur);
