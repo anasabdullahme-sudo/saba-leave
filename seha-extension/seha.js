@@ -15,6 +15,7 @@
   // شكل التاريخ في صحة: الخطوة 1 (الهوية والميلاد) بـ "/" ، وبيانات الإجازة (الخطوة 2) بـ "-"
   const DATE_FMT = "YYYY-MM-DD";           // الخطوة 2: 2026-10-14 و 1448-05-03
   const DATE_FMT_STEP1 = "DD/MM/YYYY";     // الخطوة 1: 28/05/1999
+  const HIJRI_FILL = false;                // خانات الهجري ما نعبيها (صحة تحسبها من الميلادي)
   const TYPE_LABEL = {                      // نوع الإجازة في صحة لكل نوع طلب في سابا
     sick: "إجازة مرضية اعتيادية",
     companion: "إجازة مرضية اعتيادية/إجازة مرافق",   // (مو «إجازة مرافق» لحالها)
@@ -275,9 +276,9 @@
         else if (clickRadioByText(idt)) report.idType = "ok";
       }
     }
-    // 3) الميلادي والنصوص، وبعدها الهجري (لو صحة ما حسبته لحالها)
+    // 3) الميلادي والنصوص بس — الهجري ما نكتبه أبداً (التحويل ممكن يختلف يوم عن صحة، وصحة تحسبه لحالها من الميلادي)
+    if (HIJRI_FILL) setTimeout(() => fillPass(req, labelCandidates(), {}, true, explicit), 700);
     fillPass(req, labelCandidates(), report, false, explicit);
-    setTimeout(() => fillPass(req, labelCandidates(), {}, true, explicit), 700);
     // 4) الطبيب المعالج
     const d = pickDoctor(req, explicit);
     if (d) report.doctorAr = d;
