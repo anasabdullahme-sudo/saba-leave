@@ -98,6 +98,7 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
   moved = انتقل لفرع ثاني (branch)
   schedule_change = تغيير دوام ثابت لأكثر من يوم (أو «دوامه فقط الأربعاء والخميس من 5 إلى 9»)
   لـ new_doctor و schedule_change: days = أيام الدوام أرقام (الأحد=0، الإثنين=1، الثلاثاء=2، الأربعاء=3، الخميس=4، السبت=6) لو ذكرت، from_time/to_time = بداية ونهاية الدوام، room/ext/fee لو ذكرت. يوم المباشرة (يباشر السبت) مو من أيام الدوام — لا تحطه في days
+- date: لو الحدث ليوم غير اليوم (بكرة/غداً، «الخميس» الجاي، تاريخ) حط تاريخ ذاك اليوم YYYY-MM-DD، وإلا "". مثال «غدا الخميس فقط عيادة د. رائد من ٢-٧» = starts_at مع date = تاريخ بكرة و at_time 14:00 و until_time 19:00 (دوام ذاك اليوم بس، مو تغيير دائم).
 - الأوقات بصيغة 24 ساعة HH:MM. في العيادة الأرقام 1-11 بدون ص/م غالباً مساءً إلا لو واضح الصباح (مثل 8 صباحاً، 9 الصبح). "١٠" بالليل = 22:00.
 - لو الرسالة رد (فيه رسالة مقتبسة) استخدم المقتبسة لتعرف الطبيب المقصود.
 - رسالة بدون طبيب معيّن، أو تحية، أو نقطة "." → events فاضية.
@@ -118,7 +119,7 @@ async function aiParse(text, quoted) {
         doctor_id: { type: "STRING" }, name: { type: "STRING" }, dept: { type: "STRING" }, kind: { type: "STRING", enum: KINDS },
         at_time: { type: "STRING" }, until_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" }, waiting: { type: "INTEGER" },
         start_date: { type: "STRING" }, end_date: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" },
-        days: { type: "ARRAY", items: { type: "INTEGER" } }, from_time: { type: "STRING" }, to_time: { type: "STRING" }, branch: { type: "STRING" }, note: { type: "STRING" } },
+        date: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, from_time: { type: "STRING" }, to_time: { type: "STRING" }, branch: { type: "STRING" }, note: { type: "STRING" } },
         required: ["name", "kind"] } } }, required: ["events"] },
     },
   };
@@ -195,6 +196,7 @@ function strictFind(given) { const L = docs().filter(d => sameName(given, d)); r
 function schedRule(text) {
   const n = norm(text);
   if (!/دوام|يداوم|بيداوم/.test(n)) return null;
+  if (/(^|\s)(غدا|بكره|بكرا|اليوم|الليله|هالاسبوع|هذا الاسبوع)(\s|$)/.test(n)) return null;   // ليوم معيّن، مو تغيير دائم
   const sc = schedOf(text); if (!sc.days.length && sc.from == null) return null;
   const raw = latin(text).replace(/[ً-ْـ]/g, "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ");   // الاسم مثل ما انكتب
   const nm = /(?:^|\s)(?:د|دكتور|دكتورة|دكتوره|الدكتور|الدكتورة|الدكتوره)\s+(\S+(?:\s+\S+)?)(.*?)\s(?:دوام|يداوم|بيداوم)/.exec(raw);
@@ -203,7 +205,31 @@ function schedRule(text) {
   return d && nameToks(d.name).every(t => n.includes(t)) ? { doctor_id: d.id, name: shortName(d.name), kind: "schedule_change" } : null;
 }
 
+// يوم معيّن غير اليوم: «غدا/بكرة» أو اسم يوم («الخميس») → تاريخه
+const isoPlus = (iso, n) => { const x = new Date(iso + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+function dayOf(text) {
+  const n = norm(text), t = nowR();
+  if (/(^|\s)(غدا|بكره|بكرا|باكر)(\s|$)/.test(n)) return isoPlus(t.iso, 1);
+  if (/بعد بكره|بعد غد/.test(n)) return isoPlus(t.iso, 2);
+  const w = DAYW.find(([k]) => new RegExp("(^|\\s)(يوم\\s+)?(ال)?" + k + "(\\s|$)").test(n));
+  if (w) { const diff = (w[1] - t.wd + 7) % 7; return diff ? isoPlus(t.iso, diff) : null; }
+  return null;
+}
+// «غدا الخميس فقط عيادة د رائد من ٢-٧» → دوام ذاك اليوم بس
+function dayRule(text) {
+  const n = norm(text), today = /(^|\s)(اليوم|الليله)(\s|$)/.test(n);
+  const date = dayOf(text) || (today ? nowR().iso : null); if (!date) return null;
+  const d = fuzzyPick(text); if (!d) return null;
+  const sc = schedOf(text);
+  if (sc.from != null) return { doctor_id: d.id, name: shortName(d.name), kind: "starts_at", date, at_time: hhmm(sc.from), until_time: sc.to != null ? hhmm(sc.to) : "" };
+  if (today) return null;                                                          // «اليوم» بدون وقت → القواعد العادية تحت
+  if (/غير متواجد|ما بيجي|مابيجي|ما يجي|مايجي|معتذر|يعتذر|اجازه|غايب|غائب/.test(n)) return { doctor_id: d.id, name: shortName(d.name), kind: "absent_today", date };
+  return null;
+}
+const hhmm = m => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
 function ruleParse(text, quoted) {
+  const dr = dayRule(text); if (dr) return [dr];
   const sr = schedRule(text); if (sr) return [sr];
   const vac = vacationRule(text);
   if (vac) { const d = fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null); return d ? [{ doctor_id: d.id, name: shortName(d.name), kind: "vacation", ...vac }] : Object.assign([], { unknown: true }); }
@@ -272,9 +298,31 @@ function expFor(d, atMs) {
   return mid + Math.min(...ends) * 60000;
 }
 function stampExp(cur) {
-  for (const [k, v] of Object.entries(cur.st || {})) if (v && !v.exp) v.exp = expFor(docs().find(x => x.id === k), v.at || Date.now());
+  for (const [k, v] of Object.entries(cur.st || {})) {
+    if (!v || v.exp) continue;
+    if (v.kind === "starts" && v.until != null) { const mid = riyadhMid(cur.date || nowR().iso); v.exp = mid + (v.until <= (v.from ?? 0) ? v.until + 1440 : v.until) * 60000; continue; }   // دوام يوم معيّن ينتهي بنهايته
+    v.exp = expFor(docs().find(x => x.id === k), v.at || Date.now());
+  }
 }
+const PLAN_KINDS = ["starts_at", "absent_today", "late", "leaves_at", "appointments_only", "stop"];
+// الأحداث المجدولة ليومها (اليوم أو اللي فات) → تتطبّق على حالات اليوم وتنشال من الخطة
+async function applyPlans() {
+  const t = nowR(), ref = db.doc("board/bawadi_plan");
+  try {
+    const due = await db.runTransaction(async tx => {
+      const items = (await tx.get(ref)).data()?.items || [];
+      const now = items.filter(i => i.date <= t.iso), keep = items.filter(i => i.date > t.iso);
+      if (!now.length) return [];
+      tx.set(ref, { items: keep, at: Date.now() });
+      return now.filter(i => i.date === t.iso);                                     // اللي فات يومه ينشال بس
+    });
+    for (const i of due) await apply([{ kind: i.kind, doctor_id: i.doctorId, name: "", at_time: i.at_time, until_time: i.until_time, delay_minutes: i.delay_minutes }], { text: "", by: (i.by || "القروب") + " (مجدول)", planned: true });
+    if (due.length) log.info({ n: due.length }, "طبّقنا أحداث اليوم المجدولة");
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "الأحداث المجدولة"); }
+}
+let plansDay = "";
 async function resetExpired() {
+  const tt = nowR(); if (plansDay !== tt.iso) { plansDay = tt.iso; await applyPlans(); }
   if (!today) return;
   const t = nowR(), now = Date.now();
   if (today.date === t.iso && !Object.values(today.st || {}).some(v => v.exp && v.exp <= now)) return;
@@ -290,12 +338,18 @@ async function resetExpired() {
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
-  const inbox = [], vacs = [], upd = [], newDocs = [];
+  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [];
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi_today");
     const cur = fresh((await tx.get(ref)).data(), t.iso);
     for (const e of evs) {
       let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
+      // حدث ليوم ثاني (بكرة/الخميس): نحفظه ويتطبّق أول ما يجي يومه
+      const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : "";
+      if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d) {
+        if (evDate <= isoPlus(t.iso, 14)) { plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by }); applied.push("planned"); }
+        continue;
+      }
       if (e.kind === "new_doctor" || e.kind === "schedule_change") {      // دوام ثابت: موجود → نعدّله، مو موجود → نسأل المسؤول
         if (d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
         const sc = /دوام|يداوم/.test(norm(ctx.text)) ? schedOf(ctx.text) : { days: [], from: null, to: null };   // «يباشر السبت» مو أيام دوام
@@ -359,6 +413,7 @@ async function apply(evs, ctx) {
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إجازة من القروب" }); tx.set(ref, next);
   });
   if (inbox.length) await db.doc("board/bawadi_inbox").set({ items: FieldValue.arrayUnion(...inbox), at: Date.now() }, { merge: true });
+  if (plans.length) await db.doc("board/bawadi_plan").set({ items: FieldValue.arrayUnion(...plans), at: Date.now() }, { merge: true });
   if (upd.length) await updateSchedules(upd, ctx);
   for (const x of newDocs) await askAdmin(x, ctx);
   return applied;
