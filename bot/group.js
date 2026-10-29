@@ -347,7 +347,14 @@ async function apply(evs, ctx) {
       // حدث ليوم ثاني (بكرة/الخميس): نحفظه ويتطبّق أول ما يجي يومه
       const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : "";
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d) {
-        if (evDate <= isoPlus(t.iso, 14)) { plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by }); applied.push("planned"); }
+        if (evDate <= isoPlus(t.iso, 14)) {
+          plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by }); applied.push("planned");
+          // تنبيه للموظفين الحين: «🗓 بكرة: دوامه من 2م إلى 7م»
+          const dl = evDate === isoPlus(t.iso, 1) ? "بكرة" : DAYN[new Date(evDate + "T12:00:00Z").getUTCDay()] + " " + evDate.slice(8, 10) + "/" + evDate.slice(5, 7);
+          const a = toMin(e.at_time), u = toMin(e.until_time);
+          const what = e.kind === "starts_at" ? (a != null ? `دوامه من ${hm(a)}${u != null ? " إلى " + hm(u) : ""}` : "دوام مختلف") : e.kind === "absent_today" ? "غير متواجد" : e.kind === "late" ? "بيتأخر" : e.kind === "appointments_only" ? "مواعيد فقط" : e.kind === "stop" ? "ما يستقبل" : e.kind === "leaves_at" ? `يطلع ${a != null ? hm(a) : "بدري"}` : "";
+          cur.events.push({ id: uid(), at: Date.now(), kind: "planned", doctorId: d.id, name: shortName(d.name), dep: d.dep, room: d.room || "", ext: d.ext || "", info: `${dl}: ${what}`, title: `🗓 ${dl}`, color: "blue", by: ctx.by });
+        }
         continue;
       }
       if (e.kind === "new_doctor" || e.kind === "schedule_change") {      // دوام ثابت: موجود → نعدّله، مو موجود → نسأل المسؤول

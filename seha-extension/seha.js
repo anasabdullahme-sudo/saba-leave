@@ -412,8 +412,22 @@
   // ---------- اللوحة العائمة (Shadow DOM حتى ما تتأثر بتصميم صحة) ----------
   if (TOP) document.getElementById("saba-seha-host")?.remove();            // نسخة قديمة من الأداة قبل التحديث التلقائي
   const host = document.createElement("div"); host.id = "saba-seha-host";
-  host.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:2147483646;";
+  host.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:2147483646;transition:transform .25s ease";
   const root = host.attachShadow({ mode: "open" });
+  // تنبيهات الأطباء تطلع تحت يسار: اللوحة تنزاح فوقها (ما تنغطى ولا تغطيها)، وترجع مكانها لما تروح
+  let alertArea = null;
+  function dodge() {
+    if (!TOP) return;
+    if (!alertArea) { host.style.transform = ""; return; }
+    // مكان اللوحة الأصلي بدون الإزاحة (offset* ما تتأثر بالحركة)
+    const r = { left: host.offsetLeft, top: host.offsetTop, right: host.offsetLeft + host.offsetWidth, bottom: host.offsetTop + host.offsetHeight };
+    const hitX = r.left < alertArea.right + 8 && r.right > alertArea.left - 8, hitY = r.top < alertArea.bottom + 8 && r.bottom > alertArea.top - 8;
+    if (!hitX || !hitY) { host.style.transform = ""; return; }
+    const dy = Math.max(0, Math.min(r.bottom - alertArea.top + 12, r.top - 8));
+    host.style.transform = `translateY(-${Math.round(dy)}px)`;
+  }
+  window.addEventListener("saba-alert-area", e => { try { alertArea = JSON.parse(e.detail); } catch { alertArea = null; } dodge(); });
+  try { new ResizeObserver(() => alertArea && dodge()).observe(host); } catch {}
   root.innerHTML = `
   <style>
     :host{all:initial}
@@ -697,20 +711,22 @@
   // سحب اللوحة من رأسها لأي مكان (وتنحفظ)، والضغط بدون سحب = تصغير/تكبير
   const clampPos = (x, y) => [Math.max(4, Math.min(innerWidth - 60, x)), Math.max(4, Math.min(innerHeight - 40, y))];
   function placeAt(x, y) { [x, y] = clampPos(x, y); host.style.left = x + "px"; host.style.top = y + "px"; host.style.bottom = "auto"; }
+  const dragStart = () => { host.style.transition = "none"; host.style.transform = ""; }, dragEnd = () => { host.style.transition = "transform .25s ease"; dodge(); };
   {
     const hd = $("#hd"); let st = null;
-    hd.addEventListener("pointerdown", e => { if (e.button !== 0) return; const r = host.getBoundingClientRect(); st = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false }; hd.setPointerCapture(e.pointerId); });
+    hd.addEventListener("pointerdown", e => { if (e.button !== 0) return; const tr = host.style.transform; host.style.transform = ""; const r = host.getBoundingClientRect(); host.style.transform = tr; st = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, moved: false }; hd.setPointerCapture(e.pointerId); });
     hd.addEventListener("pointermove", e => {
       if (!st) return; const dx = e.clientX - st.x, dy = e.clientY - st.y;
       if (!st.moved && Math.hypot(dx, dy) < 5) return;
+      if (!st.moved) dragStart();
       st.moved = true; hd.classList.add("drag"); placeAt(st.l + dx, st.t + dy);
     });
     hd.addEventListener("pointerup", () => {
       if (!st) return; const moved = st.moved; st = null; hd.classList.remove("drag");
-      if (moved) { const r = host.getBoundingClientRect(); chrome.storage.local.set({ sabaPos: { x: r.left, y: r.top } }); return; }
+      if (moved) { const r = host.getBoundingClientRect(); chrome.storage.local.set({ sabaPos: { x: r.left, y: r.top } }); dragEnd(); return; }
       setMin(!minimized); if (!minimized) render();
     });
-    hd.addEventListener("dblclick", () => { host.style.left = "16px"; host.style.top = "auto"; host.style.bottom = "16px"; chrome.storage.local.remove("sabaPos"); });
+    hd.addEventListener("dblclick", () => { host.style.left = "16px"; host.style.top = "auto"; host.style.bottom = "16px"; chrome.storage.local.remove("sabaPos"); dodge(); });
     addEventListener("resize", () => { if (host.style.top && host.style.top !== "auto") placeAt(parseFloat(host.style.left), parseFloat(host.style.top)); });
   }
 
