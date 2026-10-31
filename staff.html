@@ -165,6 +165,13 @@ main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
 .done-row .nm{color:var(--muted)}
 .empty{padding:50px 20px;text-align:center;color:var(--muted)}
 .empty b{display:block;font-size:17px;color:var(--navy);margin-bottom:4px}
+.gres{background:var(--white);border:1px solid var(--line);border-radius:18px;padding:12px 14px;margin:0 0 16px;box-shadow:0 10px 30px -22px rgba(0,55,101,.5)}
+.gres h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}.gres h3 small{color:var(--muted);font-weight:500;font-size:12.5px}
+.gres .gi{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:4px 10px;width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);margin-bottom:6px}
+.gres .gi:hover,.gres .gi:focus-visible{border-color:var(--blue)}
+.gres .gi b{font-size:15px}.gres .gi .mt{grid-column:1/-1;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px}
+.gres .st{font-size:12px;font-weight:700;padding:2px 9px;border-radius:99px;align-self:start}
+.gres .st.pending{background:#FFF1D6;color:#9A5B00}.gres .st.held{background:#FDECEC;color:#B4232A}.gres .st.done{background:#E3F6EF;color:#0B6E4F}
 .more{display:block;margin:6px auto 4px;font-size:14px;color:var(--blue);font-weight:600;padding:8px 14px}
 
 /* ---------- drawer ---------- */
@@ -297,6 +304,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <div class="tools"><label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" placeholder="ابحث بالاسم، رقم الهوية، الجوال أو رقم الطلب" aria-label="بحث"></label></div>
     </div>
     <div class="lane-switch"><button class="on" data-lane="pending">في الانتظار</button><button data-lane="held">معلّق</button><button data-lane="done">تم الرفع</button></div>
+    <section class="gres" id="gres" hidden></section>
     <div class="lanes" id="lanes" data-show="pending">
       <section class="lane l-pending">
         <div class="lane-h"><h2>في الانتظار <span class="count red" id="cPending">0</span></h2><span>الأقدم أولاً</span></div>
@@ -414,7 +422,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts } from "./shared.js?v=20261028a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts } from "./shared.js?v=20261031a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -628,6 +636,7 @@ function renderHeld() {
     : `<div class="empty"><b>لا يوجد طلبات معلّقة</b>علّق أي طلب فيه مشكلة ترخيص أو خطأ في البيانات</div>`;
 }
 function renderDone() {
+  if (S.q) renderGlobal();
   const list = S.done.filter(match);
   $("#cDone").textContent = S.doneToday;
   $("#doneToday").textContent = "اليوم";
@@ -637,11 +646,13 @@ function renderDone() {
 let doneSeq = 0;
 async function loadDone(reset) {
   const seq = ++doneSeq, b = S.branch, t = S.type;
-  if (reset) { S.done = []; S.doneCursor = null; $("#lDone").innerHTML = '<div class="empty">جاري التحميل…</div>'; }
+  const pin = S.pin && S.pin.branch === b && S.pin.type === t ? S.pin : null;   // طلب مرفوع قديم فتحناه من البحث
+  if (reset) { S.done = pin ? [pin] : []; S.doneCursor = null; $("#lDone").innerHTML = '<div class="empty">جاري التحميل…</div>'; }
   try {
     const [r, c] = await Promise.all([api.loadDone(b, t, reset ? null : S.doneCursor), reset ? api.countDoneToday(b, t) : S.doneToday]);
     if (seq !== doneSeq) return;
-    S.done = reset ? r.items : S.done.concat(r.items); S.doneCursor = r.cursor; S.doneMore = r.more; S.doneToday = c;
+    const keep = reset && pin && !r.items.some(y => y.id === pin.id) ? [pin] : [];
+    S.done = reset ? [...keep, ...r.items] : S.done.concat(r.items.filter(y => !S.done.some(z => z.id === y.id))); S.doneCursor = r.cursor; S.doneMore = r.more; S.doneToday = c;
     renderDone();
   } catch (e) {
     console.error(e);
@@ -649,7 +660,43 @@ async function loadDone(reset) {
   }
 }
 
-$("#q").addEventListener("input", e => { S.q = e.target.value.trim(); renderPending(); renderHeld(); renderDone(); });
+$("#q").addEventListener("input", e => { S.q = e.target.value.trim(); renderPending(); renderHeld(); renderDone(); globalSearch(); });
+
+/* ---------- بحث في كل الفروع: يطلع فوق القوائم، والضغط يفتح الطلب في فرعه ونوعه ---------- */
+let gSeq = 0, gTimer = 0, gServer = [];
+function globalSearch() {
+  clearTimeout(gTimer);
+  const q = S.q; if (!q || q.length < 3) { $("#gres").hidden = true; gServer = []; return; }
+  renderGlobal();                                                        // المحمّل عندنا على طول
+  gTimer = setTimeout(async () => {                                      // والقديم من قاعدة البيانات (هوية/جوال/رقم طلب)
+    const seq = ++gSeq;
+    try { const r = await api.searchAll?.(q) || []; if (seq !== gSeq || q !== S.q) return; gServer = r; renderGlobal(); } catch (e) { console.warn(e); }
+  }, 350);
+}
+const STATUS_AR = { pending: "بالانتظار", held: "معلّق", done: "تم الرفع" };
+function renderGlobal() {
+  if (!S.q || S.q.length < 3) { $("#gres").hidden = true; return; }
+  const all = new Map();
+  for (const x of [...S.pending, ...S.held, ...S.done, ...gServer]) if (match(x)) all.set(x.id, x);
+  const list = [...all.values()].sort((a, b) => ({ pending: 0, held: 1, done: 2 }[a.status] - { pending: 0, held: 1, done: 2 }[b.status]) || (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 30);
+  const here = list.filter(x => x.branch === S.branch && x.type === S.type).length;
+  $("#gres").hidden = false;
+  $("#gres").innerHTML = `<h3>🔎 نتائج البحث في كل الفروع <small>${list.length ? list.length + " طلب" + (here < list.length ? ` — ${list.length - here} في فروع/أنواع ثانية` : "") : ""}</small></h3>`
+    + (list.length ? list.map(x => `<button class="gi" data-gid="${esc(x.id)}"><b>${esc(x.patientName)}</b><span class="st ${x.status}">${STATUS_AR[x.status] || ""}</span>
+      <span class="mt"><span>${esc(branchName(x.branch))}</span><span>${esc(typeName(x.type))}</span><span class="id">${esc(x.idNumber)}</span><span>${esc(x.ref || "")}</span><span>${esc(dates(x))}</span>${x.status === "done" && x.doneAt ? `<span>رُفع ${esc(timeAgo(x.doneAt))}${x.doneBy ? " — " + esc(x.doneBy) : ""}</span>` : ""}</span></button>`).join("")
+      : `<div class="empty" style="padding:10px 0"><b>ما فيه طلب بهالبحث</b>للطلبات القديمة اكتب رقم الهوية أو الجوال أو رقم الطلب كامل</div>`);
+}
+$("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const all = $("#gres").querySelectorAll("[data-gid]"); if (all.length === 1) all[0].click(); } });   // نتيجة وحدة → Enter يفتحها
+$("#gres").addEventListener("click", e => {
+  const b = e.target.closest("[data-gid]"); if (!b) return;
+  const x = [...S.pending, ...S.held, ...S.done, ...gServer].find(r => r.id === b.dataset.gid); if (!x) return;
+  S.pin = x.status === "done" ? x : null;                                    // المرفوع القديم: يثبت في قائمة «تم الرفع» عشان يفتح
+  const lane = x.status === "done" ? "done" : x.status === "held" ? "held" : "pending";
+  select(x.branch, x.type);
+  if (S.pin && !S.done.some(r => r.id === x.id)) { S.done = [x, ...S.done]; renderDone(); }
+  document.querySelector(`.lane-switch button[data-lane="${lane}"]`)?.click();
+  openDrawer(x.id);
+});
 document.querySelector(".lane-switch").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
   document.querySelectorAll(".lane-switch button").forEach(x => x.classList.toggle("on", x === b));

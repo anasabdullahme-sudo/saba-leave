@@ -607,6 +607,18 @@ async function liveBackend(role) {
       const s = await FS.getDocs(FS.query(col, ...cons));
       return { items: s.docs.map(toObj), cursor: s.docs[s.docs.length - 1] || null, more: s.docs.length === n };
     },
+    // بحث في كل الفروع وكل الأنواع (حتى المرفوع القديم): هوية / جوال / رقم طلب = بحث دقيق في قاعدة البيانات
+    async searchAll(q) {
+      const t = latinDigits(String(q || "")).trim().toUpperCase().replace(/\s+/g, "");
+      const tries = [];
+      if (/^[12]\d{9}$/.test(t)) tries.push(["idNumber", t], ["companionId", t]);
+      else if (/^0?5\d{8}$/.test(t)) tries.push(["phone", normPhone(t)]);
+      else if (/^(SB-?)?[A-Z0-9]{5}$/.test(t) && /\d/.test(t)) tries.push(["ref", t.startsWith("SB") ? "SB-" + t.replace(/^SB-?/, "") : "SB-" + t]);
+      if (!tries.length) return [];
+      const out = new Map();
+      for (const [f, v] of tries) { const sn = await FS.getDocs(FS.query(col, FS.where(f, "==", v), FS.limit(25))); sn.docs.forEach(d => out.set(d.id, toObj(d))); }
+      return [...out.values()];
+    },
     async countDoneToday(branch, type) {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
       const q = FS.query(col, FS.where("status", "==", "done"), FS.where("branch", "==", branch), FS.where("type", "==", type), FS.where("doneAt", ">=", FS.Timestamp.fromDate(d0)));
@@ -811,6 +823,10 @@ function demoBackend() {
     async loadDone(branch, type) {
       const items = (load() || []).filter(x => x.status === "done" && x.branch === branch && x.type === type).sort((a, b) => b.doneAt - a.doneAt);
       return { items, cursor: null, more: false };
+    },
+    async searchAll(q) {
+      const t = String(q || "").toLowerCase();
+      return (load() || []).filter(x => [x.idNumber, x.phone, x.ref, x.companionId].some(v => String(v || "").toLowerCase().includes(t)));
     },
     async countDoneToday(branch, type) {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
