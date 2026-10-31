@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.1";
+const VERSION = "2.7.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -689,6 +689,7 @@ async function applyTodayPatches(p) {
   });
   log.info({ n: list.length }, "تعديل حالات اليوم");
 }
+const nmKey = n => String(n || "").split(/\s*[–-]\s*/)[0].replace(/^(د|دكتور|دكتوره)\.?\s+/, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/\s+/g, " ").trim();
 async function applyPatches() {
   try {
     const p = JSON.parse(fs.readFileSync(new URL("./board-patches.json", import.meta.url), "utf8"));
@@ -700,7 +701,8 @@ async function applyPatches() {
       const done = new Set([...(cur.patched || []), ...(cur.vacations || []).map(v => v.id)]);
       const docs = cur.departments.flatMap(d => d.doctors || []);
       const todo = (p.vacations || []).filter(v => !done.has(v.id));
-      const newDocs = (p.doctors || []).filter(x => !done.has(x.id) && !docs.some(d => d.id === x.doctor.id));
+      const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh" }).format(new Date());
+      const newDocs = (p.doctors || []).filter(x => !done.has(x.id) && !docs.some(d => d.id === x.doctor.id || nmKey(d.name) === nmKey(x.doctor.name)) && !(x.startsOn && x.startsOn > todayIso));   // يباشر بعدين → ننتظر يومه
       const ups = (p.updates || []).filter(u => !done.has(u.id));
       const ves = (p.vacEnds || []).filter(u => !done.has(u.id));
       const pls = (p.plans || []).filter(u => !done.has(u.id));
@@ -747,6 +749,8 @@ async function applyPatches() {
       return todo;
     });
     if (added.length) log.info({ n: added.length }, "انضافت إجازات للجدول");
+    const newNames = added.filter(a => a.isDoc && !a.upd && a.name).map(a => nmKey(a.name));            // طبيب انضاف بالتعديل → نشيل سؤال «أضيفه؟» المعلّق عنه
+    if (newNames.length) { const pr = db.doc("bot/pending_doctors"), pc = (await pr.get()).data(); if (pc?.items?.some(i => newNames.includes(nmKey(i.name)))) await pr.set({ items: pc.items.filter(i => !newNames.includes(nmKey(i.name))) }); }
   } catch (e) { log.error({ err: String(e?.message || e) }, "فشل إضافة الإجازات"); }
 }
 
@@ -873,6 +877,7 @@ async function main() {
   watchDoctors();
   startFixApplier();
   deployRules().then(seedBoard).then(applyPatches);
+  if (!globalThis.__patchTimer) globalThis.__patchTimer = setInterval(applyPatches, 20 * 60000);   // تعديلات بتاريخ (طبيب يباشر بكرة) تنطبق في يومها
   initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock,
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
