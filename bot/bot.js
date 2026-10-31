@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.2";
+const VERSION = "2.7.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -151,6 +151,8 @@ const trackKey = (id, phone) => crypto.createHash("sha256").update(`saba-track|$
 const ms = t => t?.toMillis?.() || 0;
 const isDupe = r => r.status === "done" && /^مكرر تلقائياً/.test(r.doneBy || "");
 const TYPE_AR = { sick: "إجازتك المرضية", companion: "إجازة المرافق", attendance: "مشهد المراجعة" };
+const TYPE_ADM = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
+const BR_AR = { haramain: "الحرمين", sulaimaniyah: "السليمانية", tala: "تالا", bawadi: "البوادي", watanak: "وطنك" };
 const FIELD_AR = { patientName: "الاسم", idNumber: "رقم الهوية", dob: "تاريخ الميلاد", phone: "رقم الجوال", leaveStart: "بداية الإجازة", leaveEnd: "نهاية الإجازة", visitDate: "تاريخ الحضور", companionName: "اسم المرافق", companionId: "هوية المرافق", companionDob: "ميلاد المرافق", relationship: "صلة القرابة", photo: "صورة التقرير" };
 const TYPE_SHORT = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد مراجعة" };
 
@@ -492,6 +494,8 @@ async function onIncoming(m) {
     if (od) { doc = od; r = od.data(); }
   }
   const name = String(r.patientName || "").trim().split(/\s+/)[0] || "";
+  // بيانات المراجع للمسؤول (رسائل الخاص فقط): الاسم + الهوية + نوع الطلب والفرع — عشان يدوّره بسرعة
+  const who = `\n👤 ${String(r.patientName || "").trim() || "—"}\n🪪 هوية: ${r.idNumber || "—"}${r.type === "companion" && r.companionId ? "  ·  المرافق: " + r.companionId : ""}\n📄 ${TYPE_ADM[r.type] || r.type || ""}${r.branch ? " — فرع " + (BR_AR[r.branch] || r.branch) : ""}`;
   const hi = name ? `أهلاً ${name}` : "أهلاً";
   const kind = TYPE_AR[r.type] || "طلبك";
   // طلب له أكثر من 24 ساعة وللحين يسأل → البوت يرد عادي، ونسخة للمسؤول يشيك ويرد بنفسه
@@ -499,7 +503,7 @@ async function onIncoming(m) {
   if (ageH > 24 && !it.social && relayOn() && !isAdminPhone(senderPhone)) {
     const ST = { pending: "بالانتظار (ما انرفع)", held: "معلّق", done: "انرفع على صحة" + (r.sehaRef ? " — " + r.sehaRef : "") + " (ينتظر اعتماد الطبيب)" };
     const age = ageH < 48 ? Math.round(ageH) + " ساعة" : Math.round(ageH / 24) + " أيام";
-    await relay({ ack: false, note: `⏰ طلب ${r.ref || ""} له ${age} — الحالة: ${ST[r.status] || r.status}${r.status === "held" && r.holdNote ? " (" + String(r.holdNote).slice(0, 80) + ")" : ""}` }).catch(e => log.warn({ err: String(e?.message || e) }, "تحويل طلب قديم"));
+    await relay({ ack: false, note: `⏰ طلب ${r.ref || ""} له ${age} — الحالة: ${ST[r.status] || r.status}${r.status === "held" && r.holdNote ? " (" + String(r.holdNote).slice(0, 80) + ")" : ""}${who}` }).catch(e => log.warn({ err: String(e?.message || e) }, "تحويل طلب قديم"));
   }
   const flag = () => doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
 
@@ -526,7 +530,7 @@ async function onIncoming(m) {
       remember(ck, "user", text || "(صورة)");
       if (!it.social || ai.notify) doc.ref.update({ inquiryAt: TS(), inquiryCount: FieldValue.increment(1), inquiryText: (ai.note || text || "📎 أرسل ملف/صورة").slice(0, 160) }).catch(() => {});
       if (ai.remindDoctor && r.status === "done") await remindDoctor(doc, r);
-      if (ai.staff && relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🙋 يحتاج موظف — طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${ai.note ? "\n💬 " + ai.note : ""}${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
+      if (ai.staff && relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🙋 يحتاج موظف — طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${who}${ai.note ? "\n💬 " + ai.note : ""}${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
       if (fixOpen && ai.reply.includes(r.fixToken)) fref.update({ nudgedAt: TS() }).catch(() => {});
       if (ai.reply) { remember(ck, "model", ai.reply); await reply(jid, ai.reply, senderPhone); }
       lastReply.set(jid + "#st:" + (r.id || r.ref) + ":" + r.status + (fixOpen ? ":fix" : ""), now);   // الحالة انقالت — الرد الجاهز ما يكررها
@@ -541,7 +545,7 @@ async function onIncoming(m) {
   const statusReply = async (msg) => {
     const k = "st:" + (r.id || r.ref) + ":" + r.status + (fixOpen ? ":fix" : "");
     if (now - (lastReply.get(jid + "#" + k) || 0) < 6 * 3600e3) {
-      if (relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🔁 يكرر السؤال عن طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
+      if (relayOn() && !isAdminPhone(senderPhone)) await relay({ ack: false, note: `🔁 يكرر السؤال عن طلب ${r.ref || ""} (${({ pending: "بالانتظار", held: "معلّق", done: "انرفع، ينتظر اعتماد الطبيب" })[r.status] || r.status})${who}${transcript(ck) ? "\n\n🗂 آخر المحادثة:\n" + transcript(ck) : ""}` }).catch(() => {});
       if (once("esc" + k, 3 * 3600e3)) return reply(jid, "وصلت رسالتك 🌷 بلّغت الموظف المختص وبيرد عليك هنا.", senderPhone);
       return;
     }
