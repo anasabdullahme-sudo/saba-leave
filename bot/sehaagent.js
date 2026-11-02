@@ -21,7 +21,7 @@ export async function initAgent(o) {
   ({ db, log } = o); dm = o.dm || dm;
   const ref = db.doc("bot/agent");
   const cur = (await ref.get()).data();
-  key = cur?.key || "";
+  key = cur?.key || ""; lastNumAt = cur?.numAt || 0; lastFailNote = cur?.failNoteAt || 0;   // محفوظة عشان إعادة تشغيل البوت ما تعيد نفس الرسالة
   if (!key) { key = crypto.randomBytes(24).toString("hex"); await ref.set({ key, at: Date.now() }); }
   db.doc(`agent/${key}/s/state`).onSnapshot(s => { state = s.exists ? s.data() : null; onState().catch(() => {}); }, e => log.warn({ err: String(e?.message || e) }, "حالة أداة صحة"));
   setInterval(async () => {                                                         // طلبات بحث قديمة ما انقرت
@@ -37,11 +37,11 @@ async function onState() {
   if (!state) return;
   const n = state.nafath;
   if (n?.num && n.at > lastNumAt && Date.now() - n.at < 2 * MIN) {
-    lastNumAt = n.at;
+    lastNumAt = n.at; db.doc("bot/agent").set({ numAt: n.at }, { merge: true }).catch(() => {});
     await dm(`🔐 أداة صحة تحتاج دخول\nافتح تطبيق *نفاذ* واختر الرقم: *${n.num}*`);
   }
-  if (state.fails >= 3 && Date.now() - lastFailNote > 3 * 3600e3) {
-    lastFailNote = Date.now();
+  if (state.fails >= 3 && Date.now() - lastFailNote > 12 * 3600e3) {               // مرة وحدة كل 12 ساعة بالكثير
+    lastFailNote = Date.now(); db.doc("bot/agent").set({ failNoteAt: lastFailNote }, { merge: true }).catch(() => {});
     await dm("⚠ أداة صحة حاولت تدخل 3 مرات وما انوافق في نفاذ — وقفت المحاولات التلقائية.\nترجع تحاول أول ما يجي استفسار.");
   }
 }
