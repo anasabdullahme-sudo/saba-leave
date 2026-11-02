@@ -1,39 +1,68 @@
-// بوابة النفاذ الوطني (دخول صحة): نكتب هويتك ونضغط «تسجيل الدخول»، ونعيد المحاولة لين يطلع رقم نفاذ،
-// بعدها نرسل الرقم للبوت (يوصلك واتساب). ما نوقف لين ننتقل للصفحة الثانية (الرقم) أو تمر 3 دقايق.
+// بوابة النفاذ (رابط دخول صحة iam.gov.sa/authservice/userauthservice): نشتغل حسب الرابط بس، بدون ما ننتظر شي ثاني.
+// نكتب هويتك ونضغط «تسجيل الدخول» ونعيد لين يطلع رقم نفاذ → نرسل الرقم للبوت. يطلع شريط صغير فوق يقول وش نسوي.
 (() => {
   if (window.top !== window) return;
-  const { norm, visible, ownText, sleep, waitFor, textEls, realClick, setValue, inputByLabel, TEXT_INPUT } = A;
+  if (!/iam\.gov\.sa\/authservice\/userauthservice/i.test(location.href)) return;
+  const { norm, visible, ownText, sleep } = A;
+
+  // شريط حالة صغير (عشان تشوف إن الأداة شغالة)
+  let bar = null;
+  const show = t => {
+    if (!bar) { bar = document.createElement("div"); bar.style.cssText = "position:fixed;top:8px;left:8px;z-index:2147483647;background:#003765;color:#fff;font:600 13px Tahoma,sans-serif;padding:6px 12px;border-radius:8px;direction:rtl;box-shadow:0 4px 14px rgba(0,0,0,.3)"; document.documentElement.append(bar); }
+    bar.textContent = "أداة صحة: " + t;
+  };
   chrome.runtime.onMessage.addListener((m, _s, reply) => { if (m.type === "STATE") reply({ page: "iam" }); return false; });
-  const numberEl = () => /اختيار الرقم|اختر الرقم/.test(norm(document.body.innerText))
+  const say = m => { try { return chrome.runtime.sendMessage(m).catch(() => null); } catch { return null; } };
+
+  const inputs = () => [...document.querySelectorAll("input")].filter(i => visible(i) && !/^(hidden|password|checkbox|radio|submit|button)$/i.test(i.type));
+  const idInput = () => {
+    const all = inputs();
+    return all.find(i => /id|national|user/i.test(i.name + " " + i.id) && !/pass/i.test(i.name + i.id))
+      || all.find(i => /بطاقه|الاقامه|الهويه/.test(norm((i.closest("div,form,section")?.innerText || "") + " " + (i.placeholder || ""))))
+      || all[0] || null;
+  };
+  const loginBtn = inp => {
+    const form = inp?.closest("form");
+    const cands = [...(form || document).querySelectorAll("button, input[type=submit], a, [role=button]")].filter(visible);
+    return cands.find(el => /تسجيل الدخول|^دخول$|login|sign in/i.test(norm(el.textContent || el.value || ""))) || (form ? form.querySelector("button, input[type=submit]") : null);
+  };
+  // كتابة تشتغل مع أي إطار (Angular/React/عادي)
+  function type(inp, v) {
+    inp.focus();
+    try { inp.select(); document.execCommand("insertText", false, v); } catch {}
+    if (inp.value.replace(/\D/g, "") !== v) {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(inp, v);
+    }
+    ["input", "change", "keyup", "blur"].forEach(t => inp.dispatchEvent(new Event(t, { bubbles: true })));
+  }
+  const click = el => { const r = el.getBoundingClientRect(), o = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(t => el.dispatchEvent(new (t.startsWith("pointer") ? PointerEvent : MouseEvent)(t, o))); el.click(); };
+  const numberEl = () => /اختيار الرقم|اختر الرقم|choose the number/i.test(norm(document.body.innerText))
     && [...document.querySelectorAll("body *")].find(el => visible(el) && /^\d{1,3}$/.test(ownText(el)) && el.childElementCount === 0);
-  const idInput = () => { const i = inputByLabel(/بطاقه الاحوال|الاقامه|رقم الهويه/) || [...document.querySelectorAll(TEXT_INPUT)].find(visible); return i && visible(i) ? i : null; };
-  const loginBtn = () => textEls("تسجيل الدخول").find(el => visible(el) && /^(BUTTON|A|INPUT)$/.test(A.clickable(el).tagName))
-    || [...document.querySelectorAll("button, input[type=submit]")].find(el => visible(el) && /تسجيل الدخول/.test(norm(el.textContent || el.value)));
-  const say = m => chrome.runtime.sendMessage(m).catch(() => null);
 
   (async () => {
-    await waitFor(() => document.body && document.body.innerText.length > 50, 20000);
-    const seha = /seha/i.test(document.body.innerText) || /seha\.sa/i.test(document.referrer) || /seha/i.test(location.href);   // دخول صحة بس
-    let r = null;
-    for (let i = 0; i < 5 && !r; i++) { r = await say({ type: "IAM_HELLO", seha }); if (!r) await sleep(1500); }   // الخلفية ممكن نايمة
-    if (!r?.go || !r.natId) return;
+    const c = await chrome.storage.local.get(["natId", "enabled"]);
+    if (c.enabled === false) return;
+    if (!/^[12]\d{9}$/.test(c.natId || "")) { show("ما فيه رقم هوية محفوظ — افتح إعدادات الأداة"); return; }
+    show("تكتب الهوية…");
     const end = Date.now() + 3 * 60e3;
     let lastClick = 0, clicks = 0, sent = "";
     while (Date.now() < end) {
       const num = numberEl();
-      if (num) { const n = ownText(num); if (n !== sent) { sent = n; await say({ type: "NAFATH_NUM", num: n }); } await sleep(3000); continue; }   // الرقم يتغير لو انتهى وانطلب من جديد
-      if (sent) return;                                                              // الرقم راح = وافقت وانتقلنا
+      if (num) { const n = ownText(num); if (n !== sent) { sent = n; show(`رقم نفاذ ${n} — انرسل لك واتساب`); await say({ type: "NAFATH_NUM", num: n }); } await sleep(3000); continue; }
+      if (sent) { show("تم ✓"); return; }
       const inp = idInput();
-      if (inp) {
-        if (inp.value.replace(/\D/g, "") !== r.natId) { setValue(inp, r.natId); await sleep(500); }
-        const btn = loginBtn();
-        if (btn && Date.now() - lastClick > 5000) {                                  // ما انتقل؟ نضغط مرة ثانية
-          if (clicks >= 6) { await say({ type: "IAM_ERR", err: "ضغطت دخول نفاذ 6 مرات وما طلع الرقم" }); return; }
-          lastClick = Date.now(); clicks++; realClick(btn);
-        }
+      if (!inp) { show("أدوّر على خانة الهوية…"); await sleep(1000); continue; }
+      if (inp.value.replace(/\D/g, "") !== c.natId) { type(inp, c.natId); await sleep(600); }
+      const btn = loginBtn(inp);
+      if (Date.now() - lastClick > 5000) {
+        if (clicks >= 8) { show("ضغطت دخول 8 مرات وما طلع الرقم — جرّب بنفسك"); await say({ type: "IAM_ERR", err: "نفاذ ما طلع الرقم" }); return; }
+        lastClick = Date.now(); clicks++;
+        show(`كتبت الهوية — أضغط تسجيل الدخول (${clicks})`);
+        if (btn) click(btn); else { const f = inp.closest("form"); if (f) { try { f.requestSubmit(); } catch { f.submit(); } } else inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true })); }
       }
       await sleep(1200);
     }
-    if (!sent) await say({ type: "IAM_ERR", err: "ما طلع رقم نفاذ" });
+    if (!sent) { show("ما طلع رقم نفاذ"); await say({ type: "IAM_ERR", err: "ما طلع رقم نفاذ" }); }
   })();
 })();

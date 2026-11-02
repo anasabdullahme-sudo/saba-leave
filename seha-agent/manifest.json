@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "أداة صحة الجانبية — سابا",
   "short_name": "Saba Seha Agent",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "على كمبيوتر المسؤول فقط: تخلّي منصة صحة شغّالة، تدخل بنفاذ (بموافقتك من الجوال)، وتبحث عن حالة الإجازات لبوت سابا.",
   "permissions": [
     "storage",

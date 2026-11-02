@@ -39,6 +39,16 @@
     }
     return { ok: false };
   }
+  // رابط صفحة الدخول (#/Account/Login) وأنت فاتحها قدامك → نضغط «تسجيل الدخول باستخدام نفاذ» لحالنا (تبويب الأداة المخفي تتحكم فيه الخلفية)
+  let autoBusy = false, autoAt = 0;
+  setInterval(async () => {
+    if (autoBusy || !/Account\/Login/i.test(location.hash) || document.visibilityState !== "visible") return;
+    if (Date.now() - autoAt < 15000) return;
+    const c = await chrome.storage.local.get(["natId", "enabled"]).catch(() => ({}));
+    if (c.enabled === false || !c.natId) return;
+    autoBusy = true; autoAt = Date.now();
+    try { await clickNafath(); } finally { autoBusy = false; }
+  }, 2000);
   // صفحة «أنت الآن ستغادر هذا الموقع» تتحول لحالها خلال ثواني — لو علقت نضغط الزر
   setInterval(() => {
     if (!/iamredirection/i.test(location.hash)) return;
