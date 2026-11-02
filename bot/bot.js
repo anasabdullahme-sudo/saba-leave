@@ -9,12 +9,13 @@ import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
 import { initGroup, handleGroupMessage, handleAdminMessage } from "./group.js";
+import { initArchive, archiveOn, archiveNew, ensureArchived, pruneArchive, archiveStats, wipeArchive, getImage } from "./archive.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.8.0";
+const VERSION = "2.9.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -266,9 +267,22 @@ function lookupKeys(text) {
   const refs = [...new Set((t.toUpperCase().match(/SB-?\s?[A-Z0-9]{5}/g) || []).map(r => "SB-" + r.replace(/^SB-?\s?/, "")))];
   return { ids, phones, refs };
 }
+let wipeAsk = 0;
 async function adminLookup(m, jid, text) {
   const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
   if (q) return false;                                                              // رد على رسالة (استفسار/طبيب) → مو بحث
+  const n0 = normMsg(text);
+  // أرشيف الصور: «الأرشيف» = حالته، «احذف صور الأرشيف» = يمسحها كلها (بعد تأكيد)
+  if (/^(الارشيف|ارشيف الصور|حاله الارشيف)$/.test(n0)) {
+    const a = archiveStats();
+    await sock.sendMessage(jid, { text: !a ? "⚠ أرشيف الصور متوقف (ما فيه قرص دائم /data في Railway)." : `🗂 أرشيف الصور: ${a.count} صورة (${a.mb} MB)${a.oldest ? "\nأقدم صورة: " + fmtD(a.oldest) : ""}\nتنحفظ شهر وبعدها تنمسح لحالها.\nالمساحة الفاضية في القرص: ${a.freeMb} MB\n\nتطلب صورة: «صورة» + الهوية أو الجوال أو رقم الطلب.\nتمسح الأرشيف كله: «احذف صور الأرشيف».` });
+    return true;
+  }
+  if (/^(احذف|امسح) (صور )?(ال)?ارشيف( الصور)?$/.test(n0)) {
+    if (Date.now() - wipeAsk > 5 * 60000) { wipeAsk = Date.now(); const a = archiveStats(); await sock.sendMessage(jid, { text: `⚠ بتمسح ${a?.count || 0} صورة من الأرشيف نهائياً (ما ترجع).\nأكيد؟ أرسل «احذف صور الأرشيف» مرة ثانية خلال 5 دقايق.` }); return true; }
+    wipeAsk = 0; const n = wipeArchive(); await sock.sendMessage(jid, { text: `🗑 انمسحت ${n} صورة من الأرشيف.` }); return true;
+  }
+  const wantImg = /^(صوره|صور|الصوره)(\s|$)/.test(n0);
   const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return false;
   if (String(text).split(/\n/).length > 10 || String(text).length > 600) return false;
   const found = new Map(), col = db.collection("requests");
@@ -279,6 +293,18 @@ async function adminLookup(m, jid, text) {
   const list = [...found.values()].filter(r => !isDupe(r)).sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
   const keyTxt = [...k.ids.map(x => "هوية " + x), ...k.phones.map(x => "جوال " + x), ...k.refs].join(" · ");
   if (!list.length) { await sock.sendMessage(jid, { text: `🔎 ما لقيت أي طلب بـ ${keyTxt}\n(بحثت في كل الفروع)` }); return true; }
+  if (wantImg) {                                                                    // «صورة …» → نرسل صور التقارير (من الموقع أو الأرشيف)
+    let sent = 0;
+    for (const r of list.slice(0, 5)) {
+      const im = await getImage(r.imagePath).catch(() => null);
+      const cap = `${String(r.patientName || "").trim()} — ${r.ref || ""}\n${TYPE_ADM[r.type] || ""} · فرع ${BR_AR[r.branch] || r.branch || ""}${im?.from === "archive" ? "\n🗂 من الأرشيف (انمسحت من الموقع)" : ""}`;
+      if (!im) { await sock.sendMessage(jid, { text: `🚫 ${r.ref || ""} — الصورة مو موجودة (انمسحت من الموقع ومن الأرشيف)` }); continue; }
+      await sock.sendMessage(jid, im.pdf ? { document: im.buf, mimetype: "application/pdf", fileName: `${r.ref || "report"}.pdf`, caption: cap } : { image: im.buf, caption: cap });
+      sent++;
+    }
+    if (list.length > 5) await sock.sendMessage(jid, { text: `(أرسلت آخر 5 من ${list.length})` });
+    return true;
+  }
   const lines = list.slice(0, 5).map((r, i) => {
     const st = (ST_ADM[r.status] || r.status) + (r.status === "held" ? ` — ${HOLD_AR[r.holdReason] || r.holdReason || ""}${r.holdNote ? ": " + String(r.holdNote).slice(0, 80) : ""}` : "")
       + (r.status === "done" ? `${r.sehaRef ? " — " + r.sehaRef : ""}${ms(r.doneAt) ? " · " + fmtD(ms(r.doneAt)) : ""}${r.doneBy ? " · " + r.doneBy : ""}\n   ينتظر اعتماد الطبيب في صحة` : "");
@@ -857,6 +883,8 @@ async function cleanupImages() {
     }
     // دفعات صغيرة (حجم المستندات الممسوحة يتحسب على حد الدفعة 10MB — الكبيرة ترجع «Transaction too big»)
     const sizeOf = Object.fromEntries(imgs.docs.map(d => [d.id, d.get("size") || 300000]));
+    const tOf = Object.fromEntries(imgs.docs.map(d => [d.id, d.get("createdAt")?.toMillis?.() || 0]));
+    await ensureArchived(del.filter(id => tOf[id] > now - 30 * DAY));          // نسخة في الأرشيف قبل المسح (شهر)
     let b = db.batch(), n = 0, bytes = 0;
     for (const id of del) {
       b.delete(db.doc(`imageData/${id}`)); b.delete(db.doc(`images/${id}`)); n += 2; bytes += sizeOf[id] * 1.4;
@@ -926,6 +954,9 @@ async function main() {
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
+  initArchive({ db, log });
+  if (archiveOn()) { setTimeout(() => archiveNew(1000), 60000); setInterval(() => archiveNew(), 10 * 60000); }   // نسخة من كل صورة خلال 10 دقايق من رفعها
+  else log.warn("أرشيف الصور متوقف: ما فيه قرص /data");
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {
     const st = (await statusRef.get().catch(() => null))?.data() || {};
@@ -933,6 +964,7 @@ async function main() {
     if (Date.now() - last > 20 * 3600000) await cleanupImages();
     await backupWeekly();
     await cleanupChats();
+    try { pruneArchive(); } catch (e) { log.warn({ err: String(e?.message || e) }, "تنظيف الأرشيف"); }
   };
   setTimeout(daily, 3 * 60000);
   setInterval(daily, 24 * 3600000);
