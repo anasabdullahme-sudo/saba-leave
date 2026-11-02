@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.15.0";
+const VERSION = "2.15.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -301,6 +301,7 @@ async function handleCallCenter(m) {
   const ts = Number(m.messageTimestamp || 0) * 1000; if (ts && Date.now() - ts > 15 * 60e3) return;   // رسايل قديمة (البوت كان طافي) → ما نرد عليها متأخر
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
   if (!text || !CC_LEAVE.test(normMsg(text))) return;                            // مو عن إجازة (تأمين، نتائج، دكتور…) → ما نتدخل
+  if (!isOurBranch(text)) return;                                                  // بس الرسايل الموجهة لفرعنا (سابا 1 / البوادي)
   const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return;
   const pend = { answered: false, at: Date.now(), from: m.key.participant || m.participant || "", replied: false, botIds: new Set() }; ccPending.set(m.key.id, pend);
   for (const [id, p] of ccPending) if (Date.now() - p.at > 12 * 3600e3) ccPending.delete(id);
@@ -313,10 +314,8 @@ async function handleCallCenter(m) {
     if (!k.ids.length) return sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");                 // جوال بس ومو في الموقع — ما نقدر نبحث في صحة بدون هوية
     if (!agentOnline()) { log.warn("قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
     const br = branchFromText(text);
-    try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
     const items = k.ids.slice(0, 1).map(id => ({ id, branch: br }));
     const res = await askSeha(items, 8 * 60e3).catch(() => null);
-    try { await sock.sendMessage(jid, { react: { text: "", key: m.key } }); } catch {}
     if (!res || res[0]?.err) { log.warn({ err: res?.[0]?.err }, "قروب الكول سنتر: صحة ما ردت — ما رديت"); return; }
     const today = hijriNum(hijri(Date.now()));
     const recent = (res[0].rows || []).filter(x => today - hijriNum(x.date) <= 14).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
@@ -326,10 +325,8 @@ async function handleCallCenter(m) {
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
   // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
   if (!agentOnline()) { log.warn({ ref: r.ref }, "قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
-  try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
   const items = sehaItems(k, [r]);
   const res = await askSeha(items, 8 * 60e3).catch(() => null);                    // لو تحتاج دخول نفاذ ننتظرها شوي
-  try { await sock.sendMessage(jid, { react: { text: "", key: m.key } }); } catch {}
   const v = sehaVerdict(res, items[0]);
   if (!res || res[0]?.err) { log.warn({ ref: r.ref, err: res?.[0]?.err }, "قروب الكول سنتر: صحة ما ردت — ما رديت"); return; }
   if (!v.ok) return dmAdmin(head + site + "\n\n" + sehaText(res, items) + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");   // ما انرفعت في صحة / التاريخ مختلف
@@ -337,6 +334,11 @@ async function handleCallCenter(m) {
   const out = `${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
   if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
   try { const sent = await sock.sendMessage(jid, { text: out }, { quoted: m }); pend.replied = true; pend.reply = out; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
+}
+// رسالة موجهة لفرعنا؟ «سابا 1» «سابا ١» «سابا /١» «١/ سابا» «سابا البوادي» «سابا بوادي» — غير كذا (سابا 7، الصفا…) ما نلمسها
+function isOurBranch(t) {
+  const n = normMsg(t).replace(/[\u200e\u200f]/g, "");
+  return /سابا\s*[\/\-_.]?\s*1(?!\d)/.test(n) || /(^|\s)1\s*[\/\-]?\s*سابا/.test(n) || /بوادي/.test(n);
 }
 // الفرع من رسالة الكول سنتر («سابا ١» = البوادي)
 function branchFromText(t) {
