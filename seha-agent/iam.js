@@ -2,7 +2,7 @@
 // نكتب هويتك ونضغط «تسجيل الدخول» ونعيد لين يطلع رقم نفاذ → نرسل الرقم للبوت. يطلع شريط صغير فوق يقول وش نسوي.
 (() => {
   if (window.top !== window) return;
-  if (!/iam\.gov\.sa\/authservice\/userauthservice/i.test(location.href)) return;
+  if (!/^https:\/\/(www\.)?iam\.gov\.sa\/(sso|authservice|nafath)/i.test(location.href)) return;   // نفاذ القديم (authservice) والجديد (sso)
   const { norm, visible, ownText, sleep } = A;
 
   // شريط حالة صغير (عشان تشوف إن الأداة شغالة)
@@ -37,10 +37,12 @@
   }
   const click = el => { const r = el.getBoundingClientRect(), o = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
     ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(t => el.dispatchEvent(new (t.startsWith("pointer") ? PointerEvent : MouseEvent)(t, o))); el.click(); };
-  const numberEl = () => /اختيار الرقم|اختر الرقم|choose the number/i.test(norm(document.body.innerText))
+  const numberEl = () => /اختيار الرقم|اختيار رقم|اختر الرقم|choose the number|select the number/i.test(norm(document.body.innerText))
     && [...document.querySelectorAll("body *")].find(el => visible(el) && /^\d{1,3}$/.test(ownText(el)) && el.childElementCount === 0);
 
   (async () => {
+    await A.waitFor(() => document.body && document.body.innerText.length > 30, 20000);
+    if (!/seha|صحه/i.test(norm(document.body.innerText) + location.href + document.referrer)) return;   // دخول صحة بس
     const c = await chrome.storage.local.get(["natId", "enabled"]);
     if (c.enabled === false) return;
     if (!/^[12]\d{9}$/.test(c.natId || "")) { show("ما فيه رقم هوية محفوظ — افتح إعدادات الأداة"); return; }
@@ -55,6 +57,7 @@
       if (!inp) { show("أدوّر على خانة الهوية…"); await sleep(1000); continue; }
       if (inp.value.replace(/\D/g, "") !== c.natId) { type(inp, c.natId); await sleep(600); }
       const btn = loginBtn(inp);
+      if (btn && (btn.disabled || btn.getAttribute("aria-disabled") === "true")) { inp.value = ""; type(inp, c.natId); show("كتبت الهوية — أنتظر زر الدخول يتفعّل"); await sleep(800); continue; }   // الزر مقفول لين تنكتب الهوية صح
       if (Date.now() - lastClick > 5000) {
         if (clicks >= 8) { show("ضغطت دخول 8 مرات وما طلع الرقم — جرّب بنفسك"); await say({ type: "IAM_ERR", err: "نفاذ ما طلع الرقم" }); return; }
         lastClick = Date.now(); clicks++;
