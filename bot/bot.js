@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.17.0";
+const VERSION = "2.17.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -378,6 +378,14 @@ async function sehaFollow(jid, m, items) {
     }
   }
 }
+const adminJidSet = new Map();                                                    // jid → رقم المسؤول
+function rememberAdminJid(jid) {
+  if (!jid || adminJidSet.has(jid)) return;
+  const ph = (String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0] || "");
+  adminJidSet.set(jid, normPhone(ph));
+  db.doc("bot/prefs").set({ adminJids: [...adminJidSet.keys()].slice(-10) }, { merge: true }).catch(() => {});
+}
+function loadAdminJids() { db.doc("bot/prefs").get().then(d => { const ph = normPhone(String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0] || ""); for (const j of d.get("adminJids") || []) adminJidSet.set(j, ph); }).catch(() => {}); }
 // تشغيل/إيقاف البوت في قروب الكول سنتر (المسؤول: «وقف الكول سنتر» / «شغل الكول سنتر») — موقف افتراضياً
 let ccOn = false;
 function watchCcPref() { db.doc("bot/prefs").onSnapshot(d => { ccOn = d.get("callcenter") === true; }, () => {}); }
@@ -633,7 +641,23 @@ async function onIncoming(m) {
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
-  const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
+  let senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
+  // المسؤول: نحفظ معرّف محادثته (ولو جت رسالته بمعرّف @lid بدون رقم — مثلاً بعد إعادة تشغيل البوت — نعرفه برضو)
+  if (senderPhone && isAdminPhone(senderPhone)) rememberAdminJid(jid);
+  else if (!senderPhone && adminJidSet.has(jid)) senderPhone = adminJidSet.get(jid);
+  // المسؤول سحب رسالة (استفسار مراجع/تقرير) وكتب «شوف بصحتي وش حالته» → هذا أمر للبوت، مو رد للمراجع
+  if (text && isAdminPhone(senderPhone)) {
+    const ctx = msg.extendedTextMessage?.contextInfo, qm = ctx?.quotedMessage;
+    const qtext = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || "";
+    const nt = normMsg(text);
+    if (qtext && /^(شوف|شيك|تاكد|ابحث|دور|افحص|وش|ايش|كيف|متي)/.test(nt) && /(صحتي|صحه|منصه|حالت|الحال|وين وصل|انرفع|اعتمد|دقق)/.test(nt)) {
+      const k = lookupKeys(qtext);
+      if (k.ids.length || k.phones.length || k.refs.length) {
+        const keys = [...k.refs, ...k.ids, ...k.phones].join("\n");
+        if (await adminLookup({ message: { conversation: keys } }, jid, keys).catch(e => { log.warn({ err: String(e?.message || e) }, "بحث المسؤول"); return false; })) return;
+      }
+    }
+  }
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
   if (text && isAdminPhone(senderPhone) && await adminLookup(m, jid, text).catch(e => { log.warn({ err: String(e?.message || e) }, "بحث المسؤول"); return false; })) return;   // المسؤول أرسل هوية/جوال → حالة الطلب
   if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
@@ -1110,7 +1134,7 @@ async function main() {
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
-  watchCcPref();
+  watchCcPref(); loadAdminJids();
   initAgent({ db, log, dm: dmAdmin }).catch(e => log.warn({ err: String(e?.message || e) }, "وكيل صحة"));
   initArchive({ db, log });
   if (archiveOn()) { setTimeout(() => archiveNew(1000), 60000); setInterval(() => archiveNew(), 10 * 60000); }   // نسخة من كل صورة خلال 10 دقايق من رفعها
