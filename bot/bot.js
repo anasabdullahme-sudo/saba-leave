@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.13.5";
+const VERSION = "2.14.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -308,10 +308,21 @@ async function handleCallCenter(m) {
   const head = `📨 قروب الكول سنتر (${by}):\n«${text.slice(0, 200)}»\n\n`;
   const site = r ? siteLine(r) : ""; pend.site = site;
   // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
-  if (!r) {                                                                        // مو في الموقع أبد → نرد في القروب
-    if (pend.answered) return;
-    try { const sent = await sock.sendMessage(jid, { text: "بيتم رفعها الحين" }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {}
-    return;
+  if (!r) {                                                                        // مو في الموقع: ممكن سلّمها للاستقبال ورفعوها على صحة مباشرة → نشيك صحة بالهوية
+    const sendG = async t => { if (pend.answered) return; try { const sent = await sock.sendMessage(jid, { text: t }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {} };
+    if (!k.ids.length) return sendG("بيتم رفعها الحين");                             // جوال بس — ما نقدر نبحث في صحة بدون هوية
+    if (!agentOnline()) { log.warn("قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
+    const br = branchFromText(text);
+    try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
+    const items = k.ids.slice(0, 1).map(id => ({ id, branch: br }));
+    const res = await askSeha(items, 8 * 60e3).catch(() => null);
+    try { await sock.sendMessage(jid, { react: { text: "", key: m.key } }); } catch {}
+    if (!res || res[0]?.err) { log.warn({ err: res?.[0]?.err }, "قروب الكول سنتر: صحة ما ردت — ما رديت"); return; }
+    const today = hijriNum(hijri(Date.now()));
+    const recent = (res[0].rows || []).filter(x => today - hijriNum(x.date) <= 14).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
+    if (recent) return sendG(`${sehaIcon(recent.pay && /لم يتم الدفع/.test(recent.pay) ? "معلق" : recent.status)} ${sehaMeaning(recent, {}, br)}`);
+    await sendG("بيتم رفعها الحين");
+    return dmAdmin(`${head}🔎 ما لقيتها لا في الموقع ولا في صحة (حساب ${BR_AR[br] || br}) — رديت «بيتم رفعها الحين».`);
   }
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
   // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
@@ -328,6 +339,16 @@ async function handleCallCenter(m) {
   if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
   try { const sent = await sock.sendMessage(jid, { text: out }, { quoted: m }); pend.replied = true; pend.reply = out; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
 }
+// الفرع من رسالة الكول سنتر («سابا ١» = البوادي)
+function branchFromText(t) {
+  const n = normMsg(t);
+  if (/تالا|تاله/.test(n)) return "tala";
+  if (/سليمانيه/.test(n)) return "sulaimaniyah";
+  if (/حرمين/.test(n)) return "haramain";
+  if (/وطنك/.test(n)) return "watanak";
+  return "bawadi";
+}
+const hijriNum = s => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || ""); return m ? +m[1] * 354 + (+m[2] - 1) * 29.5 + +m[3] : 0; };
 // سطر الموقع (للمسؤول)
 function siteLine(r) {
   const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
