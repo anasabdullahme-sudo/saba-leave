@@ -310,7 +310,7 @@ async function handleCallCenter(m) {
   // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
   if (!r) {                                                                        // مو في الموقع: ممكن سلّمها للاستقبال ورفعوها على صحة مباشرة → نشيك صحة بالهوية
     const sendG = async t => { if (pend.answered) return; try { const sent = await sock.sendMessage(jid, { text: t }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {} };
-    if (!k.ids.length) return sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال");                 // جوال بس ومو في الموقع — ما نقدر نبحث في صحة بدون هوية
+    if (!k.ids.length) return sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");                 // جوال بس ومو في الموقع — ما نقدر نبحث في صحة بدون هوية
     if (!agentOnline()) { log.warn("قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
     const br = branchFromText(text);
     try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
@@ -321,7 +321,7 @@ async function handleCallCenter(m) {
     const today = hijriNum(hijri(Date.now()));
     const recent = (res[0].rows || []).filter(x => today - hijriNum(x.date) <= 14).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
     if (recent) return sendG(`${sehaIcon(recent.pay && /لم يتم الدفع/.test(recent.pay) ? "معلق" : recent.status)} ${sehaMeaning(recent, {}, br)}`);
-    await sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال");
+    await sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");
     return dmAdmin(`${head}🔎 ما لقيتها لا في الموقع ولا في صحة (حساب ${BR_AR[br] || br}).`);
   }
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
