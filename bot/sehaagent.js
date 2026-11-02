@@ -55,7 +55,7 @@ export function hijri(ms) {
 
 // items: [{ id, branch, psl, reqDate (هجري), leaveStart, leaveEnd (dd/mm/yyyy), type }]
 // يرجع [{ id, branch, rows, match, view, err }] أو null لو الأداة مو شغالة / ما ردت
-export async function askSeha(items, timeoutMs = 4 * MIN) {
+export async function askSeha(items, timeoutMs = 6 * MIN) {
   items = (items || []).filter(x => /^[12]\d{9}$/.test(String(x.id))).slice(0, 3)
     .map(x => ({ id: String(x.id), branch: x.branch || "bawadi", acc: SEHA_ACC[x.branch] || SEHA_ACC.bawadi, psl: x.psl || "", reqDate: x.reqDate || "", leaveStart: x.leaveStart || "", leaveEnd: x.leaveEnd || "", type: x.type || "" }));
   if (!items.length || !agentOnline()) return null;
@@ -63,7 +63,13 @@ export async function askSeha(items, timeoutMs = 4 * MIN) {
   await ref.set({ items, at: Date.now(), status: "new" });
   try {
     return await new Promise(resolve => {
-      const t = setTimeout(() => { un(); resolve(null); }, timeoutMs);
+      const t = setTimeout(async () => {                                             // ما خلصت: نقول وش آخر شي سوّته الأداة
+        un();
+        const d = (await ref.get().catch(() => null))?.data() || {}, st = state || {};
+        const PG = { search: "صفحة البحث", dashboard: "داخل صحة", accounts: "صفحة اختيار الحساب", login: "مو داخل صحة (صفحة الدخول)", redirect: "يتحوّل لنفاذ", iam: "ينتظر موافقة نفاذ", loading: "الصفحة تحمّل", unknown: "صفحة غير معروفة" };
+        const why = d.status === "new" ? `الأداة ما استلمت الطلب — هي الحين: ${PG[st.page] || st.page || "؟"}${st.msg ? " · " + st.msg : ""}` : `استلمته ووقفت عند: ${d.step || "؟"}`;
+        resolve(items.map(x => ({ id: x.id, branch: x.branch, err: why })));
+      }, timeoutMs);
       const un = ref.onSnapshot(s => {
         const d = s.data(); if (!d) return;
         if (d.status === "done" || d.status === "error") { clearTimeout(t); un(); resolve(d.status === "error" ? [{ err: d.err || "خطأ" }] : (d.res || [])); }

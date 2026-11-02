@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.16.1";
+const VERSION = "2.16.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -366,7 +366,7 @@ function sehaItems(k, list) {
 async function sehaFollow(jid, m, items) {
   if (!items.length || !agentOnline()) return;
   const res = await askSeha(items).catch(() => null);
-  const txt = res ? sehaText(res, items) : "🏥 ما قدرت أشيك في منصة صحة الحين (الأداة ما ردت)";
+  const txt = res ? sehaText(res, items) : "🏥 ما قدرت أشيك في منصة صحة الحين (الأداة ما ردت)";   // sehaText يكتب السبب لو الأداة وقفت
   await sock.sendMessage(jid, { text: txt }, m ? { quoted: m } : undefined).catch(() => {});
 }
 // تشغيل/إيقاف البوت في قروب الكول سنتر (المسؤول: «وقف الكول سنتر» / «شغل الكول سنتر») — موقف افتراضياً

@@ -45,16 +45,20 @@ async function ensureTab(c) {
 const send = (tabId, msg, ms = 60000) => Promise.race([chrome.tabs.sendMessage(tabId, msg).catch(() => null), new Promise(r => setTimeout(() => r(null), ms))]);
 
 async function runQuery(c, tab, q) {
-  await patchQ(c.agentKey, q.id, { status: "picked", pickedAt: Date.now() });
+  const step = t => patchQ(c.agentKey, q.id, { step: t }).catch(() => {});   // البوت يشوف وين وصلنا لو تأخرنا
+  await patchQ(c.agentKey, q.id, { status: "picked", pickedAt: Date.now(), step: "استلمت الطلب" });
   const res = [];
   for (const item of (q.items || []).slice(0, 3)) {
-    let r = null;
-    for (let i = 0; i < 4; i++) {
-      r = await send(tab.id, { type: "SEARCH", item }, 90000);
-      if (!r || r.switching) { await new Promise(x => setTimeout(x, 7000)); continue; }                  // يبدّل الحساب / الصفحة تحمّل
+    let r = null, last = "";
+    for (let i = 0; i < 5; i++) {
+      await step(`أبحث في حساب ${item.acc?.key || ""} (محاولة ${i + 1})`);
+      r = await send(tab.id, { type: "SEARCH", item }, 60000);
+      if (r?.switching) { last = "بدّلت الحساب وأنتظر الصفحة"; await step(last); await new Promise(x => setTimeout(x, 8000)); continue; }
+      if (!r) { last = "صفحة صحة ما ردّت (تحمّل أو انقفلت)"; const st = await send(tab.id, { type: "STATE" }, 5000); last += st ? ` — الصفحة: ${st.page}` : ""; await step(last); await new Promise(x => setTimeout(x, 6000)); continue; }
       break;
     }
-    if (!r || r.switching) r = { err: "صفحة صحة ما ردّت" };
+    if (!r || r.switching) r = { err: last || "صفحة صحة ما ردّت" };
+    if (r.err) await step("⚠ " + r.err);
     res.push({ id: item.id, branch: item.branch || "", rows: (r.rows || []).slice(0, 8), match: r.match ?? null, view: r.view || null, err: r.err || "" });
   }
   await patchQ(c.agentKey, q.id, { status: "done", res, doneAt: Date.now() });

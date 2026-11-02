@@ -95,8 +95,8 @@ service cloud.firestore {
     match /agent/{key}/q/{id} {
       allow get, list: if key.size() >= 40;
       allow update: if key.size() >= 40
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'res', 'err', 'doneAt', 'pickedAt'])
-        && request.resource.data.status in ['picked', 'done', 'error']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'res', 'err', 'doneAt', 'pickedAt', 'step'])
+        && request.resource.data.status in ['new', 'picked', 'done', 'error']
         && (!('res' in request.resource.data) || request.resource.data.res.size() <= 5);
     }
     match /agent/{key}/s/{id} {
