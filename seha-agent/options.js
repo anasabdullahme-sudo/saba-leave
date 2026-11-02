@@ -17,4 +17,5 @@ $("#save").onclick = async () => {
   $("#msg").textContent = "انحفظ ✓"; filled = true; chrome.runtime.sendMessage({ type: "TICK_NOW" }).catch(() => {}); setTimeout(load, 1500);
 };
 $("#open").onclick = () => chrome.runtime.sendMessage({ type: "OPEN_TAB" });
+$("#ver").textContent = "نسخة " + chrome.runtime.getManifest().version;
 load(); setInterval(load, 5000);

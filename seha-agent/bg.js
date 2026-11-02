@@ -131,6 +131,14 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   return true;
 });
 
+// احتياط: لو سكربت نفاذ ما انحقن لحاله (إعدادات كروم/تحميل متأخر) نحقنه بأنفسنا أول ما تفتح صفحة نفاذ
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  if (info.status !== "complete" || !/^https:\/\/(www\.)?iam\.gov\.sa\//i.test(tab.url || "")) return;
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!window.__sabaIam });
+    if (!r?.result) await chrome.scripting.executeScript({ target: { tabId }, files: ["common.js", "iam.js"] });
+  } catch (e) { console.warn("inject iam", e); }
+});
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());     // أيقونة الأداة → صفحة الإعدادات في تبويب (مو نافذة صغيرة تنقفل)
 chrome.alarms.create("tick", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(a => { if (a.name === "tick") tick(); });

@@ -1,7 +1,8 @@
 // بوابة النفاذ (رابط دخول صحة iam.gov.sa/authservice/userauthservice): نشتغل حسب الرابط بس، بدون ما ننتظر شي ثاني.
 // نكتب هويتك ونضغط «تسجيل الدخول» ونعيد لين يطلع رقم نفاذ → نرسل الرقم للبوت. يطلع شريط صغير فوق يقول وش نسوي.
 (() => {
-  if (window.top !== window) return;
+  if (window.top !== window || window.__sabaIam) return;
+  window.__sabaIam = true;                                                          // ما يشتغل مرتين (الحقن الاحتياطي)
   if (!/^https:\/\/(www\.)?iam\.gov\.sa\/(sso|authservice|nafath)/i.test(location.href)) return;   // نفاذ القديم (authservice) والجديد (sso)
   const { norm, visible, ownText, sleep } = A;
 
