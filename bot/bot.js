@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.3";
+const VERSION = "2.7.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -717,10 +717,11 @@ async function applyPatches() {
         tx.set(pref, { ...pc, items: [...(pc.items || []), ...pls.map(({ id, ...x }) => ({ id, ...x }))], at: Date.now() });
         for (const u of pls) todo.push({ id: u.id, name: "", isDoc: true, upd: true, quiet: true });
       }
-      for (const u of ves) {                                                    // نهاية إجازة مفتوحة (يباشر)
-        const v = (next.vacations || []).filter(v => v.doctorId === u.doctorId && v.start <= u.end && (!v.end || v.end >= u.end)).sort((a, b) => a.start < b.start ? 1 : -1)[0];
-        if (v) v.end = u.end;
-        todo.push({ id: u.id, name: v ? v.name : "", isDoc: true, upd: true, quiet: true });
+      for (const u of ves) {                                                    // نهاية إجازة مفتوحة (يباشر) — كل إجازاته المفتوحة، مو بس الأخيرة
+        const dd = docs.find(x => x.id === u.doctorId);
+        const vs = (next.vacations || []).filter(v => (v.doctorId === u.doctorId || (u.code && String(v.code) === String(u.code)) || (dd && nmKey(v.name) === nmKey(dd.name)) || (u.name && nmKey(v.name) === nmKey(u.name))) && v.start <= u.end && (!v.end || v.end > u.end));
+        vs.forEach(v => { v.end = u.end; });
+        todo.push({ id: u.id, name: vs[0]?.name || "", isDoc: true, upd: true, quiet: true });
       }
       for (const x of newDocs) {
         const dep = next.departments.find(q => q.id === x.depId); if (!dep) continue;

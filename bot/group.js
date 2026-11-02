@@ -535,8 +535,8 @@ async function endVacations(list, ctx) {
     const next = structuredClone(cur); let n = 0;
     for (const { d, day } of list) {
       const end = isoPlus(day, -1);
-      const v = (next.vacations || []).filter(v => v.doctorId === d.id && v.start <= end && (!v.end || v.end >= isoPlus(nowR().iso, -1))).sort((a, b) => a.start < b.start ? 1 : -1)[0];
-      if (v) { v.end = end; n++; }
+      const vs = (next.vacations || []).filter(v => (v.doctorId === d.id || (d.code && String(v.code) === String(d.code))) && v.start <= end && (!v.end || v.end > end));   // كل إجازاته المفتوحة
+      for (const v of vs) { v.end = end; n++; }
     }
     if (!n) return;
     next.log = [{ at: Date.now(), by: `البوت (${ctx.by})`, what: "نهاية إجازة من القروب" }, ...(cur.log || [])].slice(0, 60);

@@ -564,6 +564,13 @@
    "id": "v2910m1",
    "doctorId": "gguqlrc",
    "end": "2026-10-31"
+  },
+  {
+   "id": "v0211m1",
+   "doctorId": "gguqlrc",
+   "code": "1250",
+   "end": "2026-10-31",
+   "name": "مجدي نصيف"
   }
  ],
  "plans": [
