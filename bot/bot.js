@@ -320,7 +320,7 @@ ${STC[r.status] || r.status}${r.status === "done" && ms(r.doneAt) ? " " + fmtD(m
 }
 // منصة صحة (أداة كمبيوتر المسؤول): الطلبات اللي انرفعت → نبحث في حساب فرعها ونطابق PSL/تاريخ الرفع وتاريخ الإجازة
 function sehaItems(k, list) {
-  const done = list.filter(r => r.status === "done").slice(0, 2).map(r => ({ id: latin(r.idNumber || ""), branch: r.branch || "bawadi", psl: r.sehaRef || "", reqDate: hijri(ms(r.doneAt) || ms(r.createdAt)), leaveStart: r.type === "attendance" ? (r.visitDate || "") : (r.leaveStart || ""), leaveEnd: r.type === "attendance" ? (r.visitDate || "") : (r.leaveEnd || ""), type: r.type || "" }));
+  const done = list.filter(r => r.status === "done").slice(0, 2).map(r => ({ id: latin(r.idNumber || ""), branch: r.branch || "bawadi", psl: r.sehaRef || "", reqDate: hijri(ms(r.doneAt) || ms(r.createdAt)), leaveStart: r.type === "attendance" ? (r.visitDate || "") : (r.leaveStart || ""), leaveEnd: r.type === "attendance" ? (r.visitDate || "") : (r.leaveEnd || ""), type: r.type || "", doctor: r.doctorName || r.stampDoctor || "" }));
   if (done.length) return done.filter(x => /^[12]\d{9}$/.test(x.id));
   if (!list.length) return k.ids.slice(0, 2).map(id => ({ id, branch: "bawadi" }));    // مو في نظامنا → نشيك حساب البوادي بالهوية
   return [];                                                                       // بالانتظار/معلّق → لسى ما انرفع على صحة

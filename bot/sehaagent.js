@@ -75,6 +75,15 @@ export async function askSeha(items, timeoutMs = 4 * MIN) {
 const ST_ICON = [[/مكتمل/, "✅"], [/بانتظار|انتظار/, "⏳"], [/معلق/, "⏸"], [/معاد/, "↩️"], [/مرفوض|رفض/, "⛔"], [/ملغ/, "✖️"]];
 const icon = s => (ST_ICON.find(([re]) => re.test(s || "")) || [, "•"])[1];
 const BR = { bawadi: "البوادي", tala: "تالا", watanak: "وطنك", haramain: "الحرمين", sulaimaniyah: "السليمانية" };
+// معنى الحالة للكول سنتر (ليش ما وصلت للمراجع)
+function meaning(row, w, branch) {
+  const st = row.status || "", pay = row.pay || "", br = BR[branch] || branch || "الفرع";
+  if (/مكتمل/.test(st)) return "مكتملة — تطلع للمراجع في صحتي";
+  if (/لم يتم الدفع/.test(pay) || (/معلق/.test(st) && !/تم الدفع/.test(pay))) return `بانتظار فرع ${br} يشحن رصيد المنصة (لم يتم الدفع)`;
+  if (/بانتظار (التحقق|التدقيق)|تدقيق|تحقق/.test(st)) return `الطبيب${w.doctor ? " (" + String(w.doctor).replace(/^د\.?\s*/, "د. ") + ")" : ""} ما دققها للحين`;
+  if (/معاد/.test(st)) return "رجعت لموظف الإدخال يعدّلها";
+  return "";
+}
 const dmyNum = s => { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s || ""); return m ? +m[3] * 1e4 + +m[2] * 100 + +m[1] : 0; };
 // سطر/أسطر «منصة صحة» لرسالة القروب
 export function sehaText(res, want) {
@@ -87,7 +96,8 @@ export function sehaText(res, want) {
     const m = r.match != null ? r.rows[r.match] : null;
     if (!m) {                                                                         // ما عرفنا أي وحدة: نعرض آخرها
       const last = r.rows.slice().sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0];
-      return `🏥 منصة صحة (${acc}): ما لقيت إجازة تطابق الطلب بالضبط — آخر وحدة بالهوية:\n${icon(last.status)} ${last.status || "—"}${last.pay ? " · " + last.pay : ""}\n   ${last.psl || ""} · ${last.type || ""} · ${last.date || ""}`;
+      const why = meaning(last, w, r.branch);
+      return `🏥 منصة صحة (${acc}): ما لقيت إجازة تطابق الطلب بالضبط — آخر وحدة بالهوية:\n${icon(last.status)} ${last.status || "—"}${last.pay ? " · " + last.pay : ""}${why ? "\n👈 " + why : ""}\n   ${last.psl || ""} · ${last.type || ""} · ${last.date || ""}`;
     }
     let dates = "";
     const vs = r.view?.from, ve = r.view?.to;
@@ -95,6 +105,7 @@ export function sehaText(res, want) {
       const ok = dmyNum(vs) === dmyNum(w.leaveStart) && dmyNum(ve) === dmyNum(w.leaveEnd);
       dates = ok ? `\n📅 تاريخ الإجازة مطابق (${vs} ← ${ve})` : `\n⚠ تاريخ الإجازة في صحة: ${vs || "؟"} ← ${ve || "؟"}${w.leaveStart ? `\n   وعندنا: ${w.leaveStart} ← ${w.leaveEnd}` : ""}`;
     }
-    return `🏥 منصة صحة (${acc}):\n${icon(m.status)} *${m.status || "—"}*${m.pay ? " · " + m.pay : ""}\n   ${m.psl || ""} · ${m.type || ""} · طلب ${m.date || ""}${dates}`;
+    const why = meaning(m, w, r.branch);
+    return `🏥 منصة صحة (${acc}):\n${icon(m.status)} *${m.status || "—"}*${m.pay ? " · " + m.pay : ""}${why ? "\n👈 " + why : ""}\n   ${m.psl || ""} · ${m.type || ""} · طلب ${m.date || ""}${dates}`;
   }).join("\n\n");
 }
