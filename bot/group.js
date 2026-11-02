@@ -590,7 +590,7 @@ async function removeDoctor(id, by) {
 /* ---------- طبيب مو موجود → رسالة للمسؤول على الخاص: يضيفه أو لا ---------- */
 const adminJids = new Map();
 const adminLog = [];                       // آخر رسائلنا للمسؤول (سياق لما يسأل «ليش؟»)
-async function dmAdmin(text) {
+export async function dmAdmin(text) {
   adminLog.push({ at: Date.now(), text: String(text).slice(0, 700) }); while (adminLog.length > 8) adminLog.shift();
   const sock = getSock(); if (!sock || !admins.length) return false;
   let ok = false;
