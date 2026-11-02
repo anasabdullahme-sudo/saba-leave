@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.13.4";
+const VERSION = "2.13.5";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -308,7 +308,11 @@ async function handleCallCenter(m) {
   const head = `📨 قروب الكول سنتر (${by}):\n«${text.slice(0, 200)}»\n\n`;
   const site = r ? siteLine(r) : ""; pend.site = site;
   // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
-  if (!r) return dmAdmin(head + "🔎 ما لقيت طلب بهالبيانات في الموقع (بحثت بكل الفروع).");
+  if (!r) {                                                                        // مو في الموقع أبد → نرد في القروب
+    if (pend.answered) return;
+    try { const sent = await sock.sendMessage(jid, { text: "❌ ما فيه إجازة — المراجع ما رفعها بالشيت أو ما سلّمها للاستقبال" }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {}
+    return;
+  }
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
   // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
   if (!agentOnline()) { log.warn({ ref: r.ref }, "قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
