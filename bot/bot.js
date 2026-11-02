@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.13.2";
+const VERSION = "2.13.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -323,7 +323,7 @@ async function handleCallCenter(m) {
   const v = sehaVerdict(res, items[0]);
   if (!v.ok) return dmAdmin(head + site + "\n\n" + (res ? sehaText(res, items) : "🏥 أداة صحة ما ردت") + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");
   const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
-  const out = `${String(r.patientName || "").trim()}\n${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
+  const out = `${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
   if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
   try { const sent = await sock.sendMessage(jid, { text: out }, { quoted: m }); pend.replied = true; pend.reply = out; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
 }
