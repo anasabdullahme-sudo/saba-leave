@@ -80,11 +80,11 @@ const BR = { bawadi: "البوادي", tala: "تالا", watanak: "وطنك", ha
 export function sehaMeaning(row, w, branch) { return meaning(row, w || {}, branch); }
 function meaning(row, w, branch) {
   const st = row.status || "", pay = row.pay || "", br = BR[branch] || branch || "الفرع";
-  if (/مكتمل/.test(st)) return "مكتملة — تطلع للمراجع في صحتي";
-  if (/لم يتم الدفع/.test(pay) || (/معلق/.test(st) && !/تم الدفع/.test(pay))) return `بانتظار فرع ${br} يشحن رصيد المنصة (لم يتم الدفع)`;
-  if (/بانتظار (التحقق|التدقيق)|تدقيق|تحقق/.test(st)) return `الطبيب${w.doctor ? " (" + String(w.doctor).replace(/^د\.?\s*/, "د. ") + ")" : ""} ما دققها للحين`;
+  if (/لم يتم الدفع/.test(pay) || (/معلق/.test(st) && !/تم الدفع/.test(pay))) return `الإجازة مرفوعة ومدققة — بانتظار فرع ${br} يشحن المنصة`;
+  if (/مكتمل/.test(st)) return "الإجازة مدققة — يدخل يشيك من صحتي";
+  if (/بانتظار (التحقق|التدقيق)|تدقيق|تحقق/.test(st)) return "مرفوعة — بانتظار تدقيق الطبيب";
   if (/معاد/.test(st)) return "رجعت لموظف الإدخال يعدّلها";
-  return "";
+  return st;
 }
 const dmyNum = s => { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s || ""); return m ? +m[3] * 1e4 + +m[2] * 100 + +m[1] : 0; };
 // سطر/أسطر «منصة صحة» لرسالة القروب
