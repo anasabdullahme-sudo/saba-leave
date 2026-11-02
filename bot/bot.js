@@ -15,7 +15,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.1";
+const VERSION = "2.10.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -53,7 +53,7 @@ async function connect() {
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", ({ messages, type }) => {
     // رسائل القروب اللي وصلت والبوت طافي (append) — نعالج الأحدث من 6 ساعات
-    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) handleGroupMessage(m).catch(() => {}); else if (m.key?.remoteJid && !m.key.remoteJid.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 10 * 60e3) bufferIncoming(m); } return; }   // رسايل خاصة وصلت والبوت يعيد التشغيل (آخر 10 دقايق) → نرد عليها
+    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) onGroupMessage(m).catch(() => {}); else if (m.key?.remoteJid && !m.key.remoteJid.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 10 * 60e3) bufferIncoming(m); } return; }   // رسايل خاصة وصلت والبوت يعيد التشغيل (آخر 10 دقايق) → نرد عليها
     if (type !== "notify") return;
     for (const m of messages || []) bufferIncoming(m);
   });
@@ -267,6 +267,49 @@ function lookupKeys(text) {
   const refs = [...new Set((t.toUpperCase().match(/SB-?\s?[A-Z0-9]{5}/g) || []).map(r => "SB-" + r.replace(/^SB-?\s?/, "")))];
   return { ids, phones, refs };
 }
+async function findRequests(k) {
+  const found = new Map(), col = db.collection("requests");
+  const add = s => s.docs.forEach(d => found.set(d.id, { id: d.id, ...d.data() }));
+  for (const v of k.ids) { add(await col.where("idNumber", "==", v).limit(20).get()); add(await col.where("companionId", "==", v).limit(20).get()); }
+  for (const v of k.phones) add(await col.where("phone", "==", v).limit(20).get());
+  for (const v of k.refs) add(await col.where("ref", "==", v).limit(5).get());
+  return [...found.values()].filter(r => !isDupe(r)).sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
+}
+
+/* ---------- قروب الكول سنتر: أي رسالة عن إجازة/منصة فيها هوية أو جوال → البوت يرد بحالة الطلب ---------- */
+const CC_NAME = String(process.env.CALLCENTER_GROUP || "call center").toLowerCase();
+const ccSubj = new Map(), ccDone = new Set();
+async function isCallCenter(jid) {
+  if (!ccSubj.has(jid)) { try { ccSubj.set(jid, String((await sock.groupMetadata(jid))?.subject || "").toLowerCase()); } catch { return false; } }
+  return ccSubj.get(jid).includes(CC_NAME);
+}
+const CC_LEAVE = /منص|اجاز|سكليف|سك ليف|مرافق|مشهد|صحتي|صحه|تقرير طبي|sick/i;
+async function handleCallCenter(m) {
+  const jid = m.key.remoteJid, msg = m.message || {};
+  if (m.key?.id) { if (ccDone.has(m.key.id)) return; ccDone.add(m.key.id); if (ccDone.size > 3000) ccDone.clear(); }
+  if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;
+  const ts = Number(m.messageTimestamp || 0) * 1000; if (ts && Date.now() - ts > 15 * 60e3) return;   // رسايل قديمة (البوت كان طافي) → ما نرد عليها متأخر
+  const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
+  if (!text || !CC_LEAVE.test(normMsg(text))) return;                            // مو عن إجازة (تأمين، نتائج، دكتور…) → ما نتدخل
+  const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return;
+  const list = await findRequests(k);
+  const STC = { pending: "⏳ وصل طلبه ولسى ما انرفع على صحة", held: "⏸ الطلب معلّق", done: "✅ انرفعت على منصة صحة", cancelled: "✖️ الطلب ملغي" };
+  let out;
+  if (!list.length) out = "🔎 ما لقيت طلب إجازة بهالبيانات في نظام سابا (بحثت بكل الفروع).\nممكن ما رفع التقرير من رابط سابا، أو الرقم مختلف — اطلبوا منه رقم الطلب SB- أو رقم الهوية.";
+  else {
+    const r = list[0], dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
+    out = `📋 ${String(r.patientName || "").trim()} — ${r.ref || ""}
+${TYPE_ADM[r.type] || ""} · فرع ${BR_AR[r.branch] || r.branch || "—"}${dates ? " · " + dates : ""}
+🩺 ${r.doctorName || r.stampDoctor || "الطبيب ما انكتب"}
+${STC[r.status] || r.status}${r.status === "done" && ms(r.doneAt) ? " " + fmtD(ms(r.doneAt)) + "\n   الباقي: اعتماد الطبيب في صحة، وبعدها تطلع له في صحتي" : ""}${r.status === "held" ? " — " + (HOLD_AR[r.holdReason] || r.holdReason || "") + (r.holdNote ? ": " + String(r.holdNote).slice(0, 80) : "") : ""}${r.status === "pending" ? "\n   وصل " + fmtD(ms(r.createdAt)) : ""}${list.length > 1 ? `\n\n(له ${list.length} طلبات — هذا آخر واحد)` : ""}`;
+  }
+  try { await sock.sendMessage(jid, { text: out }, { quoted: m }); log.info({ found: list.length }, "قروب الكول سنتر: رد على استفسار إجازة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
+}
+async function onGroupMessage(m) {
+  if (await isCallCenter(m.key.remoteJid).catch(() => false)) return handleCallCenter(m);
+  return handleGroupMessage(m);
+}
+
 let wipeAsk = 0;
 async function adminLookup(m, jid, text) {
   const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -285,12 +328,7 @@ async function adminLookup(m, jid, text) {
   const wantImg = /^(صوره|صور|الصوره)(\s|$)/.test(n0);
   const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return false;
   if (String(text).split(/\n/).length > 10 || String(text).length > 600) return false;
-  const found = new Map(), col = db.collection("requests");
-  const add = s => s.docs.forEach(d => found.set(d.id, { id: d.id, ...d.data() }));
-  for (const v of k.ids) { add(await col.where("idNumber", "==", v).limit(20).get()); add(await col.where("companionId", "==", v).limit(20).get()); }
-  for (const v of k.phones) add(await col.where("phone", "==", v).limit(20).get());
-  for (const v of k.refs) add(await col.where("ref", "==", v).limit(5).get());
-  const list = [...found.values()].filter(r => !isDupe(r)).sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
+  const list = await findRequests(k);
   const keyTxt = [...k.ids.map(x => "هوية " + x), ...k.phones.map(x => "جوال " + x), ...k.refs].join(" · ");
   if (!list.length) { await sock.sendMessage(jid, { text: `🔎 ما لقيت أي طلب بـ ${keyTxt}\n(بحثت في كل الفروع)` }); return true; }
   if (wantImg) {                                                                    // «صورة …» → نرسل صور التقارير (من الموقع أو الأرشيف)
@@ -486,7 +524,7 @@ function mergeBurst(list) {
 
 async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
-  if (!m.key?.fromMe && jid.endsWith("@g.us")) return handleGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
+  if (!m.key?.fromMe && jid.endsWith("@g.us")) return onGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
   if (m.key?.fromMe || !jid || jid.endsWith("@g.us") || jid.includes("broadcast") || jid.endsWith("@newsletter")) return;
   const msg = m.message || {};
   // تعديل رسالة، حذف، تفاعل (إيموجي على رسالة)… مو رسالة جديدة → نتجاهلها
