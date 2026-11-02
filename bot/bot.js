@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.5";
+const VERSION = "2.8.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -255,6 +255,44 @@ async function reply(jid, text, phone) {
 // ردود قصيرة (سلام، شكر، تمام…) — لو جت بعد رسالة منا ما نرد عليها
 const PLEASANT = /^(و?\s*عليكم\s*السلام.*|السلام\s*عليكم.*|تمام.*|تم|اوكي?|ok(ay)?|شكرا.*|مشكور.*|يعطيك.*|الله\s*يعافيك.*|جزاك.*|طيب|حاضر|ابشر.*|ان\s*شاء\s*الله|خلاص|[\u{1F300}-\u{1FAFF}\u2600-\u27BF\s]+)[\s!.؟?]*$/iu;
 const normMsg = s => latin(s).replace(/[\u064B-\u0652]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").trim();
+/* ---------- المسؤول يسأل عن مراجع (هوية/جوال/رقم طلب) → حالة طلباته ومع أي طبيب ---------- */
+const ST_ADM = { pending: "⏳ بالانتظار (ما انرفع على صحة)", held: "⏸ معلّق", done: "✅ انرفع على صحة", cancelled: "✖️ ملغي" };
+const HOLD_AR = { license: "ترخيص الطبيب", data: "خطأ في البيانات", other: "أخرى" };
+const fmtD = t => t ? new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "numeric", minute: "2-digit" }).format(new Date(t)) : "";
+function lookupKeys(text) {
+  const t = latin(text);
+  const ids = [...new Set((t.match(/(?<!\d)[12]\d{9}(?!\d)/g) || []))];
+  const phones = [...new Set((t.replace(/[\s-]/g, "").match(/(?<!\d)(?:00966|\+?966|0)?5\d{8}(?!\d)/g) || []).map(normPhone).filter(p => /^05\d{8}$/.test(p)))];
+  const refs = [...new Set((t.toUpperCase().match(/SB-?\s?[A-Z0-9]{5}/g) || []).map(r => "SB-" + r.replace(/^SB-?\s?/, "")))];
+  return { ids, phones, refs };
+}
+async function adminLookup(m, jid, text) {
+  const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  if (q) return false;                                                              // رد على رسالة (استفسار/طبيب) → مو بحث
+  const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return false;
+  if (String(text).split(/\n/).length > 10 || String(text).length > 600) return false;
+  const found = new Map(), col = db.collection("requests");
+  const add = s => s.docs.forEach(d => found.set(d.id, { id: d.id, ...d.data() }));
+  for (const v of k.ids) { add(await col.where("idNumber", "==", v).limit(20).get()); add(await col.where("companionId", "==", v).limit(20).get()); }
+  for (const v of k.phones) add(await col.where("phone", "==", v).limit(20).get());
+  for (const v of k.refs) add(await col.where("ref", "==", v).limit(5).get());
+  const list = [...found.values()].filter(r => !isDupe(r)).sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
+  const keyTxt = [...k.ids.map(x => "هوية " + x), ...k.phones.map(x => "جوال " + x), ...k.refs].join(" · ");
+  if (!list.length) { await sock.sendMessage(jid, { text: `🔎 ما لقيت أي طلب بـ ${keyTxt}\n(بحثت في كل الفروع)` }); return true; }
+  const lines = list.slice(0, 5).map((r, i) => {
+    const st = (ST_ADM[r.status] || r.status) + (r.status === "held" ? ` — ${HOLD_AR[r.holdReason] || r.holdReason || ""}${r.holdNote ? ": " + String(r.holdNote).slice(0, 80) : ""}` : "")
+      + (r.status === "done" ? `${r.sehaRef ? " — " + r.sehaRef : ""}${ms(r.doneAt) ? " · " + fmtD(ms(r.doneAt)) : ""}${r.doneBy ? " · " + r.doneBy : ""}\n   ينتظر اعتماد الطبيب في صحة` : "");
+    const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" → ");
+    return `${list.length > 1 ? (i + 1) + ") " : ""}*${String(r.patientName || "—").trim()}* — ${r.ref || ""}
+📄 ${TYPE_ADM[r.type] || r.type || ""} — فرع ${BR_AR[r.branch] || r.branch || "—"}${dates ? "\n📅 " + dates : ""}
+🩺 الطبيب: ${r.doctorName || r.stampDoctor || "— ما انكتب"}
+🪪 ${r.idNumber || "—"}${r.type === "companion" && r.companionId ? " · المرافق " + r.companionId : ""} · 📱 ${r.phone || "—"}
+📌 ${st}
+🕐 وصل ${fmtD(ms(r.createdAt))}`;
+  });
+  await sock.sendMessage(jid, { text: `🔎 ${list.length === 1 ? "لقيت طلب واحد" : `لقيت ${list.length} طلبات${list.length > 5 ? " (هذي آخر 5)" : ""}`}:\n\n${lines.join("\n\n")}` });
+  return true;
+}
 async function findByRef(ref) {
   const s = await db.collection("requests").where("ref", "==", ref).limit(1).get();
   return s.docs[0] || null;
@@ -438,6 +476,7 @@ async function onIncoming(m) {
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
   const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
+  if (text && isAdminPhone(senderPhone) && await adminLookup(m, jid, text).catch(e => { log.warn({ err: String(e?.message || e) }, "بحث المسؤول"); return false; })) return;   // المسؤول أرسل هوية/جوال → حالة الطلب
   if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
   const t = latin(text).toUpperCase();
   const it = readIntent(text, media);
