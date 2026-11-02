@@ -29,7 +29,7 @@ export async function initAgent(o) {
   }, 30 * MIN);
 }
 export const agentKey = () => key;
-export const agentOnline = () => !!(state && Date.now() - (state.at || 0) < 3 * MIN);
+export const agentOnline = () => !!(state && Date.now() - (state.at || 0) < 12 * MIN);
 export const agentState = () => state;
 export const agentReady = () => agentOnline() && !!state.ok;                     // داخل صحة الحين (مو ينتظر نفاذ)
 

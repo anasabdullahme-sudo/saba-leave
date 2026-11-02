@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.17.1";
+const VERSION = "2.17.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -170,9 +170,17 @@ function trackItem(r) {
 }
 function startTrackSync() {
   const since = Timestamp.fromMillis(Date.now() - TRACK_DAYS * DAY);
-  let chain = Promise.resolve();
+  let chain = Promise.resolve(), first = true;
   db.collection("requests").where("createdAt", ">=", since).onSnapshot(s => {
-    const changes = s.docChanges().filter(c => c.type !== "removed");
+    let changes = s.docChanges().filter(c => c.type !== "removed");
+    // أول قراءة بعد تشغيل البوت: كل الطلبات تجي «جديدة» — كانت تنكتب كلها من جديد مع كل إعادة تشغيل (آلاف الكتابات → خلص حد Firestore المجاني)
+    // الحين: نحفظها في الذاكرة بس، ونكتب اللي تغيّر آخر 6 ساعات (وقت ما كان البوت طافي)
+    if (first) {
+      first = false;
+      const recent = Date.now() - 6 * 3600e3;
+      for (const ch of changes) { const r = ch.doc.data(); if (r.idNumber && r.phone && (ch.doc.updateTime?.toMillis?.() || 0) < recent) trackCache.set(ch.doc.id, { key: trackKey(r.idNumber, r.phone), json: JSON.stringify(trackItem(r)) }); }
+      changes = changes.filter(ch => (ch.doc.updateTime?.toMillis?.() || Date.now()) >= recent);
+    }
     chain = chain.then(async () => {
       for (const ch of changes) {
         const r = ch.doc.data(), id = ch.doc.id;
@@ -1120,10 +1128,10 @@ async function main() {
   }, e => log.error({ e }, "control listener"));
 
   // نبض كل دقيقتين ونص عشان اللوحة تعرف إن البوت شغال (كل نبضة = قراءة عند كل لوحة مفتوحة، فما نكثّر)
-  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 150000);
+  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 600000);   // كل 10 دقايق (كان كل دقيقتين ونص — كتابات كثيرة)
   // نبض عام (صفحة الأطباء تقراه كل 5 دقائق — لو وقف تطلع «تحديثات القروب متوقفة»)
   const pub = () => connected && db.doc("public/bot").set({ seen: Date.now() }, { merge: true }).catch(() => {});   // بس لو واتساب متصل (غيره ما توصل رسائل القروب)
-  pub(); setInterval(pub, 5 * 60000);
+  pub(); setInterval(pub, 10 * 60000);
 
   startTrackSync();
   watchDoctors();

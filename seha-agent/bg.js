@@ -28,8 +28,8 @@ async function patchQ(key, id, data) {
 }
 let lastStateAt = 0, lastStateSig = "";
 async function writeState(key, s, force) {
-  const sig = JSON.stringify({ ...s, at: 0 });
-  if (!force && sig === lastStateSig && Date.now() - lastStateAt < 60e3) return;
+  const sig = JSON.stringify({ ok: s.ok, account: s.account, nafath: s.nafath?.num || "" });   // نكتب بس لو تغيّر شي يهم البوت (داخل/طالع، الحساب، رقم نفاذ)
+  if (!force && sig === lastStateSig && Date.now() - lastStateAt < 5 * 60e3) return;   // نبضة كل 5 دقايق بس (توفير كتابات Firestore)
   lastStateSig = sig; lastStateAt = Date.now();
   const data = { ...s, at: Date.now(), ver: VER };
   await set({ lastState: data });
@@ -56,7 +56,7 @@ async function runQuery(c, tab, q) {
   for (const item of (q.items || []).slice(0, 3)) {
     let r = null, last = "";
     for (let i = 0; i < 5; i++) {
-      await step(`أبحث في حساب ${item.acc?.key || ""} (محاولة ${i + 1})`);
+      if (i) await step(`أبحث في حساب ${item.acc?.key || ""} (محاولة ${i + 1})`);
       r = await send(tab.id, { type: "SEARCH", item }, 60000);
       if (r?.switching) { last = "بدّلت الحساب وأنتظر الصفحة"; await step(last); await new Promise(x => setTimeout(x, 8000)); continue; }
       if (!r) { last = "صفحة صحة ما ردّت (تحمّل أو انقفلت)"; const st = await send(tab.id, { type: "STATE" }, 5000); last += st ? ` — الصفحة: ${st.page}` : ""; await step(last); await new Promise(x => setTimeout(x, 6000)); continue; }
