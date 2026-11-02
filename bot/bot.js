@@ -321,8 +321,7 @@ async function handleCallCenter(m) {
     const today = hijriNum(hijri(Date.now()));
     const recent = (res[0].rows || []).filter(x => today - hijriNum(x.date) <= 14).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
     if (recent) return sendG(`${sehaIcon(recent.pay && /لم يتم الدفع/.test(recent.pay) ? "معلق" : recent.status)} ${sehaMeaning(recent, {}, br)}`);
-    await sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");
-    return dmAdmin(`${head}🔎 ما لقيتها لا في الموقع ولا في صحة (حساب ${BR_AR[br] || br}).`);
+    return sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");   // بدون رسالة خاص
   }
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
   // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
