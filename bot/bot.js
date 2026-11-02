@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.13.0";
+const VERSION = "2.13.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -279,7 +279,7 @@ async function findRequests(k) {
 
 /* ---------- قروب الكول سنتر: أي رسالة عن إجازة/منصة فيها هوية أو جوال → البوت يرد بحالة الطلب ---------- */
 const CC_NAME = String(process.env.CALLCENTER_GROUP || "call center").toLowerCase();
-const ccSubj = new Map(), ccDone = new Set(), sehaCache = new Map();
+const ccSubj = new Map(), ccDone = new Set(), sehaCache = new Map(), ccPending = new Map();   // ccPending: استفسارات ننتظر نرد عليها (لو أحد ردّ قبلنا → ما نرد)
 async function isCallCenter(jid) {
   if (!ccSubj.has(jid)) { try { ccSubj.set(jid, String((await sock.groupMetadata(jid))?.subject || "").toLowerCase()); } catch { return false; } }
   return ccSubj.get(jid).includes(CC_NAME);
@@ -289,10 +289,15 @@ async function handleCallCenter(m) {
   const jid = m.key.remoteJid, msg = m.message || {};
   if (m.key?.id) { if (ccDone.has(m.key.id)) return; ccDone.add(m.key.id); if (ccDone.size > 3000) ccDone.clear(); }
   if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;
+  // أحد من القروب ردّ (سحب) على استفسار ننتظر نرد عليه → خلاص ما نرد عليه
+  const qid = (msg.extendedTextMessage || msg.imageMessage || msg.documentMessage)?.contextInfo?.stanzaId;
+  if (qid && ccPending.has(qid)) { ccPending.get(qid).answered = true; log.info("قروب الكول سنتر: أحد ردّ على الاستفسار قبلنا"); return; }
   const ts = Number(m.messageTimestamp || 0) * 1000; if (ts && Date.now() - ts > 15 * 60e3) return;   // رسايل قديمة (البوت كان طافي) → ما نرد عليها متأخر
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
   if (!text || !CC_LEAVE.test(normMsg(text))) return;                            // مو عن إجازة (تأمين، نتائج، دكتور…) → ما نتدخل
   const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return;
+  const pend = { answered: false, at: Date.now() }; ccPending.set(m.key.id, pend);
+  for (const [id, p] of ccPending) if (Date.now() - p.at > 30 * 60e3) ccPending.delete(id);
   const list = await findRequests(k), r = list[0], by = m.pushName || "الكول سنتر";
   const head = `📨 قروب الكول سنتر (${by}):\n«${text.slice(0, 200)}»\n\n`;
   const site = r ? siteLine(r) : "";
@@ -309,6 +314,7 @@ async function handleCallCenter(m) {
   if (!v.ok) return dmAdmin(head + site + "\n\n" + (res ? sehaText(res, items) : "🏥 أداة صحة ما ردت") + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");
   const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
   const out = `${String(r.patientName || "").trim()}\n${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
+  if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
   try { await sock.sendMessage(jid, { text: out }, { quoted: m }); log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
 }
 // سطر الموقع (للمسؤول)
