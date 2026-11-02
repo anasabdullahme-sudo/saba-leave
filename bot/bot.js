@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.13.1";
+const VERSION = "2.13.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -291,16 +291,26 @@ async function handleCallCenter(m) {
   if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;
   // أحد من القروب ردّ (سحب) على استفسار ننتظر نرد عليه → خلاص ما نرد عليه
   const qid = (msg.extendedTextMessage || msg.imageMessage || msg.documentMessage)?.contextInfo?.stanzaId;
-  if (qid && ccPending.has(qid)) { ccPending.get(qid).answered = true; log.info("قروب الكول سنتر: أحد ردّ على الاستفسار قبلنا"); return; }
+  const who = m.key.participant || m.participant || "";
+  if (qid && ccPending.has(qid)) {
+    const p = ccPending.get(qid), qtext = (msg.extendedTextMessage?.text || msg.imageMessage?.caption || "📎").trim();
+    // ردّ على رد البوت، أو صاحب الاستفسار رجع يكتب على رسالته بعد ما رد البوت (مثلاً «المراجع ما وصلت له») → للمسؤول على الخاص
+    if (p.botIds?.has(qid) || (who && who === p.from && p.replied)) {
+      dmAdmin(`📨 قروب الكول سنتر (${m.pushName || "موظف"}) رجع يكتب على الاستفسار:\n«${qtext.slice(0, 300)}»\n\n${p.site || ""}${p.reply ? "\n\nرد البوت كان:\n" + p.reply : ""}`).catch(() => {});
+      return;
+    }
+    if (who && who === p.from) return;                                             // صاحب الاستفسار يضيف شي قبل ما نرد → نكمل عادي
+    p.answered = true; log.info("قروب الكول سنتر: أحد ردّ على الاستفسار قبلنا"); return;
+  }
   const ts = Number(m.messageTimestamp || 0) * 1000; if (ts && Date.now() - ts > 15 * 60e3) return;   // رسايل قديمة (البوت كان طافي) → ما نرد عليها متأخر
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
   if (!text || !CC_LEAVE.test(normMsg(text))) return;                            // مو عن إجازة (تأمين، نتائج، دكتور…) → ما نتدخل
   const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return;
-  const pend = { answered: false, at: Date.now() }; ccPending.set(m.key.id, pend);
-  for (const [id, p] of ccPending) if (Date.now() - p.at > 30 * 60e3) ccPending.delete(id);
+  const pend = { answered: false, at: Date.now(), from: m.key.participant || m.participant || "", replied: false, botIds: new Set() }; ccPending.set(m.key.id, pend);
+  for (const [id, p] of ccPending) if (Date.now() - p.at > 12 * 3600e3) ccPending.delete(id);
   const list = await findRequests(k), r = list[0], by = m.pushName || "الكول سنتر";
   const head = `📨 قروب الكول سنتر (${by}):\n«${text.slice(0, 200)}»\n\n`;
-  const site = r ? siteLine(r) : "";
+  const site = r ? siteLine(r) : ""; pend.site = site;
   // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
   if (!r) return dmAdmin(head + "🔎 ما لقيت طلب بهالبيانات في الموقع (بحثت بكل الفروع).");
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
@@ -315,7 +325,7 @@ async function handleCallCenter(m) {
   const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
   const out = `${String(r.patientName || "").trim()}\n${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
   if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
-  try { await sock.sendMessage(jid, { text: out }, { quoted: m }); log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
+  try { const sent = await sock.sendMessage(jid, { text: out }, { quoted: m }); pend.replied = true; pend.reply = out; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
 }
 // سطر الموقع (للمسؤول)
 function siteLine(r) {
