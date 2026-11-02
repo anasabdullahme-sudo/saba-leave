@@ -91,6 +91,19 @@ service cloud.firestore {
     }
 
     // زر الطبيب (من أثير): الطبيب يرسل حالته بس (وقف/أستقبل/انتظار/مواعيد) — البوت يقرأها ويطبّقها ويحذفها
+    // أداة صحة الجانبية (كمبيوتر المسؤول): المسار فيه مفتاح سري طويل يعرفه البوت والأداة بس
+    match /agent/{key}/q/{id} {
+      allow get, list: if key.size() >= 40;
+      allow update: if key.size() >= 40
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'res', 'err', 'doneAt', 'pickedAt'])
+        && request.resource.data.status in ['picked', 'done', 'error']
+        && (!('res' in request.resource.data) || request.resource.data.res.size() <= 5);
+    }
+    match /agent/{key}/s/{id} {
+      allow get: if key.size() >= 40;
+      allow write: if key.size() >= 40 && id == 'state'
+        && request.resource.data.keys().hasOnly(['at', 'page', 'account', 'ok', 'nafath', 'fails', 'ver', 'msg']);
+    }
     match /signals/{id} {
       allow create: if autoId(id)
         && request.resource.data.keys().hasOnly(['doctorId', 'kind', 'at', 'pc'])
