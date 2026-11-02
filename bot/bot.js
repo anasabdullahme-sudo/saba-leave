@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.16.0";
+const VERSION = "2.16.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -436,7 +436,10 @@ async function adminLookup(m, jid, text) {
 🕐 وصل ${fmtD(ms(r.createdAt))}`;
   });
   await sock.sendMessage(jid, { text: `🔎 ${list.length === 1 ? "لقيت طلب واحد" : `لقيت ${list.length} طلبات${list.length > 5 ? " (هذي آخر 5)" : ""}`}:\n\n${lines.join("\n\n")}` });
-  sehaFollow(jid, null, sehaItems(k, list)).catch(() => {});
+  { const its = sehaItems(k, list), st = agentState();
+    if (its.length && !agentOnline()) await sock.sendMessage(jid, { text: `🏥 ما أقدر أشيك في صحة الحين — أداة صحة مو متصلة${st?.at ? " (آخر تواصل " + fmtD(st.at) + ")" : " (ما اشتغلت ولا مرة)"}.\nتأكد إن الكمبيوتر وكروم شغالين والأداة مفعّلة.` });
+    else if (its.length) await sock.sendMessage(jid, { text: `🏥 أشيك في صحة (حساب ${BR_AR[its[0].branch] || its[0].branch})… يوصلك الرد خلال دقيقة أو دقيقتين.` });
+    sehaFollow(jid, null, its).catch(() => {}); }
   return true;
 }
 async function findByRef(ref) {
