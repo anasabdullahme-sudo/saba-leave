@@ -183,4 +183,13 @@
   const iv = setInterval(() => { if (!alive()) { clearInterval(iv); return; } if (document.visibilityState === "visible") tick(); }, 500);       // select2 ما يطلق change عادي، فنراقب القيمة
   addEventListener("scroll", place, true); addEventListener("resize", place);
   setInterval(() => { if (field && document.visibilityState === "visible") load(); }, 60000);
+  // الخلفية تشيك كل 30 ثانية: أي تعديل (من القروب أو صفحة الأطباء أو زر الطبيب) يتحدث في البطاقة على طول بدون ما تعيد اختيار الطبيب
+  try {
+    chrome.storage.onChanged.addListener((ch, area) => {
+      const c = area === "local" && ch.sabaBoardCache?.newValue; if (!c || !alive()) return;
+      if (c.board?.departments) board = c.board;
+      if (c.today !== undefined) today = c.today || null;
+      lastSig = ""; tick();
+    });
+  } catch { /* سياق الإضافة انتهى */ }
 })();
