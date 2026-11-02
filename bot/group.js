@@ -237,6 +237,7 @@ function dayRule(text) {
   const date = dayOf(text) || (today ? nowR().iso : null); if (!date) return null;
   // جدول لأكثر من طبيب (سطر لكل طبيب: «د. إكرامي من ٩ص - ٩م») → دوام كل واحد ذاك اليوم
   const lines = String(text).split(/\n+/).map(l => ({ l, d: fuzzyPick(l), sc: schedOf(l) })).filter(x => x.d && x.sc.from != null);
+  if (lines.length > 1 && PERMANENT.test(n)) return lines.map(x => ({ doctor_id: x.d.id, name: shortName(x.d.name), kind: "schedule_change", start_date: date, from_time: hhmm(x.sc.from), to_time: x.sc.to != null ? hhmm(x.sc.to) : "", days: x.sc.days || [] }));   // «من يوم الأحد كالآتي» = جدول ثابت من ذاك اليوم
   if (lines.length > 1) return lines.map(x => ({ doctor_id: x.d.id, name: shortName(x.d.name), kind: "starts_at", date, at_time: hhmm(x.sc.from), until_time: x.sc.to != null ? hhmm(x.sc.to) : "" }));
   const d = fuzzyPick(text); if (!d) return null;
   const sc = schedOf(text);
@@ -264,7 +265,8 @@ function ruleParse(text, quoted) {
   const vac = vacationRule(text);
   if (vac) { const d = fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null); return d ? [{ doctor_id: d.id, name: shortName(d.name), kind: "vacation", ...vac }] : Object.assign([], { unknown: true }); }
   const timeIn = n => { const m = /(\d{1,2})(?::(\d{2}))?/.exec(n); return m ? `${String(+m[1]).padStart(2, "0")}:${m[2] || "00"}` : ""; };
-  const kindOf = n => /مواعيد فقط|فقط مواعيد/.test(n) ? "appointments_only"
+  const kindOf = n => /تاخر/.test(n) && /انتظار\s*(الى|الي|لين|لحد|حتى)/.test(n) ? "late_wait"
+    : /مواعيد فقط|فقط مواعيد/.test(n) ? "appointments_only"
     : /وقف|لحد يطلع|لا احد يدخل|محد يدخل|خلاص/.test(n) ? "stop"
     : /غير متواجد|ما بيجي|يعتذر عن الحضور|مو موجود اليوم/.test(n) ? "absent_today"
     : /انتظار/.test(n) ? "busy"
@@ -285,6 +287,13 @@ function ruleParse(text, quoted) {
     const tm = timeIn(n), e = { doctor_id: who.id, name: shortName(who.name), kind };
     const rg = /(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/.exec(latin(line));          // «من ٤-١٠» = دوام اليوم من 4 إلى 10
     if (rg && (kind === "present" || kind === "starts_at")) { e.kind = "starts_at"; e.at_time = `${String(+rg[1]).padStart(2, "0")}:${rg[2] || "00"}`; e.until_time = `${String(+rg[3]).padStart(2, "0")}:${rg[4] || "00"}`; evs.push(e); continue; }
+    if (kind === "late_wait") {                                                                   // «بيتأخر يجي 3:30 ويستقبل انتظار الى ٥ والباقي مواعيد»
+      const ts = [...latin(n).matchAll(/(\d{1,2})(?::(\d{2}))?/g)].map(m => `${String(+m[1]).padStart(2, "0")}:${m[2] || "00"}`);
+      evs.push({ ...e, kind: "late", ...(ts[0] ? { at_time: ts[0] } : { delay_minutes: 30 }) });
+      if (ts[1]) evs.push({ ...e, kind: "appointments_only", at_time: ts[1] });
+      continue;
+    }
+    if (kind === "present" && tm && /(^|\s)(الين|لين|الى|إلى|لحد|حتى)\s/.test(n)) { e.kind = "leaves_at"; e.at_time = tm; evs.push(e); continue; }   // «مداوم الين ٦:٣٠» = يطلع ٦:٣٠
     if (kind === "late") e.delay_minutes = /ساعه/.test(n) ? 60 : 20;
     if (kind === "busy") e.waiting = +((/(\d+)\s*انتظار/.exec(n) || [])[1] || 0);
     if (["stop", "leaves_at", "starts_at"].includes(kind) && tm) e.at_time = tm;
@@ -347,7 +356,9 @@ async function applyPlans() {
       return now.filter(i => i.date === t.iso);                                     // اللي فات يومه ينشال بس
     });
     for (const i of due.filter(i => i.kind === "remove_doctor")) { const nm = await removeDoctor(i.doctorId, "البوت (مجدول)"); if (nm) await dmAdmin(`✅ شلت د. ${nm} من الجدول (زي ما اتفقنا).`); }
-    for (const i of due.filter(i => i.kind !== "remove_doctor")) await apply([{ kind: i.kind, doctor_id: i.doctorId, name: "", at_time: i.at_time, until_time: i.until_time, delay_minutes: i.delay_minutes }], { text: "", by: (i.by || "القروب") + " (مجدول)", planned: true });
+    const sets = due.filter(i => i.kind === "set_schedule").map(i => ({ d: docs().find(x => x.id === i.doctorId), sch: i.sch })).filter(x => x.d && x.sch);
+    if (sets.length) await updateSchedules(sets, { by: "القروب (مجدول)" });
+    for (const i of due.filter(i => i.kind !== "remove_doctor" && i.kind !== "set_schedule")) await apply([{ kind: i.kind, doctor_id: i.doctorId, name: "", at_time: i.at_time, until_time: i.until_time, delay_minutes: i.delay_minutes }], { text: "", by: (i.by || "القروب") + " (مجدول)", planned: true });
     if (due.length) log.info({ n: due.length }, "طبّقنا أحداث اليوم المجدولة");
   } catch (e) { log.warn({ err: String(e?.message || e) }, "الأحداث المجدولة"); }
 }
@@ -425,6 +436,12 @@ async function apply(evs, ctx) {
         const from = toMin(e.from_time) ?? sc.from, to = toMin(e.to_time) ?? sc.to;
         const sch = { days, shifts: from != null && to != null ? [{ s: from, e: to }] : null, room: e.room || "", ext: e.ext || "", fee: String(e.fee || "").replace(/\D/g, "") };
         if (d && !sch.shifts && (from != null || to != null)) (ctx.rep ||= []).push(`⚠️ د. ${shortName(d.name)} — ما عدّلت الدوام لأن وقت ${from == null ? "البداية" : "النهاية"} مو مكتوب`);
+        // دوام ثابت يبدأ يوم قدّام («من يوم الأحد 1/11 كالآتي») → نحفظه ويتطبّق يومها (البطاقة تبقى على الدوام الحالي لين ذاك اليوم)
+        const sFrom = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : (/(^|\s)(من|ابتداء من|اعتبارا من|بدايه من|يباشر|سيباشر)\s+(يوم\s+)?(ال)?(سبت|احد|اثنين|ثلاثاء|اربعاء|خميس|بكره|غدا)/.test(norm(ctx.text)) ? dayOf(ctx.text) : null);
+        if (d && sFrom && sFrom > t.iso && sFrom <= isoPlus(t.iso, 30) && (days.length || sch.shifts)) {
+          plans.push({ id: uid(), date: sFrom, doctorId: d.id, kind: "set_schedule", sch, by: ctx.by }); applied.push("planned");
+          (ctx.rep ||= []).push(`🗓 د. ${shortName(d.name)} — دوام ثابت من ${sFrom.split("-").reverse().slice(0, 2).join("/")}: ${schedTxt(sch)}\n   الموقع: يتعدّل يومها (لين ذاك اليوم يبقى الدوام الحالي)`); continue;
+        }
         if (d && (days.length || sch.shifts || sch.room || sch.fee)) { upd.push({ d, sch }); applied.push("schedule_change"); (ctx.rep ||= []).push(`✏️ د. ${shortName(d.name)} — تغيير دوام ثابت: ${schedTxt(sch)}\n   الموقع: انعدّل في الجدول`); continue; }
         if (!d && admins.length) { newDocs.push({ e, sch }); applied.push("new_doctor"); (ctx.rep ||= []).push(`🆕 د. ${e.name} — طبيب مو موجود: أرسلت لك تسأل تضيفه أو لا`); continue; }
         if (d) { applied.push("known"); (ctx.rep ||= []).push(`ℹ️ د. ${shortName(d.name)} — موجود بالجدول، ما تغيّر شي`); continue; }                      // موجود وما فيه شي يتعدل (✅ بدون تغيير)
@@ -460,7 +477,11 @@ async function apply(evs, ctx) {
       if (["resume", "absent_today", "stop", "starts_at", "free"].includes(e.kind)) cur.scheduled = cur.scheduled.filter(x => x.key !== key || (e.kind === "starts_at" && x.kind === "appt"));
       if (e.kind === "resume") delete cur.st[key];
       else if (e.kind === "late") { const from = atMin ?? (t.m + (e.delay_minutes || 30)); cur.st[key] = { kind: "late", from, at, by: ctx.by }; info = `يوصل تقريباً ${hm(from)}`; }
-      else if (e.kind === "leaves_at") { cur.st[key] = { kind: "leaves", until: nextDay(atMin) ?? untilMin, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : ""; }
+      else if (e.kind === "leaves_at") {
+        const lu = nextDay(atMin) ?? untilMin;
+        cur.st[key] = { kind: "leaves", until: lu, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : "";
+        if (lu != null && lu > t.m && lu < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: lu, key, kind: "off", name, dep, by: ctx.by }); }   // بعد ما يطلع: البطاقة «خلص دوامه اليوم» (مو يرجع لدوامه العادي)
+      }
       else if (e.kind === "starts_at") { const ap = cur.scheduled.find(x => x.key === key && x.kind === "appt"); cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by, ...(ap ? { apptFrom: ap.min } : {}) };
         if (untilMin != null && untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }   // بعد نهايته: «غير متواجد»
         info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }

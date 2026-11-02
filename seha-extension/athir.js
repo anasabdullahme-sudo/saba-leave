@@ -97,6 +97,7 @@
     if (vac) { const n = vac.end ? nextStart(d, t) : null; return ["vac", `في إجازة${vac.end ? " لين " + vac.end.split("-").reverse().slice(0, 2).join("/") : ""}${n && n.day > 0 ? " · يرجع " + (n.day === 1 ? "بكرة" : WD[n.wd]) + " " + hm(n.s) : ""}`]; }
     const s = today?.date === t.iso ? today.st?.[d.id] : null, a = active(d, t);
     if (s?.kind === "stop") return ["red", "⛔ وقف استقبال الحالات"];
+    if (s?.kind === "absent" && s.off) return ["gray", "خلص دوامه اليوم"];               // دوام اليوم المعدّل خلص (أو طلع بدري)
     if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
     if (s?.kind === "appt") {                                              // مواعيد فقط + متى يخلص دوامه
       const end = s.until ?? (a ? a.e : null);
@@ -105,7 +106,9 @@
     }
     if (s?.kind === "absent" && s.off) return ["gray", "خلص دوامه اليوم"];
     if (s?.kind === "absent") return ["red", "غير متواجد اليوم"];
-    if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)} (بعد ${left(s.from - t.m)})`];
+    const walkTxt = () => s.apptFrom != null ? (t.m < s.apptFrom ? ` · انتظار لين ${hm(s.apptFrom)}` : " · مواعيد فقط") : "";
+    if (s?.kind === "late" && t.m < s.from) return ["amber", `متأخر — يوصل ${hm(s.from)} (بعد ${left(s.from - t.m)})${s.apptFrom != null ? ` · انتظار لين ${hm(s.apptFrom)}` : ""}`];
+    if (s?.kind === "late" && s.apptFrom != null) return [t.m >= s.apptFrom ? "amber" : "green", `✓ متواجد الحين${a ? " — لين " + hm(a.e) : ""}${walkTxt()}`];
     if (s?.kind === "busy") return ["amber", `زحمة${s.count ? " — " + s.count + " بالانتظار" : ""}`];
     // دوام اليوم بس (من القروب): «اليوم من 2م إلى 7م» + «انتظار لين 5م»
     if (s?.kind === "starts" && s.from != null) {
@@ -116,7 +119,8 @@
       return [s.apptFrom != null && t.m >= s.apptFrom ? "amber" : "green", `✓ متواجد الحين${end != null ? " — لين " + hm(end) : ""}${walk}`];
     }
     if (s?.kind === "appt_at") return ["amber", t.m < s.from ? `انتظار لين ${hm(s.from)} · بعدها مواعيد فقط` : "مواعيد فقط"];
-    if (s?.kind === "leaves" && s.until != null) return t.m >= s.until ? ["gray", "طلع"] : ["amber", `متواجد — يطلع ${hm(s.until)}`];
+    if (s?.kind === "leaves" && s.until != null) return t.m >= s.until ? ["gray", "خلص دوامه اليوم"] : ["green", `✓ متواجد الحين — اليوم لين ${hm(s.until)}${s.until - t.m <= 60 ? ` (باقي ${left(s.until - t.m)})` : ""}`];
+    if ((s?.kind === "free" || s?.kind === "present") && s.until != null) return t.m >= s.until ? ["gray", "خلص دوامه اليوم"] : ["green", `✓ متواجد الحين — لين ${hm(s.until)}`];
     if (s?.kind === "free" || s?.kind === "present") return ["green", "متواجد الحين"];
     if (a) { const endIn = (a.e > a.s ? a.e : a.e + (t.m >= a.s ? 1440 : 0)) - t.m; return ["green", `✓ متواجد الحين — لين ${hm(a.e)}${endIn <= 60 ? ` (باقي ${left(endIn)})` : ""}`]; }
     const n = nextStart(d, t);
