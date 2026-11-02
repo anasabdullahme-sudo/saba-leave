@@ -33,6 +33,16 @@ small{color:var(--mut)}
   <div class="row"><label style="margin:0;font-weight:500"><input id="on" type="checkbox" checked> تشغيل الأداة</label></div>
   <div class="row"><button class="pri" id="save">حفظ</button><button id="open">افتح تبويب صحة</button><span id="msg" class="mut"></span></div>
 </div>
+<div class="card">
+  <b>تجربة بحث</b> <small>(تشيك إن الأداة تقدر تبحث في صحة — بدون البوت)</small>
+  <label for="tid">رقم هوية مراجع</label>
+  <input id="tid" type="text" inputmode="numeric" maxlength="10" autocomplete="off" placeholder="10 أرقام">
+  <label for="tfrom">تاريخ بداية الإجازة (اختياري — عشان تجرّب «عرض»)</label>
+  <input id="tfrom" type="text" autocomplete="off" placeholder="مثلاً 01/11/2026">
+  <div class="row"><button class="pri" id="test">جرّب البحث</button><span id="tmsg" class="mut"></span></div>
+  <div id="tres" style="margin-top:10px;white-space:pre-wrap;font-size:13px"></div>
+  <div class="row" id="tbtns" hidden><button id="copylog">نسخ السجل</button><button id="savehtml" hidden>تنزيل كود الصفحة</button></div>
+</div>
 <div class="card mut">
   • خلّ الكمبيوتر شغّال وكروم مفتوح (التبويب المثبّت حق صحة لا تسكره).<br>
   • لو صحة طلّعتك: الأداة تبدأ الدخول، ويجيك من البوت واتساب برقم نفاذ تختاره من تطبيق نفاذ.<br>

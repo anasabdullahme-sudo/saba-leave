@@ -3,5 +3,10 @@
   "deploy": {
     "startCommand": "node bot.js",
     "restartPolicyType": "ALWAYS"
+  },
+  "build": {
+    "watchPatterns": [
+      "/bot/**"
+    ]
   }
 }

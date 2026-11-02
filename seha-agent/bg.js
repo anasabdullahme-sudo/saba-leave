@@ -49,24 +49,54 @@ async function ensureTab(c) {
 }
 const send = (tabId, msg, ms = 60000) => Promise.race([chrome.tabs.sendMessage(tabId, msg).catch(() => null), new Promise(r => setTimeout(() => r(null), ms))]);
 
+// الإطار الداخلي (sickleave.seha.sa) جاهز؟ ننتظره لين يرد
+async function frameReady(tab, ms = 25000) {
+  const end = Date.now() + ms; let st = null;
+  let injected = false;
+  while (Date.now() < end) {
+    st = await send(tab.id, { type: "F_STATE" }, 3000); if (st?.ready) return st;
+    // الأداة انحدّثت والصفحة مفتوحة من قبل؟ سكربت الإطار ما انحقن — نحقنه بأنفسنا (مرة)
+    if (!st && !injected && Date.now() > end - ms + 4000) { injected = true; await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["common.js", "frame.js"] }).catch(e => console.warn("inject frame", e)); }
+    await new Promise(r => setTimeout(r, 1200));
+  }
+  return st || { ready: false, none: true };
+}
 async function runQuery(c, tab, q) {
-  const step = t => patchQ(c.agentKey, q.id, { step: t }).catch(() => {});   // البوت يشوف وين وصلنا لو تأخرنا
+  const step = t => patchQ(c.agentKey, q.id, { step: t }).catch(() => {});   // البوت يشوف وين وصلنا لو تأخرنا (بس لما يصير شي غلط)
   await patchQ(c.agentKey, q.id, { status: "picked", pickedAt: Date.now(), step: "استلمت الطلب" });
   const res = [];
-  for (const item of (q.items || []).slice(0, 3)) {
-    let r = null, last = "";
+  for (const item of (q.items || []).slice(0, 3)) res.push(await searchItem(tab, item, step));
+  await patchQ(c.agentKey, q.id, { status: "done", res, doneAt: Date.now() });
+}
+async function searchItem(tab, item, step) {
+  {
+    let r = null, last = "", log = [], debug = null;
     for (let i = 0; i < 5; i++) {
-      if (i) await step(`أبحث في حساب ${item.acc?.key || ""} (محاولة ${i + 1})`);
-      r = await send(tab.id, { type: "SEARCH", item }, 60000);
-      if (r?.switching) { last = "بدّلت الحساب وأنتظر الصفحة"; await step(last); await new Promise(x => setTimeout(x, 8000)); continue; }
-      if (!r) { last = "صفحة صحة ما ردّت (تحمّل أو انقفلت)"; const st = await send(tab.id, { type: "STATE" }, 5000); last += st ? ` — الصفحة: ${st.page}` : ""; await step(last); await new Promise(x => setTimeout(x, 6000)); continue; }
+      if (i) await step(`محاولة ${i + 1}: ${last}`);
+      const p = await send(tab.id, { type: "PREP", item }, 45000);
+      if (p?.log) log.push(...p.log.map(x => "أم: " + x));
+      if (p?.switching) { last = "بدّلت الحساب وأنتظر الصفحة"; await new Promise(x => setTimeout(x, 8000)); continue; }
+      if (!p) { last = "صفحة صحة ما ردّت (تحمّل أو انقفلت)"; const st = await send(tab.id, { type: "STATE" }, 5000); last += st ? ` — الصفحة: ${st.page}` : ""; log.push("⚠ " + last); await new Promise(x => setTimeout(x, 6000)); continue; }
+      if (p.err) { last = p.err; debug = p.debug || debug; if (i >= 2) break; await new Promise(x => setTimeout(x, 4000)); continue; }
+      const fs = await frameReady(tab);
+      if (!fs.ready) {
+        last = fs.none ? "إطار صفحة الإجازات ما ردّ (sickleave.seha.sa)" : `إطار الإجازات مو جاهز${fs.text ? ": «" + fs.text.slice(0, 80) + "»" : ""} (${fs.path || ""})`;
+        log.push("⚠ " + last);
+        if (!fs.none && i >= 1) { const d = await send(tab.id, { type: "F_SEARCH", item }, 60000); if (d?.err) { if (d.log) log.push(...d.log); r = d; break; } }   // الإطار يرد بس ناقص → نجيب منه وش الناقص + كود الصفحة
+        await send(tab.id, { type: "RELOAD_FRAME" }, 5000); await new Promise(x => setTimeout(x, 7000));
+        if (i === 2) { log.push("أعيد تحميل صحة كاملة"); await chrome.tabs.update(tab.id, { url: SEHA }); await new Promise(x => setTimeout(x, 12000)); }
+        continue;
+      }
+      r = await send(tab.id, { type: "F_SEARCH", item }, 120000);
+      if (!r) { last = "إطار الإجازات ما ردّ على البحث (يمكن انتقل لصفحة ثانية)"; log.push("⚠ " + last); await new Promise(x => setTimeout(x, 5000)); continue; }
+      if (r.log) log.push(...r.log);
+      if (r.retry) { last = r.err; r = null; await new Promise(x => setTimeout(x, 6000)); continue; }
       break;
     }
-    if (!r || r.switching) r = { err: last || "صفحة صحة ما ردّت" };
+    if (!r) r = { err: last || "صفحة صحة ما ردّت", ...(debug ? { debug } : {}) };
     if (r.err) await step("⚠ " + r.err);
-    res.push({ id: item.id, branch: item.branch || "", rows: (r.rows || []).slice(0, 8), match: r.match ?? null, view: r.view || null, err: r.err || "", log: (r.log || []).slice(-40), ...(r.debug ? { debug: r.debug } : {}) });
+    return { id: item.id, branch: item.branch || "", rows: (r.rows || []).slice(0, 8), match: r.match ?? null, view: r.view || null, err: r.err || "", log: log.slice(-40), ...(r.debug ? { debug: r.debug } : {}) };
   }
-  await patchQ(c.agentKey, q.id, { status: "done", res, doneAt: Date.now() });
 }
 
 let busy = false;
@@ -77,7 +107,12 @@ async function tick() {
     if (!c.enabled || !c.agentKey || !c.natId) return;
     const queue = await pending(c.agentKey).catch(async e => { await set({ pendErr: String(e?.message || e).slice(0, 120), pendErrAt: Date.now() }); return []; });
     const tab = await ensureTab(c);
-    let st = (await send(tab.id, { type: "STATE" }, 6000)) || { page: "loading" };
+    let st = await send(tab.id, { type: "STATE" }, 6000);
+    if (!st && /^https:\/\/(www\.)?seha\.sa\//.test(tab.url || "")) {           // الأداة انحدّثت وتبويب صحة مفتوح من قبل → نحقن سكربتها
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js", "seha.js"] }).catch(() => {});
+      st = await send(tab.id, { type: "STATE" }, 6000);
+    }
+    st ||= { page: "loading" };
     // صفحة الدخول: يمكن دخلت أنت من تبويب ثاني — نحدّث تبويب الأداة أول قبل ما نطلب نفاذ
     if (st.page === "login") {
       const { lastReload } = await get("lastReload");
@@ -106,7 +141,7 @@ async function tick() {
     } else if (st.page === "dashboard" || st.page === "search") {
       if (c.loginAt || fails) { await set({ loginAt: 0, fails: 0 }); fails = 0; }
       if (queue.length) { await writeState(c.agentKey, { page: st.page, account: st.account || "", ok: true, fails, msg: "يبحث…" }, true); for (const q of queue) await runQuery(c, tab, q).catch(e => patchQ(c.agentKey, q.id, { status: "error", err: String(e?.message || e) })); }
-      else if (Date.now() - (c.lastKeep || 0) > 4 * MIN) { await send(tab.id, { type: "KEEPALIVE" }, 30000); await set({ lastKeep: Date.now() }); }
+      else if (Date.now() - (c.lastKeep || 0) > 4 * MIN) { const k = await send(tab.id, { type: "KEEPALIVE" }, 30000); if (k?.ok) await send(tab.id, { type: "F_KEEPALIVE" }, 10000); await set({ lastKeep: Date.now() }); }
     } else if (st.page === "unknown" || st.page === "loading") {
       const { stuckSince } = await get("stuckSince");
       if (!stuckSince) await set({ stuckSince: Date.now() });
@@ -134,6 +169,19 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
     }
     if (m.type === "IAM_ERR" && c.agentKey) { await writeState(c.agentKey, { page: "iam", account: "", ok: false, fails: c.fails || 0, msg: m.err || "" }, true); return { ok: true }; }
     if (m.type === "TICK_NOW") { await tick(); return { ok: true }; }
+    // تجربة بحث من صفحة الإعدادات (بدون البوت ولا Firestore) — نفس خطوات البحث الحقيقي
+    if (m.type === "TEST_SEARCH") {
+      if (busy) return { err: "الأداة مشغولة الحين — جرّب بعد دقيقة" };
+      busy = true;
+      try {
+        const tab = await ensureTab(c);
+        const st = await send(tab.id, { type: "STATE" }, 6000);
+        if (!st || !["dashboard", "search"].includes(st.page)) return { err: `صحة مو جاهزة (${st?.page || "ما ردّت"}) — ادخل صحة أول` };
+        const acc = m.acc || DEF_ACC;
+        await set({ testStep: "بدأ البحث…" });
+        return await searchItem(tab, { id: String(m.id), branch: "", acc, psl: m.psl || "", reqDate: m.reqDate || "", leaveStart: m.leaveStart || "", leaveEnd: m.leaveEnd || "", type: "" }, t => set({ testStep: t }));
+      } finally { busy = false; await set({ testStep: "" }); }
+    }
     if (m.type === "OPEN_TAB") { const t = await ensureTab(c); chrome.tabs.update(t.id, { active: true }); return { ok: true }; }
     return null;
   })().then(reply, () => reply(null));

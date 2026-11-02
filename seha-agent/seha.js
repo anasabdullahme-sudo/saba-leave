@@ -1,7 +1,7 @@
 // صفحات منصة صحة (التبويب المثبّت حق الأداة): نعرف وين حنا، ندخل بنفاذ، نختار الحساب، نبحث بالهوية.
 // ⚠ ما نضغط أبداً: إضافة، تحقق، حفظ، تعديل (القلم)، طباعة — بس: دخول نفاذ، اختيار الحساب، القائمة، «بحث»، «إعادة تعيين»، «عرض» (العين).
 (() => {
-  if (window.top !== window) return;
+  if (window.top !== window || window.__sabaTop) return; window.__sabaTop = true;
   const { norm, T, visible, ownText, sleep, waitFor, textEls, realClick, hover, setValue, inputByLabel } = A;
   const bodyN = () => norm(document.body?.innerText || "");
   // شريط حالة صغير فوق (عشان تشوف وش تسوي الأداة)
@@ -11,6 +11,7 @@
     bar.textContent = "أداة صحة: " + t; bar.style.display = ""; clearTimeout(barT); if (!keep) barT = setTimeout(() => { if (bar) bar.style.display = "none"; }, 15000);
   };
 
+  const frameEl = () => [...document.querySelectorAll("iframe")].find(f => /sickleave\.seha\.sa/i.test(f.src || "") && visible(f)) || null;
   function page() {
     const h = location.hash || "", t = bodyN();
     if (/حسابات صحه طبي/.test(t)) return "accounts";                               // رابطها #/account/login?sessionId=… (مو صفحة دخول)
@@ -18,7 +19,7 @@
     if (/iamredirection/i.test(h)) return "redirect";
     if (/Account\/Login/i.test(h) && /تسجيل الدخول باستخدام/.test(t)) return "login";
     if (/Account\/Login/i.test(h)) return "loading";
-    if (/بحث عن اجازه مرضيه/.test(t) && (inputByLabel(/رقم هويه/) || /نتايج البحث|اضافه اجازه مرضيه/.test(t))) return "search";   // صفحة البحث (حتى لو ما لقينا الخانة — يطلع الخطأ الصح بعدين)
+    if (frameEl()) return "search";                                                  // صفحة الإجازات: محتواها داخل إطار من sickleave.seha.sa (frame.js يشتغل هناك)
     if ((/مرحبا بك/.test(t) || /الصفحه الرييسيه/.test(t)) && textEls("الخدمات").some(visible)) return "dashboard";
     if (/تسجيل الدخول باستخدام/.test(t)) return "login";
     if (/انشاء حساب/.test(t) && /تسجيل دخول/.test(t) && !/مرحبا بك/.test(t)) return "login";   // الصفحة العامة (طلّعته)
@@ -127,93 +128,30 @@
     return !!(await waitFor(() => page() === "search", 15000));
   }
 
-  // جدول النتائج
-  const COLS = [[/اسم المريض/, "name"], [/نوع الهويه/, "idType"], [/رقم الهويه|الاقامه/, "id"], [/جوال/, "phone"], [/رمز الخدمه/, "psl"], [/حاله ?الطلب/, "status"], [/تاريخ الطلب/, "date"], [/حاله ?الدفع/, "pay"], [/نوع الاجازه/, "type"]];
-  function table() { return [...document.querySelectorAll("table")].find(t => visible(t) && /رمز الخدمه/.test(norm(t.innerText))) || null; }
-  function parseTable() {
-    const t = table(); if (!t) return { rows: [], trs: [] };
-    const ths = [...(t.querySelector("thead") || t).querySelectorAll("th")];
-    const keys = ths.map(th => (COLS.find(([re]) => re.test(norm(th.innerText || th.textContent))) || [, ""])[1]);
-    const trs = [...t.querySelectorAll("tbody tr")].filter(tr => tr.querySelectorAll("td").length >= 4);
-    const rows = trs.map(tr => {
-      const tds = [...tr.querySelectorAll("td")], o = {};
-      keys.forEach((k, i) => { if (k && tds[i]) o[k] = T(tds[i].innerText); });
-      const dm = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(A.norm(o.date || "")); if (dm) { o.time = T((o.date || "").replace(dm[0], "")); o.date = `${dm[1]}-${dm[2].padStart(2, "0")}-${dm[3].padStart(2, "0")}`; }
-      if (o.id) o.id = o.id.replace(/\D/g, "");
-      return o;
-    });
-    return { rows, trs };
-  }
-  const noData = () => { const t = table(); return !!t && /لا توجد|لا يوجد|no data|no records/i.test(norm(t.innerText)) && !parseTable().rows.length; };
-
-  // الصف المطابق للطلب: رقم PSL، وإلا تاريخ الرفع (هجري ±يوم) + نوع الطلب
-  const hNum = s => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || ""); return m ? +m[1] * 360 + (+m[2] - 1) * 30 + +m[3] : 0; };
-  const typeOk = (row, type) => { const t = norm(row.type || ""); return type === "attendance" ? /مشهد/.test(t) : type === "companion" ? /مرافق/.test(t) : type === "sick" ? !/مشهد|مرافق/.test(t) : true; };
-  function matchRow(rows, item) {
-    if (item.psl) { const i = rows.findIndex(r => (r.psl || "").replace(/\s/g, "") === item.psl); if (i >= 0) return i; }
-    if (item.reqDate) {
-      const want = hNum(item.reqDate);
-      const c = rows.map((r, i) => ({ i, d: Math.abs(hNum(r.date) - want), ok: typeOk(r, item.type) })).filter(x => x.d <= 1 && x.ok).sort((a, b) => a.d - b.d);
-      if (c.length) return c[0].i;
-    }
-    return -1;
-  }
-
-  // «عرض» (العين) للصف → نقرا تاريخ بداية ونهاية الإجازة، ونسكّر
-  const DATE_RE = /(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2})|(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})/;
-  const toDmy = m => m[3] ? `${m[1].padStart(2, "0")}/${m[2].padStart(2, "0")}/${m[3]}` : `${m[6].padStart(2, "0")}/${m[5].padStart(2, "0")}/${m[4]}`;
-  function viewDates(root) {
-    const all = [...root.querySelectorAll("*")].filter(el => el.childElementCount === 0 && visible(el));
-    const near = re => {
-      const lab = all.find(el => re.test(norm(el.textContent)) && norm(el.textContent).length < 50); if (!lab) return "";
-      let p = lab;
-      for (let k = 0; k < 4 && p; k++) { p = p.parentElement; const txt = A.norm(p?.innerText || "").replace(norm(lab.textContent), ""); const m = DATE_RE.exec(txt); if (m) return toDmy(m); const inp = p?.querySelector("input"); if (inp) { const mm = DATE_RE.exec(A.norm(inp.value)); if (mm) return toDmy(mm); } }
-      return "";
-    };
-    return { from: near(/(بدايه|بداء|من تاريخ).*(اجازه|ميلادي)|تاريخ بدايه|تاريخ البدايه|بدايه الاجازه/), to: near(/(نهايه|الي تاريخ|إلى تاريخ).*(اجازه|ميلادي)|تاريخ نهايه|تاريخ النهايه|نهايه الاجازه/) };
-  }
-  async function readView(tr) {
-    const eye = tr.querySelector('[class*="eye"], [title*="عرض"], [aria-label*="عرض"], [ngbtooltip*="عرض"], [mattooltip*="عرض"]');
-    if (!eye) return null;                                                          // ما نضغط أي أيقونة ثانية (قلم/طباعة)
-    const before = location.hash;
-    realClick(eye);
-    const root = await waitFor(() => { const m = document.querySelector(".modal.show, [role=dialog], mat-dialog-container, .p-dialog, .modal-dialog"); if (m && visible(m)) return m; return location.hash !== before ? document.body : null; }, 8000);
-    if (!root) return null;
-    await sleep(1200);
-    const d = viewDates(root);
-    // نسكّر: زر إغلاق/رجوع، أو Escape، أو نرجع للصفحة
-    const close = [...root.querySelectorAll("button, a, [aria-label]")].find(el => visible(el) && (/^(اغلاق|الغاء|رجوع|عوده|close|×|✕)$/i.test(norm(el.textContent)) || /close|اغلاق/i.test(el.getAttribute("aria-label") || "")));
-    if (close) realClick(close); else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    await sleep(800);
-    if (location.hash !== before && page() !== "search") { history.back(); await waitFor(() => page() === "search", 8000); }
-    return d;
-  }
-
-  // ---------- وضع التشخيص (مؤقت): نسجّل كل خطوة، ولو صار خطأ نرسل كود الصفحة (بدون بيانات المرضى) ----------
+  // ---------- وضع التشخيص: نسجّل كل خطوة ----------
   let LOG = [];
   const L = t => { LOG.push(new Date().toLocaleTimeString("en-GB", { hour12: false }) + " " + t); };
   function snapshot() {
     const root = document.body.cloneNode(true);
-    root.querySelectorAll("script, style, link, noscript, svg path, iframe, img").forEach(e => e.remove());
-    root.querySelectorAll("tbody td").forEach(td => { td.textContent = (td.textContent || "").replace(/\d/g, "9").replace(/[\u0600-\u06FFA-Za-z]{2,}/g, w => /حال|معاد|مكتمل|بانتظار|تحقق|معلق|دفع|اجاز|إجاز|مرض|اعتيادي/.test(w) ? w : "اسم"); });   // نخفي أسماء وأرقام المرضى
+    root.querySelectorAll("script, style, link, noscript, svg, img").forEach(e => e.remove());
     root.querySelectorAll("input").forEach(i => { i.setAttribute("value", i.value ? "[" + i.value.length + " حرف]" : ""); });
-    let html = root.outerHTML.replace(/\s+/g, " ");
-    if (html.length > 250000) html = html.slice(0, 250000) + " …(مقصوص)";
+    let html = root.outerHTML.replace(/\s+/g, " ").replace(/\d{6,}/g, m => "9".repeat(m.length));
+    if (html.length > 150000) html = html.slice(0, 150000) + " …(مقصوص)";
     return { url: location.href.replace(/sessionId=[^&]+/, "sessionId=…"), page: page(), account: account(), html };
   }
-  async function search(item) {
+  // تجهيز البحث في الصفحة الأم: الحساب الصح + فتح صفحة الإجازات (البحث نفسه في frame.js)
+  async function prep(item) {
     LOG = [];
     let r;
-    try { r = await search0(item); } catch (e) { r = { err: "خطأ في الكود: " + String(e?.message || e) }; L("💥 " + r.err); }
-    show(r.err ? "⚠ " + r.err : r.switching ? "أبدّل الحساب…" : `خلصت البحث — ${r.rows?.length || 0} نتيجة`);
-    r.log = LOG.slice(-40);
+    try { r = await prep0(item); } catch (e) { r = { err: "خطأ في الكود: " + String(e?.message || e) }; L("💥 " + r.err); }
+    if (r.err) show("⚠ " + r.err); else if (r.switching) show("أبدّل الحساب…"); else show(`أبحث عن ${String(item.id).slice(0, 3)}••••${String(item.id).slice(-3)}…`);
+    r.log = LOG.slice(-20);
     const { debug } = await chrome.storage.local.get("debug").catch(() => ({}));
-    if (r.err && debug !== false) r.debug = snapshot();                             // كود الصفحة لما يصير خطأ
+    if (r.err && debug !== false) r.debug = snapshot();
     return r;
   }
-  async function search0(item) {
-    show(`أبحث عن ${String(item.id).slice(0, 3)}••••${String(item.id).slice(-3)} (${item.acc?.key || ""})…`, true);
-    L(`بدأت: حساب مطلوب «${item.acc?.key}» · الصفحة «${page()}» · الرابط ${location.hash.slice(0, 40)}`);
+  async function prep0(item) {
+    L(`بدأت: حساب مطلوب «${item.acc?.key}» · الصفحة «${page()}» · ${location.hash.slice(0, 40)}`);
     const cur = norm(account());
     L(`الحساب الحالي: «${account() || "ما لقيته فوق"}»`);
     if (item.acc && cur && !cur.includes(norm(item.acc.key))) {
@@ -222,49 +160,24 @@
       return r.ok ? { switching: true } : { err: r.err };
     }
     const okNav = await gotoSearch();
-    L(okNav ? "صفحة البحث مفتوحة" : `⚠ ما قدرت أفتح صفحة البحث — الصفحة «${page()}»، «الخدمات» موجودة: ${textEls("الخدمات").some(visible)}، «الإجازات المرضية» موجودة: ${textEls("الإجازات المرضية").length}`);
+    L(okNav ? `صفحة الإجازات مفتوحة (الإطار: ${frameEl()?.src.replace(/\?.*/, "") || "؟"})` : `⚠ ما قدرت أفتح صفحة الإجازات — الصفحة «${page()}»، «الخدمات» موجودة: ${textEls("الخدمات").some(visible)}، «الإجازات المرضية»: ${textEls("الإجازات المرضية").length}، إطارات: ${[...document.querySelectorAll("iframe")].map(f => (f.src || "").replace(/\?.*/, "")).join(" ") || "ولا واحد"}`);
     if (!okNav) return { err: "ما قدرت أفتح صفحة الإجازات المرضية" };
-    const reset = textEls("إعادة تعيين").find(visible);
-    L(reset ? "ضغطت إعادة تعيين" : "⚠ ما لقيت زر إعادة تعيين");
-    if (reset) { realClick(reset); await sleep(700); }
-    const inp = inputByLabel(/رقم هويه/);
-    L(inp ? `لقيت خانة الهوية (${inp.tagName.toLowerCase()}${inp.id ? "#" + inp.id : ""}${inp.name ? " name=" + inp.name : ""} placeholder="${inp.placeholder || ""}")` : `⚠ ما لقيت خانة الهوية — عدد الخانات الظاهرة: ${[...document.querySelectorAll(A.TEXT_INPUT)].filter(visible).length}`);
-    if (!inp) return { err: "ما لقيت خانة رقم الهوية" };
-    setValue(inp, item.id); await sleep(300);
-    L(inp.value.replace(/\D/g, "") === item.id ? "كتبت الهوية ✓" : `⚠ كتبت الهوية بس الخانة فيها ${inp.value.length} حرف`);
-    const btn = textEls("بحث").find(el => visible(el) && /^(BUTTON|A|INPUT)$/.test(A.clickable(el).tagName));
-    L(btn ? `لقيت زر البحث (${A.clickable(btn).tagName.toLowerCase()})` : `⚠ ما لقيت زر البحث — أزرار ظاهرة: ${[...document.querySelectorAll("button")].filter(visible).map(x => T(x.textContent)).filter(Boolean).slice(0, 12).join(" | ")}`);
-    if (!btn) return { err: "ما لقيت زر البحث" };
-    const sig = table()?.innerText || "";
-    realClick(btn);
-    const got = await waitFor(() => { const { rows } = parseTable(); return noData() || (rows.length && rows.some(r => r.id === item.id) && (table()?.innerText || "") !== sig) || (rows.length && rows.every(r => r.id === item.id)); }, 15000);
-    await sleep(700);
-    let { rows, trs } = parseTable();
-    L(`النتائج: ${rows.length} صف${got ? "" : " (⚠ ما تغيّر الجدول خلال 15 ثانية)"}${table() ? "" : " — ⚠ ما لقيت جدول النتائج"}${rows[0] ? ` — الأعمدة: ${Object.keys(rows[0]).join(",")}` : ""}`);
-    rows = rows.slice(0, 10);
-    const match = matchRow(rows, item);
-    L(match >= 0 ? `الصف المطابق: ${match + 1} (${rows[match].status || "؟"})` : `⚠ ما لقيت صف مطابق (PSL ${item.psl || "—"} · تاريخ ${item.reqDate || "—"})`);
-    let view = null;
-    if (match >= 0 && trs[match] && item.leaveStart) { try { view = await readView(trs[match]); L(view?.from ? `قريت تاريخ الإجازة من «عرض»: ${view.from} ← ${view.to}` : "⚠ ما قدرت أقرا تاريخ الإجازة من «عرض»"); } catch (e) { L("⚠ «عرض»: " + e.message); } }
-    return { rows, match: match >= 0 ? match : null, view, account: account() };
-  }
-
-  async function keepAlive() {
-    if (page() !== "search" && !(await gotoSearch())) return { ok: false };
-    const btn = textEls("بحث").find(el => visible(el) && /^(BUTTON|A|INPUT)$/.test(A.clickable(el).tagName));
-    if (btn) realClick(btn);
     return { ok: true };
   }
+  async function keepAlive() { return { ok: page() === "search" || await gotoSearch() }; }
 
+  const MINE = new Set(["STATE", "CLICK_NAFATH", "PICK", "PREP", "KEEPALIVE", "GOTO_SEARCH", "RELOAD_FRAME"]);
   chrome.runtime.onMessage.addListener((m, _s, reply) => {
+    if (!MINE.has(m?.type)) return false;                                         // رسائل الإطار (F_…) مو لنا — نخليه هو يرد
     (async () => {
       if (m.type === "STATE") return { page: page(), account: account() };
       if (m.type === "CLICK_NAFATH") return clickNafath();
       if (m.type === "PICK") return pickAccount(m.acc);
-      if (m.type === "SEARCH") return search(m.item);
+      if (m.type === "PREP") return prep(m.item);
+      if (m.type === "RELOAD_FRAME") { const f = frameEl(); if (f) { f.src = f.src; return { ok: true }; } return { ok: false }; }
       if (m.type === "KEEPALIVE") return keepAlive();
       if (m.type === "GOTO_SEARCH") return { ok: await gotoSearch() };
-      return null;
+      return { err: "?" };
     })().then(reply, e => reply({ err: String(e?.message || e) }));
     return true;
   });
