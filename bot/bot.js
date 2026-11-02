@@ -8,7 +8,7 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
-import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin } from "./group.js";
+import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin, boardInfo } from "./group.js";
 import { initAgent, agentKey, agentOnline, agentReady, agentState, askSeha, sehaText, sehaVerdict, sehaMeaning, sehaIcon, patientSeha, hijri } from "./sehaagent.js";
 import { initArchive, archiveOn, archiveNew, ensureArchived, pruneArchive, archiveStats, wipeArchive, getImage } from "./archive.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.15.1";
+const VERSION = "2.16.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -394,6 +394,8 @@ async function adminLookup(m, jid, text) {
   }
   if (/^(وقف|اوقف|طفي|سكر) (البوت )?(في |ب)?(قروب )?(ال)?كول ?سنتر$/.test(n0)) { await db.doc("bot/prefs").set({ callcenter: false }, { merge: true }); ccOn = false; await sock.sendMessage(jid, { text: "⏸ وقفت البوت في قروب الكول سنتر — ما راح يرد على شي هناك.\nترجّعه بـ «شغل الكول سنتر»." }); return true; }
   if (/^(شغل|رجع|فعل) (البوت )?(في |ب)?(قروب )?(ال)?كول ?سنتر$/.test(n0)) { await db.doc("bot/prefs").set({ callcenter: true }, { merge: true }); ccOn = true; await sock.sendMessage(jid, { text: "▶️ رجّعت البوت في قروب الكول سنتر." }); return true; }
+  { const bm = /^(جدول|بيانات|دوام)\s+(.{2,40})$/.exec(n0);                                // «جدول مجدي» → وش في الجدول عنه
+    if (bm && !/\d{6,}/.test(bm[2])) { const r = boardInfo(bm[2]); if (r !== null) { await sock.sendMessage(jid, { text: r || `ما لقيت «${bm[2]}» في الجدول.` }); return true; } } }
   if (/^(مفتاح|ربط) (اداه|أداة|اداة) صحه$/.test(n0.replace(/أ/g, "ا"))) {
     await sock.sendMessage(jid, { text: `🔑 مفتاح أداة صحة الجانبية (لا ترسله لأحد):\n\n${agentKey()}\n\nانسخه وحطه في صفحة إعدادات الأداة على كمبيوترك.` });
     return true;
@@ -921,7 +923,12 @@ async function applyPatches() {
         const dd = docs.find(x => x.id === u.doctorId);
         const vs = (next.vacations || []).filter(v => (v.doctorId === u.doctorId || (u.code && String(v.code) === String(u.code)) || (dd && nmKey(v.name) === nmKey(dd.name)) || (u.name && nmKey(v.name) === nmKey(u.name))) && v.start <= u.end && (!v.end || v.end > u.end));
         vs.forEach(v => { v.end = u.end; });
-        todo.push({ id: u.id, name: vs[0]?.name || "", isDoc: true, upd: true, quiet: true });
+        let bad = [];
+        if (u.dropOpen) {                                                               // إجازة مفتوحة تبدأ بعد يوم المباشرة (انحطت بالغلط) → نشيلها
+          bad = (next.vacations || []).filter(v => (v.doctorId === u.doctorId || (u.code && String(v.code) === String(u.code)) || (u.name && nmKey(v.name) === nmKey(u.name))) && !v.end && v.start > u.end);
+          if (bad.length) next.vacations = next.vacations.filter(v => !bad.includes(v));
+        }
+        todo.push({ id: u.id, name: (vs[0] || bad[0]) ? `${String((vs[0] || bad[0]).name).split(" –")[0]} — خلصت إجازته ${u.end.split("-").reverse().slice(0, 2).join("/")}` : "", isDoc: true, upd: true, quiet: !vs.length && !bad.length });
       }
       for (const x of newDocs) {
         const dep = next.departments.find(q => q.id === x.depId); if (!dep) continue;
@@ -954,6 +961,8 @@ async function applyPatches() {
       return todo;
     });
     if (added.length) log.info({ n: added.length }, "انضافت إجازات للجدول");
+    const shown = added.filter(a => !a.skip && a.name && !a.quiet);
+    if (shown.length) dmAdmin(`✅ عدّلت الجدول:\n${shown.map(a => "• " + (a.upd ? "تعديل: " : a.isDoc ? "طبيب جديد: " : "إجازة: ") + String(a.name).split(" –")[0]).join("\n")}`).catch(() => {});
     const newNames = added.filter(a => a.isDoc && !a.upd && a.name).map(a => nmKey(a.name));            // طبيب انضاف بالتعديل → نشيل سؤال «أضيفه؟» المعلّق عنه
     if (newNames.length) { const pr = db.doc("bot/pending_doctors"), pc = (await pr.get()).data(); if (pc?.items?.some(i => newNames.includes(nmKey(i.name)))) await pr.set({ items: pc.items.filter(i => !newNames.includes(nmKey(i.name))) }); }
   } catch (e) { log.error({ err: String(e?.message || e) }, "فشل إضافة الإجازات"); }

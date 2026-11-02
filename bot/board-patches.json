@@ -96,6 +96,32 @@
      }
     ]
    }
+  },
+  {
+   "id": "p0211y1",
+   "depId": "cx1upfd",
+   "doctor": {
+    "id": "yns1101",
+    "name": "محمد خالد يونس – أخصائي",
+    "code": "",
+    "ext": "",
+    "room": "",
+    "fee": "",
+    "workdays": [
+     6,
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "shifts": [
+     {
+      "s": 780,
+      "e": 990
+     }
+    ]
+   }
   }
  ],
  "updates": [
@@ -596,6 +622,16 @@
      }
     ]
    }
+  },
+  {
+   "id": "p0211y2",
+   "doctorId": "yns1101",
+   "copyFrom": "8o66nhf",
+   "fields": [
+    "room",
+    "ext",
+    "fee"
+   ]
   }
  ],
  "today": [
@@ -623,6 +659,14 @@
    "code": "1250",
    "end": "2026-10-31",
    "name": "مجدي نصيف"
+  },
+  {
+   "id": "v0211m2",
+   "doctorId": "gguqlrc",
+   "code": "1250",
+   "name": "مجدي نصيف",
+   "end": "2026-10-31",
+   "dropOpen": true
   }
  ],
  "plans": [
