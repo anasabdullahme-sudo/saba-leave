@@ -2,16 +2,56 @@
   "manifest_version": 3,
   "name": "أداة صحة الجانبية — سابا",
   "short_name": "Saba Seha Agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "على كمبيوتر المسؤول فقط: تخلّي منصة صحة شغّالة، تدخل بنفاذ (بموافقتك من الجوال)، وتبحث عن حالة الإجازات لبوت سابا.",
-  "permissions": ["storage", "alarms", "tabs"],
-  "host_permissions": ["https://seha.sa/*", "https://www.seha.sa/*", "https://iam.gov.sa/*", "https://firestore.googleapis.com/*"],
-  "background": { "service_worker": "bg.js" },
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://seha.sa/*",
+    "https://www.seha.sa/*",
+    "https://iam.gov.sa/*",
+    "https://firestore.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "bg.js"
+  },
   "content_scripts": [
-    { "matches": ["https://seha.sa/*", "https://www.seha.sa/*"], "js": ["common.js", "seha.js"], "run_at": "document_idle" },
-    { "matches": ["https://iam.gov.sa/*"], "js": ["common.js", "iam.js"], "run_at": "document_idle" }
+    {
+      "matches": [
+        "https://seha.sa/*",
+        "https://www.seha.sa/*"
+      ],
+      "js": [
+        "common.js",
+        "seha.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://iam.gov.sa/*"
+      ],
+      "js": [
+        "common.js",
+        "iam.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
   "options_page": "options.html",
-  "action": { "default_title": "أداة صحة الجانبية", "default_popup": "options.html", "default_icon": { "16": "icon16.png", "48": "icon48.png" } },
-  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  "action": {
+    "default_title": "أداة صحة الجانبية",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
 }

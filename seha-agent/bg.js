@@ -120,6 +120,7 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
   return true;
 });
 
+chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());     // أيقونة الأداة → صفحة الإعدادات في تبويب (مو نافذة صغيرة تنقفل)
 chrome.alarms.create("tick", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(a => { if (a.name === "tick") tick(); });
 chrome.runtime.onStartup.addListener(() => tick());
