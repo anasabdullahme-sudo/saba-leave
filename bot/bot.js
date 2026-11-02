@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.14.0";
+const VERSION = "2.15.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -367,8 +367,11 @@ async function sehaFollow(jid, m, items) {
   const txt = res ? sehaText(res, items) : "🏥 ما قدرت أشيك في منصة صحة الحين (الأداة ما ردت)";
   await sock.sendMessage(jid, { text: txt }, m ? { quoted: m } : undefined).catch(() => {});
 }
+// تشغيل/إيقاف البوت في قروب الكول سنتر (المسؤول: «وقف الكول سنتر» / «شغل الكول سنتر») — موقف افتراضياً
+let ccOn = false;
+function watchCcPref() { db.doc("bot/prefs").onSnapshot(d => { ccOn = d.get("callcenter") === true; }, () => {}); }
 async function onGroupMessage(m) {
-  if (await isCallCenter(m.key.remoteJid).catch(() => false)) return handleCallCenter(m);
+  if (await isCallCenter(m.key.remoteJid).catch(() => false)) return ccOn ? handleCallCenter(m) : undefined;
   return handleGroupMessage(m);
 }
 
@@ -387,6 +390,8 @@ async function adminLookup(m, jid, text) {
     if (Date.now() - wipeAsk > 5 * 60000) { wipeAsk = Date.now(); const a = archiveStats(); await sock.sendMessage(jid, { text: `⚠ بتمسح ${a?.count || 0} صورة من الأرشيف نهائياً (ما ترجع).\nأكيد؟ أرسل «احذف صور الأرشيف» مرة ثانية خلال 5 دقايق.` }); return true; }
     wipeAsk = 0; const n = wipeArchive(); await sock.sendMessage(jid, { text: `🗑 انمسحت ${n} صورة من الأرشيف.` }); return true;
   }
+  if (/^(وقف|اوقف|طفي|سكر) (البوت )?(في |ب)?(قروب )?(ال)?كول ?سنتر$/.test(n0)) { await db.doc("bot/prefs").set({ callcenter: false }, { merge: true }); ccOn = false; await sock.sendMessage(jid, { text: "⏸ وقفت البوت في قروب الكول سنتر — ما راح يرد على شي هناك.\nترجّعه بـ «شغل الكول سنتر»." }); return true; }
+  if (/^(شغل|رجع|فعل) (البوت )?(في |ب)?(قروب )?(ال)?كول ?سنتر$/.test(n0)) { await db.doc("bot/prefs").set({ callcenter: true }, { merge: true }); ccOn = true; await sock.sendMessage(jid, { text: "▶️ رجّعت البوت في قروب الكول سنتر." }); return true; }
   if (/^(مفتاح|ربط) (اداه|أداة|اداة) صحه$/.test(n0.replace(/أ/g, "ا"))) {
     await sock.sendMessage(jid, { text: `🔑 مفتاح أداة صحة الجانبية (لا ترسله لأحد):\n\n${agentKey()}\n\nانسخه وحطه في صفحة إعدادات الأداة على كمبيوترك.` });
     return true;
@@ -1082,6 +1087,7 @@ async function main() {
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
+  watchCcPref();
   initAgent({ db, log, dm: dmAdmin }).catch(e => log.warn({ err: String(e?.message || e) }, "وكيل صحة"));
   initArchive({ db, log });
   if (archiveOn()) { setTimeout(() => archiveNew(1000), 60000); setInterval(() => archiveNew(), 10 * 60000); }   // نسخة من كل صورة خلال 10 دقايق من رفعها
