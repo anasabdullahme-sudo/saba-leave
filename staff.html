@@ -285,7 +285,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <nav class="branches" id="branches" aria-label="الفروع"></nav>
     <div class="me">
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
-      <a class="seha tool" id="toolDl" download title="تحميل إضافة «سابا ← صحة» للتعبئة التلقائية"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
+      <a class="seha tool" id="toolDl" target="_blank" rel="noopener" title="إضافة «سابا ← صحة» من متجر كروم"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
       <a class="admin-btn" href="./doctors.html" style="display:inline-flex;align-items:center;text-decoration:none" title="جداول أطباء البوادي">جداول الأطباء</a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who" title="اسم هالجهاز"></span>
@@ -1288,17 +1288,18 @@ let extVersion = null, sehaWarned = null;
 const EXT_LATEST = "1.8.8", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
 const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 let extWarned = false;
-$("#toolDl").href = EXT_ZIP; $("#toolVer").textContent = EXT_LATEST;
+const EXT_STORE = "https://chromewebstore.google.com/detail/amooccmkmlokblanmfoiidhleicphfja";   // متجر كروم (غير مدرج): التثبيت والتحديث التلقائي من هنا
+$("#toolDl").href = EXT_STORE; $("#toolVer").textContent = EXT_LATEST;
 function renderExtHint() {
   const outdated = !extVersion || verLt(extVersion, EXT_LATEST);
   $("#toolDot").hidden = !outdated;
-  $("#toolDl").title = !extVersion ? "الإضافة مو مثبتة في هالجهاز — اضغط لتحميلها" : outdated ? `الإضافة في هالجهاز ${extVersion} — اضغط لتحميل ${EXT_LATEST}` : `الإضافة محدّثة (${extVersion}) — اضغط لتحميلها لجهاز ثاني`;
+  $("#toolDl").title = !extVersion ? "الإضافة مو مثبتة في هالجهاز — اضغط وثبّتها من متجر كروم" : outdated ? `الإضافة في هالجهاز ${extVersion} — المثبّتة من المتجر تتحدث لحالها` : `الإضافة محدّثة (${extVersion})`;
   $("#sehaTxt").textContent = extVersion ? "افتح صحة وعبّي تلقائياً" : "افتح منصة صحة للرفع";
   const old = extVersion && verLt(extVersion, EXT_LATEST);
-  $("#extHint").innerHTML = !extVersion ? `ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً — <a href="${EXT_ZIP}" download>نزّلها من هنا</a>`
-    : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — <a href="${EXT_ZIP}" download>نزّل النسخة ${EXT_LATEST}</a> واستبدل ملفاتها، وبعدها ↻ في chrome://extensions`
+  $("#extHint").innerHTML = !extVersion ? `ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً — <a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من متجر كروم</a>`
+    : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — المثبّتة من المتجر تتحدث لحالها. لو مثبّتة من ملف: شيلها من chrome://extensions و<a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من المتجر</a> (<a href="${EXT_ZIP}" download>أو الملف ${EXT_LATEST}</a>)`
     : "<b>✓</b> إضافة التعبئة شغالة";
-  if (old && !extWarned) { extWarned = true; toast(`إضافة صحة في هالجهاز قديمة (${extVersion}) — نزّل ${EXT_LATEST} من رابط تحت زر صحة`); }
+  if (old && !extWarned) { extWarned = true; toast(`إضافة صحة في هالجهاز قديمة (${extVersion}) — ثبّتها من متجر كروم (الرابط تحت زر صحة) عشان تتحدث لحالها`); }
 }
 // صورة التقرير للإضافة (تطلع صغيرة داخل صحة + تنفتح كبيرة) — مرة لكل طلب
 let imgSent = { id: "", at: 0 };
