@@ -28,15 +28,22 @@
 
   async function clickNafath() {
     if (!/Account\/Login/i.test(location.hash) && !/تسجيل الدخول باستخدام/.test(bodyN())) { location.hash = "#/Account/Login"; await sleep(2500); }
-    const b = await waitFor(() => [...document.querySelectorAll("button, a")].find(el => visible(el) && /تسجيل الدخول باستخدام/.test(norm(el.textContent))), 10000);
-    if (!b) return { ok: false };
-    realClick(b); return { ok: true };
+    const find = () => [...document.querySelectorAll("button, a")].find(el => visible(el) && /تسجيل الدخول باستخدام/.test(norm(el.textContent)));
+    // نضغط ونتأكد إنه انتقل (صفحة «ستغادر هذا الموقع» أو نفاذ) — ما انتقل؟ نضغط مرة ثانية (لين 6 مرات)
+    for (let i = 0; i < 6; i++) {
+      const b = await waitFor(find, 10000);
+      if (!b) return { ok: !/Account\/Login/i.test(location.hash) };
+      realClick(b);
+      const moved = await waitFor(() => !/Account\/Login/i.test(location.hash) || /ستغادر|بوابه نفاذ/.test(bodyN()), 5000);
+      if (moved) return { ok: true };
+    }
+    return { ok: false };
   }
   // صفحة «أنت الآن ستغادر هذا الموقع» تتحول لحالها خلال ثواني — لو علقت نضغط الزر
   setInterval(() => {
     if (!/iamredirection/i.test(location.hash)) return;
     const b = [...document.querySelectorAll("button, a")].find(el => visible(el) && /الانتقال الي بوابه نفاذ/.test(norm(el.textContent)));
-    if (b && !b.dataset.sabaClicked && performance.now() > 7000) { b.dataset.sabaClicked = "1"; realClick(b); }
+    if (b && Date.now() - (+b.dataset.sabaClicked || 0) > 6000 && performance.now() > 6000) { b.dataset.sabaClicked = String(Date.now()); realClick(b); }   // ما تحوّل لحاله؟ نضغط (ونعيد كل 6 ثواني)
   }, 2000);
 
   // صفحة «حسابات صحة طبي»: نفتح المجموعة ونختار «مدخل الإجازات المرضية — الفرع»
