@@ -31,10 +31,16 @@ var A = (() => {
   function inputByLabel(re) {
     const labels = [...document.querySelectorAll("label, span, div, p, small")]
       .filter(el => el.childElementCount === 0 && visible(el) && T(el.textContent).length < 70 && re.test(norm(el.textContent)));
+    const all = [...document.querySelectorAll(TEXT_INPUT)].filter(visible);
     for (const l of labels) {
       if (l.htmlFor) { const i = document.getElementById(l.htmlFor); if (i && visible(i)) return i; }
       let p = l;
       for (let k = 0; k < 4 && p; k++) { p = p.parentElement; const ins = p ? [...p.querySelectorAll(TEXT_INPUT)].filter(visible) : []; if (ins.length === 1) return ins[0]; if (ins.length > 1) break; }
+      // صف فيه أكثر من خانة (3 أعمدة): ناخذ الخانة اللي تحت العنوان مباشرة (بالمكان على الشاشة)
+      const r = l.getBoundingClientRect();
+      const best = all.map(i => { const q = i.getBoundingClientRect(); const ov = Math.min(r.right, q.right) - Math.max(r.left, q.left); return { i, dy: q.top - r.bottom, ov }; })
+        .filter(x => x.dy > -10 && x.dy < 70 && x.ov > 0).sort((a, b) => a.dy - b.dy || b.ov - a.ov)[0];
+      if (best) return best.i;
     }
     return null;
   }

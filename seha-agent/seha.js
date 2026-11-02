@@ -4,6 +4,12 @@
   if (window.top !== window) return;
   const { norm, T, visible, ownText, sleep, waitFor, textEls, realClick, hover, setValue, inputByLabel } = A;
   const bodyN = () => norm(document.body?.innerText || "");
+  // شريط حالة صغير فوق (عشان تشوف وش تسوي الأداة)
+  let bar = null, barT = 0;
+  const show = (t, keep) => {
+    if (!bar || !bar.isConnected) { bar = document.createElement("div"); bar.style.cssText = "position:fixed;top:8px;left:8px;z-index:2147483647;background:#003765;color:#fff;font:600 13px Tahoma,sans-serif;padding:6px 12px;border-radius:8px;direction:rtl;box-shadow:0 4px 14px rgba(0,0,0,.3);max-width:60vw"; document.documentElement.append(bar); }
+    bar.textContent = "أداة صحة: " + t; bar.style.display = ""; clearTimeout(barT); if (!keep) barT = setTimeout(() => { if (bar) bar.style.display = "none"; }, 15000);
+  };
 
   function page() {
     const h = location.hash || "", t = bodyN();
@@ -184,10 +190,17 @@
   }
 
   async function search(item) {
+    const r = await search0(item).catch(e => ({ err: String(e?.message || e) }));
+    show(r.err ? "⚠ " + r.err : r.switching ? "أبدّل الحساب…" : `خلصت البحث — ${r.rows?.length || 0} نتيجة`);
+    return r;
+  }
+  async function search0(item) {
+    show(`أبحث عن ${String(item.id).slice(0, 3)}••••${String(item.id).slice(-3)} (${item.acc?.key || ""})…`, true);
     // الحساب الصحيح أول
     const cur = norm(account());
     if (item.acc && cur && !cur.includes(norm(item.acc.key))) { const r = await switchAccount(item.acc); return r.ok ? { switching: true } : { err: r.err }; }
     if (!(await gotoSearch())) return { err: "ما قدرت أفتح صفحة الإجازات المرضية" };
+    show("كتبت الهوية — أضغط بحث…", true);
     const reset = textEls("إعادة تعيين").find(visible); if (reset) { realClick(reset); await sleep(700); }
     const inp = inputByLabel(/رقم هويه/); if (!inp) return { err: "ما لقيت خانة رقم الهوية" };
     setValue(inp, item.id); await sleep(300);
