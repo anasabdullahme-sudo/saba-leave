@@ -68,7 +68,16 @@ async function tick() {
     if (!c.enabled || !c.agentKey || !c.natId) return;
     const queue = await pending(c.agentKey).catch(() => []);
     const tab = await ensureTab(c);
-    const st = (await send(tab.id, { type: "STATE" }, 6000)) || { page: "loading" };
+    let st = (await send(tab.id, { type: "STATE" }, 6000)) || { page: "loading" };
+    // صفحة الدخول: يمكن دخلت أنت من تبويب ثاني — نحدّث تبويب الأداة أول قبل ما نطلب نفاذ
+    if (st.page === "login") {
+      const { lastReload } = await get("lastReload");
+      if (Date.now() - (lastReload || 0) > 3 * MIN) {
+        await set({ lastReload: Date.now() });
+        await chrome.tabs.update(tab.id, { url: SEHA }); await new Promise(r => setTimeout(r, 8000));
+        st = (await send(tab.id, { type: "STATE" }, 6000)) || { page: "loading" };
+      }
+    }
     let fails = c.fails || 0, msg = "";
     if (["login", "redirect", "iam"].includes(st.page)) {
       const h = riyadhHour();
@@ -103,12 +112,14 @@ async function tick() {
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
   (async () => {
     const c = await get(["agentKey", "natId", "agentTab", "loginAt", "iamFor", "fails"]);
-    if (m.type === "IAM_HELLO") {                                                   // نفاذ: نكتب الهوية بس لو الأداة هي اللي بدأت الدخول، مرة وحدة لكل محاولة
-      const go = sender.tab?.id === c.agentTab && c.loginAt && Date.now() - c.loginAt < 5 * MIN && c.iamFor !== c.loginAt;
-      if (go) await set({ iamFor: c.loginAt });
+    if (m.type === "IAM_HELLO") {
+      // نفاذ (دخول صحة): نكتب هويتك ونضغط دخول — سواء الأداة بدأته أو أنت فتحته بنفسك من صحة (حتى لو انفتح في تبويب جديد)
+      const g = await get(["enabled"]);
+      const go = g.enabled !== false && !!c.natId && m.seha;
+      if (go) { await set({ iamTab: sender.tab?.id || 0, iamAt: Date.now() }); if (c.loginAt && sender.tab?.id && sender.tab.id !== c.agentTab) await set({ agentTab: sender.tab.id }); }   // زر «الانتقال لنفاذ» يفتح تبويب جديد → نعتمده تبويب الأداة
       return { go: !!go, natId: go ? c.natId : "" };
     }
-    if (m.type === "NAFATH_NUM" && sender.tab?.id === c.agentTab && c.agentKey) {
+    if (m.type === "NAFATH_NUM" && c.agentKey) {
       await writeState(c.agentKey, { page: "iam", account: "", ok: false, fails: c.fails || 0, msg: "ينتظر موافقة نفاذ", nafath: { num: String(m.num), at: Date.now() } }, true);
       return { ok: true };
     }

@@ -7,7 +7,9 @@
   const numberEl = () => /اختيار الرقم/.test(norm(document.body.innerText))
     && [...document.querySelectorAll("body *")].find(el => visible(el) && /^\d{1,3}$/.test(ownText(el)) && el.childElementCount === 0);
   (async () => {
-    const r = await chrome.runtime.sendMessage({ type: "IAM_HELLO" }).catch(() => null);
+    await waitFor(() => document.body && document.body.innerText.length > 50, 15000);
+    const seha = /seha/i.test(document.body.innerText) || /seha\.sa/i.test(document.referrer) || /seha/i.test(location.href);   // دخول صحة بس (مو أي موقع ثاني يستخدم نفاذ)
+    const r = await chrome.runtime.sendMessage({ type: "IAM_HELLO", seha }).catch(() => null);
     if (!r?.go || !r.natId) return;
     let num = numberEl();
     if (!num) {
