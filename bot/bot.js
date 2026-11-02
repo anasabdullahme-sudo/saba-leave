@@ -310,7 +310,7 @@ async function handleCallCenter(m) {
   // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
   if (!r) {                                                                        // مو في الموقع أبد → نرد في القروب
     if (pend.answered) return;
-    try { const sent = await sock.sendMessage(jid, { text: "ما فيه إجازة — المراجع ما رفعها بالشيت أو ما سلّمها للاستقبال.\nخلّوه يرفعها من الشيت أو يسلّمها للاستقبال، وبيتم رفعها على صحة على طول." }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {}
+    try { const sent = await sock.sendMessage(jid, { text: "بيتم رفعها الحين" }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {}
     return;
   }
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
