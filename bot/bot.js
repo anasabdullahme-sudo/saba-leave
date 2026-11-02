@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.16.2";
+const VERSION = "2.17.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -368,6 +368,15 @@ async function sehaFollow(jid, m, items) {
   const res = await askSeha(items).catch(() => null);
   const txt = res ? sehaText(res, items) : "🏥 ما قدرت أشيك في منصة صحة الحين (الأداة ما ردت)";   // sehaText يكتب السبب لو الأداة وقفت
   await sock.sendMessage(jid, { text: txt }, m ? { quoted: m } : undefined).catch(() => {});
+  // وضع التشخيص (مؤقت): خطوات الأداة، ولو صار خطأ ملف كود الصفحة (بدون بيانات المرضى) — حوّله لـ Claude
+  if (m) return;                                                                    // للمسؤول على الخاص بس
+  for (const r of res || []) {
+    if (r.log?.length) await sock.sendMessage(jid, { text: `🛠 خطوات أداة صحة:\n${r.log.join("\n")}` }).catch(() => {});
+    if (r.debug?.html) {
+      const d = r.debug, html = `<!-- ${d.url} | page=${d.page} | account=${d.account} -->\n${d.html}`;
+      await sock.sendMessage(jid, { document: Buffer.from(html, "utf8"), mimetype: "text/html", fileName: `seha-debug-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.html`, caption: `🛠 كود صفحة صحة وقت المشكلة (${r.err || ""}) — حوّل هالملف لـ Claude` }).catch(() => {});
+    }
+  }
 }
 // تشغيل/إيقاف البوت في قروب الكول سنتر (المسؤول: «وقف الكول سنتر» / «شغل الكول سنتر») — موقف افتراضياً
 let ccOn = false;

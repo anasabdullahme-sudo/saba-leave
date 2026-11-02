@@ -59,7 +59,7 @@ async function runQuery(c, tab, q) {
     }
     if (!r || r.switching) r = { err: last || "صفحة صحة ما ردّت" };
     if (r.err) await step("⚠ " + r.err);
-    res.push({ id: item.id, branch: item.branch || "", rows: (r.rows || []).slice(0, 8), match: r.match ?? null, view: r.view || null, err: r.err || "" });
+    res.push({ id: item.id, branch: item.branch || "", rows: (r.rows || []).slice(0, 8), match: r.match ?? null, view: r.view || null, err: r.err || "", log: (r.log || []).slice(-40), ...(r.debug ? { debug: r.debug } : {}) });
   }
   await patchQ(c.agentKey, q.id, { status: "done", res, doneAt: Date.now() });
 }
