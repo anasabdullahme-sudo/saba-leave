@@ -18,7 +18,8 @@ const riyadhHour = () => +new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riy
 async function pending(key) {
   const r = await fetch(`${FS}agent/${key}:runQuery`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "q" }], where: { fieldFilter: { field: { fieldPath: "status" }, op: "EQUAL", value: { stringValue: "new" } } }, limit: 3 } }) });
-  if (!r.ok) throw new Error("firestore " + r.status);
+  if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`firestore ${r.status} ${(/"message":\s*"([^"]+)/.exec(t) || [])[1] || ""}`); }
+  await set({ pendErr: "" });
   return (await r.json()).filter(x => x.document).map(x => ({ id: x.document.name.split("/").pop(), ...dec({ mapValue: { fields: x.document.fields || {} } }) }));
 }
 async function patchQ(key, id, data) {
@@ -32,7 +33,11 @@ async function writeState(key, s, force) {
   lastStateSig = sig; lastStateAt = Date.now();
   const data = { ...s, at: Date.now(), ver: VER };
   await set({ lastState: data });
-  await fetch(`${FS}agent/${key}/s/state`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fields: enc(data).mapValue.fields }) }).catch(() => {});
+  try {
+    const r = await fetch(`${FS}agent/${key}/s/state`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fields: enc(data).mapValue.fields }) });
+    if (r.ok) await set({ syncOk: Date.now(), syncErr: "" });
+    else { const t = await r.text().catch(() => ""); await set({ syncErr: `${r.status} ${(/"message":\s*"([^"]+)/.exec(t) || [])[1] || t.slice(0, 120)}`, syncErrAt: Date.now() }); lastStateSig = ""; }   // ما وصل للبوت → نعيد المحاولة الجاية
+  } catch (e) { await set({ syncErr: "ما فيه اتصال بالإنترنت (" + String(e?.message || e).slice(0, 60) + ")", syncErrAt: Date.now() }); lastStateSig = ""; }
 }
 
 async function ensureTab(c) {
@@ -70,7 +75,7 @@ async function tick() {
   try {
     const c = await get(["agentKey", "natId", "enabled", "agentTab", "loginAt", "fails", "lastKeep", "lastLoginTry"]);
     if (!c.enabled || !c.agentKey || !c.natId) return;
-    const queue = await pending(c.agentKey).catch(() => []);
+    const queue = await pending(c.agentKey).catch(async e => { await set({ pendErr: String(e?.message || e).slice(0, 120), pendErrAt: Date.now() }); return []; });
     const tab = await ensureTab(c);
     let st = (await send(tab.id, { type: "STATE" }, 6000)) || { page: "loading" };
     // صفحة الدخول: يمكن دخلت أنت من تبويب ثاني — نحدّث تبويب الأداة أول قبل ما نطلب نفاذ
