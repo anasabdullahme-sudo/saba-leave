@@ -16,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.13.3";
+const VERSION = "2.13.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -294,11 +294,7 @@ async function handleCallCenter(m) {
   const who = m.key.participant || m.participant || "";
   if (qid && ccPending.has(qid)) {
     const p = ccPending.get(qid), qtext = (msg.extendedTextMessage?.text || msg.imageMessage?.caption || "📎").trim();
-    // ردّ على رد البوت، أو صاحب الاستفسار رجع يكتب على رسالته بعد ما رد البوت (مثلاً «المراجع ما وصلت له») → للمسؤول على الخاص
-    if (p.botIds?.has(qid) || (who && who === p.from && p.replied)) {
-      dmAdmin(`📨 قروب الكول سنتر (${m.pushName || "موظف"}) رجع يكتب على الاستفسار:\n«${qtext.slice(0, 300)}»\n\n${p.site || ""}${p.reply ? "\n\nرد البوت كان:\n" + p.reply : ""}`).catch(() => {});
-      return;
-    }
+    if (p.botIds?.has(qid) || (who && who === p.from && p.replied)) return;         // انرد عليه في القروب — ما نزعج المسؤول
     if (who && who === p.from) return;                                             // صاحب الاستفسار يضيف شي قبل ما نرد → نكمل عادي
     p.answered = true; log.info("قروب الكول سنتر: أحد ردّ على الاستفسار قبلنا"); return;
   }
@@ -315,13 +311,14 @@ async function handleCallCenter(m) {
   if (!r) return dmAdmin(head + "🔎 ما لقيت طلب بهالبيانات في الموقع (بحثت بكل الفروع).");
   if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
   // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
-  if (!agentOnline()) return dmAdmin(head + site + "\n\n🏥 ما قدرت أتأكد من صحة (أداة صحة مو شغالة) — ما رديت في القروب.");
+  if (!agentOnline()) { log.warn({ ref: r.ref }, "قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
   try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
   const items = sehaItems(k, [r]);
   const res = await askSeha(items, 8 * 60e3).catch(() => null);                    // لو تحتاج دخول نفاذ ننتظرها شوي
   try { await sock.sendMessage(jid, { react: { text: "", key: m.key } }); } catch {}
   const v = sehaVerdict(res, items[0]);
-  if (!v.ok) return dmAdmin(head + site + "\n\n" + (res ? sehaText(res, items) : "🏥 أداة صحة ما ردت") + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");
+  if (!res || res[0]?.err) { log.warn({ ref: r.ref, err: res?.[0]?.err }, "قروب الكول سنتر: صحة ما ردت — ما رديت"); return; }
+  if (!v.ok) return dmAdmin(head + site + "\n\n" + sehaText(res, items) + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");   // ما انرفعت في صحة / التاريخ مختلف
   const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
   const out = `${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
   if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
@@ -679,8 +676,7 @@ async function onIncoming(m) {
       const items = sehaItems({ ids: [] }, [r]);
       const res = items.length ? await askSeha(items, 2 * 60e3).catch(() => null) : null;
       v = sehaVerdict(res, items[0]); sehaCache.set(r.ref || r.id, { at: now, v }); if (sehaCache.size > 500) sehaCache.clear();
-      if (!v.ok) dmAdmin(`📨 مراجع يسأل عن إجازته (انرفعت من أكثر من 4 ساعات)\n${siteLine(r)}\n\n${res ? sehaText(res, items) : "🏥 أداة صحة ما ردت"}\n\n⚠ ${v.why || "ما تطابقت"}`).catch(() => {});
-      else if (/لم يتم الدفع/.test(v.row.pay || "") || /معلق/.test(v.row.status || "")) dmAdmin(`💳 ${String(r.patientName || "").trim()} (${r.ref || ""}) يسأل عن إجازته — في صحة: ${v.row.status}${v.row.pay ? " · " + v.row.pay : ""}\n👈 ${sehaMeaning(v.row, {}, r.branch)}`).catch(() => {});
+      if (!v.ok && res && !res[0]?.err) dmAdmin(`📨 مراجع يسأل عن إجازته (انرفعت من أكثر من 4 ساعات)\n${siteLine(r)}\n\n${sehaText(res, items)}\n\n⚠ ${v.why || "ما تطابقت"}`).catch(() => {});   // ما انرفعت في صحة / التاريخ مختلف بس
     }
     if (v?.ok) sehaNote = patientSeha(v.row);
   }
