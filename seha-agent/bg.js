@@ -91,7 +91,7 @@ async function tick() {
       } else msg = st.page === "iam" ? "ينتظر موافقة نفاذ" : "مو داخل صحة";
       if (queue.length && fails >= 3 && Date.now() - (c.lastLoginTry || 0) > 2 * MIN) await set({ fails: 2 });   // استفسار جديد = محاولة جديدة
     } else if (st.page === "accounts") {
-      const acc = queue[0]?.items?.[0]?.acc || DEF_ACC;
+      const acc = queue[0]?.items?.[0]?.acc || DEF_ACC; await set({ pickAcc: acc });
       const r = await send(tab.id, { type: "PICK", acc }, 20000);
       msg = r?.ok ? "اخترت الحساب" : (r?.err || "صفحة اختيار الحساب");
     } else if (st.page === "dashboard" || st.page === "search") {

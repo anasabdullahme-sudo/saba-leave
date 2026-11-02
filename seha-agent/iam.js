@@ -28,12 +28,16 @@
   };
   // كتابة تشتغل مع أي إطار (Angular/React/عادي)
   function type(inp, v) {
-    inp.focus();
-    try { inp.select(); document.execCommand("insertText", false, v); } catch {}
-    if (inp.value.replace(/\D/g, "") !== v) {
-      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(inp, v);
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    inp.focus(); set.call(inp, ""); inp.dispatchEvent(new Event("input", { bubbles: true }));
+    for (const ch of v) {                                                           // رقم رقم (زي الكتابة) — يشتغل مع خانات فيها قناع/حد للطول
+      inp.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true }));
+      set.call(inp, inp.value + ch);
+      inp.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" }));
+      inp.dispatchEvent(new KeyboardEvent("keyup", { key: ch, bubbles: true }));
     }
-    ["input", "change", "keyup", "blur"].forEach(t => inp.dispatchEvent(new Event(t, { bubbles: true })));
+    if (inp.value.replace(/\D/g, "") !== v) { try { inp.select(); document.execCommand("insertText", false, v); } catch {} }
+    inp.dispatchEvent(new Event("change", { bubbles: true }));
   }
   const click = el => { const r = el.getBoundingClientRect(), o = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
     ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(t => el.dispatchEvent(new (t.startsWith("pointer") ? PointerEvent : MouseEvent)(t, o))); el.click(); };
@@ -42,6 +46,21 @@
 
   (async () => {
     await A.waitFor(() => document.body && document.body.innerText.length > 30, 20000);
+    // دخلت نفاذ بس ما رجعك لصحة (طلعت صفحة نفاذ الرئيسية «أهلاً بك … المعلومات الشخصية») → نرجع لدخول صحة
+    for (let i = 0; i < 10; i++) {
+      const t = norm(document.body.innerText);
+      if (/المعلومات الشخصيه|سجل العمليات/.test(t) && /اهلا بك/.test(t) && !inputs().length) {
+        const c0 = await chrome.storage.local.get(["enabled", "nafathAt", "backAt"]);
+        if (c0.enabled !== false && c0.nafathAt && Date.now() - c0.nafathAt < 10 * 60e3 && Date.now() - (c0.backAt || 0) > 60e3) {
+          await chrome.storage.local.set({ backAt: Date.now() });
+          show("دخلت نفاذ — أرجعك لصحة…");
+          location.href = "https://seha.sa/samlgateway/index?returnUrl=https%3A%2F%2Fseha.sa%2F%23%2Faccount%2Flogin";
+        }
+        return;
+      }
+      if (inputs().length || numberEl()) break;
+      await sleep(1000);
+    }
     if (!/seha|صحه/i.test(norm(document.body.innerText) + location.href + document.referrer)) return;   // دخول صحة بس
     const c = await chrome.storage.local.get(["natId", "enabled"]);
     if (c.enabled === false) return;
@@ -51,8 +70,12 @@
     let lastClick = 0, clicks = 0, sent = "";
     while (Date.now() < end) {
       const num = numberEl();
-      if (num) { const n = ownText(num); if (n !== sent) { sent = n; show(`رقم نفاذ ${n} — انرسل لك واتساب`); await say({ type: "NAFATH_NUM", num: n }); } await sleep(3000); continue; }
-      if (sent) { show("تم ✓"); return; }
+      if (num) { const n = ownText(num); if (n !== sent) { sent = n; show(`رقم نفاذ ${n} — انرسل لك واتساب`); await chrome.storage.local.set({ nafathAt: Date.now() }); await say({ type: "NAFATH_NUM", num: n }); } await sleep(3000); continue; }
+      if (sent) {                                                                   // وافقت — لو طلعت صفحة نفاذ الرئيسية بدل ما يرجع لصحة نرجّعه
+        show("وافقت ✓ — أرجع لصحة…");
+        for (let i = 0; i < 20; i++) { const t = norm(document.body.innerText); if (/المعلومات الشخصيه|سجل العمليات/.test(t) && /اهلا بك/.test(t)) { await chrome.storage.local.set({ backAt: Date.now() }); location.href = "https://seha.sa/samlgateway/index?returnUrl=https%3A%2F%2Fseha.sa%2F%23%2Faccount%2Flogin"; return; } await sleep(1000); }
+        return;
+      }
       const inp = idInput();
       if (!inp) { show("أدوّر على خانة الهوية…"); await sleep(1000); continue; }
       if (inp.value.replace(/\D/g, "") !== c.natId) { type(inp, c.natId); await sleep(600); }

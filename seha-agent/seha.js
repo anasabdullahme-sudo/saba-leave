@@ -7,9 +7,11 @@
 
   function page() {
     const h = location.hash || "", t = bodyN();
-    if (/Account\/Login/i.test(h)) return "login";
+    if (/حسابات صحه طبي/.test(t)) return "accounts";                               // رابطها #/account/login?sessionId=… (مو صفحة دخول)
+    if (/sessionId=/i.test(h)) return "loading";                                    // راجع من نفاذ — يحمّل
     if (/iamredirection/i.test(h)) return "redirect";
-    if (/حسابات صحه طبي/.test(t)) return "accounts";
+    if (/Account\/Login/i.test(h) && /تسجيل الدخول باستخدام/.test(t)) return "login";
+    if (/Account\/Login/i.test(h)) return "loading";
     if (/بحث عن اجازه مرضيه/.test(t) && inputByLabel(/رقم هويه/)) return "search";
     if ((/مرحبا بك/.test(t) || /الصفحه الرييسيه/.test(t)) && textEls("الخدمات").some(visible)) return "dashboard";
     if (/تسجيل الدخول باستخدام/.test(t)) return "login";
@@ -42,13 +44,22 @@
   // رابط صفحة الدخول (#/Account/Login) وأنت فاتحها قدامك → نضغط «تسجيل الدخول باستخدام نفاذ» لحالنا (تبويب الأداة المخفي تتحكم فيه الخلفية)
   let autoBusy = false, autoAt = 0;
   setInterval(async () => {
-    if (autoBusy || !/Account\/Login/i.test(location.hash) || document.visibilityState !== "visible") return;
+    if (autoBusy || page() !== "login" || document.visibilityState !== "visible") return;
     if (Date.now() - autoAt < 15000) return;
     const c = await chrome.storage.local.get(["natId", "enabled"]).catch(() => ({}));
     if (c.enabled === false || !c.natId) return;
     autoBusy = true; autoAt = Date.now();
     try { await clickNafath(); } finally { autoBusy = false; }
   }, 2000);
+  // صفحة «حسابات صحة طبي» بعد دخول نفاذ سوّته الأداة (آخر 10 دقايق) → نختار حساب البوادي (مدخل الإجازات) لحالنا
+  let pickAt = 0;
+  setInterval(async () => {
+    if (page() !== "accounts" || Date.now() - pickAt < 8000) return;
+    const c = await chrome.storage.local.get(["enabled", "nafathAt", "pickAcc"]).catch(() => ({}));
+    if (c.enabled === false || !c.nafathAt || Date.now() - c.nafathAt > 10 * 60e3) return;
+    pickAt = Date.now();
+    await pickAccount(c.pickAcc || { group: "سابا الطبية", role: "مدخل الإجازات المرضية", key: "البوادي" });
+  }, 2500);
   // صفحة «أنت الآن ستغادر هذا الموقع» تتحول لحالها خلال ثواني — لو علقت نضغط الزر
   setInterval(() => {
     if (!/iamredirection/i.test(location.hash)) return;
