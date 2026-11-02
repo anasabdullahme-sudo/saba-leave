@@ -73,9 +73,11 @@ export async function askSeha(items, timeoutMs = 4 * MIN) {
 }
 
 const ST_ICON = [[/مكتمل/, "✅"], [/بانتظار|انتظار/, "⏳"], [/معلق/, "⏸"], [/معاد/, "↩️"], [/مرفوض|رفض/, "⛔"], [/ملغ/, "✖️"]];
+export const sehaIcon = s => (ST_ICON.find(([re]) => re.test(s || "")) || [, "•"])[1];
 const icon = s => (ST_ICON.find(([re]) => re.test(s || "")) || [, "•"])[1];
 const BR = { bawadi: "البوادي", tala: "تالا", watanak: "وطنك", haramain: "الحرمين", sulaimaniyah: "السليمانية" };
 // معنى الحالة للكول سنتر (ليش ما وصلت للمراجع)
+export function sehaMeaning(row, w, branch) { return meaning(row, w || {}, branch); }
 function meaning(row, w, branch) {
   const st = row.status || "", pay = row.pay || "", br = BR[branch] || branch || "الفرع";
   if (/مكتمل/.test(st)) return "مكتملة — تطلع للمراجع في صحتي";
@@ -108,4 +110,25 @@ export function sehaText(res, want) {
     const why = meaning(m, w, r.branch);
     return `🏥 منصة صحة (${acc}):\n${icon(m.status)} *${m.status || "—"}*${m.pay ? " · " + m.pay : ""}${why ? "\n👈 " + why : ""}\n   ${m.psl || ""} · ${m.type || ""} · طلب ${m.date || ""}${dates}`;
   }).join("\n\n");
+}
+
+// نفس الإجازة ونفس التاريخ؟ (مطابقة PSL/تاريخ الرفع + تاريخ الإجازة من «عرض» لو انقرا)
+export function sehaVerdict(res, w) {
+  const r = res?.[0];
+  if (!r) return { ok: false, why: "أداة صحة ما ردت" };
+  if (r.err) return { ok: false, why: "صحة: " + r.err };
+  if (!r.rows?.length) return { ok: false, why: "ما فيه إجازة بهالهوية في صحة" };
+  if (r.match == null) return { ok: false, why: "ما لقيت في صحة إجازة بنفس تاريخ الرفع (يمكن ما انرفعت أو انرفعت بحساب ثاني)" };
+  const row = r.rows[r.match], vs = r.view?.from, ve = r.view?.to;
+  if ((vs || ve) && w?.leaveStart && !(dmyNum(vs) === dmyNum(w.leaveStart) && dmyNum(ve) === dmyNum(w.leaveEnd))) return { ok: false, row, why: `تاريخ الإجازة في صحة (${vs || "؟"} ← ${ve || "؟"}) غير اللي عندنا (${w.leaveStart} ← ${w.leaveEnd})` };
+  return { ok: true, row };
+}
+// للمراجع نفسه (بدون تفاصيل داخلية مثل الدفع)
+export function patientSeha(row) {
+  const st = row?.status || "", pay = row?.pay || "";
+  if (/مكتمل/.test(st)) return "إجازتك مكتملة في منصة صحة ✅ وتقدر تشوفها في تطبيق صحتي.";
+  if (/لم يتم الدفع/.test(pay) || /معلق/.test(st)) return "إجازتك مرفوعة في منصة صحة وباقي عليها إجراء بسيط من العيادة، وبتظهر لك في صحتي قريب إن شاء الله.";
+  if (/بانتظار (التحقق|التدقيق)|تدقيق|تحقق/.test(st)) return "تأكدت الحين من منصة صحة: إجازتك مرفوعة وتنتظر تدقيق الطبيب، وأول ما يعتمدها تظهر لك في صحتي.";
+  if (/معاد/.test(st)) return "إجازتك يراجعها الموظف الحين، وبنبلغك أول ما تكتمل.";
+  return "";
 }

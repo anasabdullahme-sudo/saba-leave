@@ -9,14 +9,14 @@ import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
 import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin } from "./group.js";
-import { initAgent, agentKey, agentOnline, agentReady, agentState, askSeha, sehaText, hijri } from "./sehaagent.js";
+import { initAgent, agentKey, agentOnline, agentReady, agentState, askSeha, sehaText, sehaVerdict, sehaMeaning, sehaIcon, patientSeha, hijri } from "./sehaagent.js";
 import { initArchive, archiveOn, archiveNew, ensureArchived, pruneArchive, archiveStats, wipeArchive, getImage } from "./archive.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.12.0";
+const VERSION = "2.13.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -279,7 +279,7 @@ async function findRequests(k) {
 
 /* ---------- قروب الكول سنتر: أي رسالة عن إجازة/منصة فيها هوية أو جوال → البوت يرد بحالة الطلب ---------- */
 const CC_NAME = String(process.env.CALLCENTER_GROUP || "call center").toLowerCase();
-const ccSubj = new Map(), ccDone = new Set();
+const ccSubj = new Map(), ccDone = new Set(), sehaCache = new Map();
 async function isCallCenter(jid) {
   if (!ccSubj.has(jid)) { try { ccSubj.set(jid, String((await sock.groupMetadata(jid))?.subject || "").toLowerCase()); } catch { return false; } }
   return ccSubj.get(jid).includes(CC_NAME);
@@ -293,30 +293,30 @@ async function handleCallCenter(m) {
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
   if (!text || !CC_LEAVE.test(normMsg(text))) return;                            // مو عن إجازة (تأمين، نتائج، دكتور…) → ما نتدخل
   const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return;
-  const list = await findRequests(k);
-  const STC = { pending: "⏳ وصل طلبه ولسى ما انرفع على صحة", held: "⏸ الطلب معلّق", done: "✅ انرفعت على منصة صحة", cancelled: "✖️ الطلب ملغي" };
-  let out;
-  if (!list.length) out = "🔎 ما لقيت طلب إجازة بهالبيانات في نظام سابا (بحثت بكل الفروع).\nممكن ما رفع التقرير من رابط سابا، أو الرقم مختلف — اطلبوا منه رقم الطلب SB- أو رقم الهوية.";
-  else {
-    const r = list[0], dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
-    out = `📋 ${String(r.patientName || "").trim()} — ${r.ref || ""}
-${TYPE_ADM[r.type] || ""} · فرع ${BR_AR[r.branch] || r.branch || "—"}${dates ? " · " + dates : ""}
-🩺 ${r.doctorName || r.stampDoctor || "الطبيب ما انكتب"}
-${STC[r.status] || r.status}${r.status === "done" && ms(r.doneAt) ? " " + fmtD(ms(r.doneAt)) + "\n   الباقي: اعتماد الطبيب في صحة، وبعدها تطلع له في صحتي" : ""}${r.status === "held" ? " — " + (HOLD_AR[r.holdReason] || r.holdReason || "") + (r.holdNote ? ": " + String(r.holdNote).slice(0, 80) : "") : ""}${r.status === "pending" ? "\n   وصل " + fmtD(ms(r.createdAt)) : ""}${list.length > 1 ? `\n\n(له ${list.length} طلبات — هذا آخر واحد)` : ""}`;
-  }
-  // انرفعت على صحة (أو مو عندنا) والأداة شغالة → نشيك صحة أول ونرسل رد واحد فيه الثنين
-  const items = sehaItems(k, list);
-  if (items.length && agentOnline() && !agentReady()) {                             // الأداة طالعة من صحة (تنتظر نفاذ) → نرد الحين ونكمّل بعدين
-    try { await sock.sendMessage(jid, { text: out + "\n\n🏥 أشيك في منصة صحة وأرد عليكم…" }, { quoted: m }); } catch {}
-    return sehaFollow(jid, m, items);
-  }
-  if (items.length && agentReady()) {
-    try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
-    const res = await askSeha(items, 2.5 * 60e3).catch(() => null);
-    out += "\n\n" + (res ? sehaText(res, items) : "🏥 ما قدرت أشيك في منصة صحة الحين");
-    try { await sock.sendMessage(jid, { react: { text: "", key: m.key } }); } catch {}
-  }
-  try { await sock.sendMessage(jid, { text: out }, { quoted: m }); log.info({ found: list.length, seha: items.length }, "قروب الكول سنتر: رد على استفسار إجازة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
+  const list = await findRequests(k), r = list[0], by = m.pushName || "الكول سنتر";
+  const head = `📨 قروب الكول سنتر (${by}):\n«${text.slice(0, 200)}»\n\n`;
+  const site = r ? siteLine(r) : "";
+  // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
+  if (!r) return dmAdmin(head + "🔎 ما لقيت طلب بهالبيانات في الموقع (بحثت بكل الفروع).");
+  if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
+  // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
+  if (!agentOnline()) return dmAdmin(head + site + "\n\n🏥 ما قدرت أتأكد من صحة (أداة صحة مو شغالة) — ما رديت في القروب.");
+  try { await sock.sendMessage(jid, { react: { text: "🔎", key: m.key } }); } catch {}
+  const items = sehaItems(k, [r]);
+  const res = await askSeha(items, 8 * 60e3).catch(() => null);                    // لو تحتاج دخول نفاذ ننتظرها شوي
+  try { await sock.sendMessage(jid, { react: { text: "", key: m.key } }); } catch {}
+  const v = sehaVerdict(res, items[0]);
+  if (!v.ok) return dmAdmin(head + site + "\n\n" + (res ? sehaText(res, items) : "🏥 أداة صحة ما ردت") + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");
+  const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
+  const why = sehaMeaning(v.row, items[0], r.branch);
+  const out = `📋 ${String(r.patientName || "").trim()} — ${TYPE_ADM[r.type] || ""}${dates ? " " + dates : ""}\n${sehaIcon(v.row.status)} ${v.row.status}${why ? "\n👈 " + why : ""}`;
+  try { await sock.sendMessage(jid, { text: out }, { quoted: m }); log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
+}
+// سطر الموقع (للمسؤول)
+function siteLine(r) {
+  const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
+  const st = { pending: "⏳ بالانتظار (ما انرفع)", held: "⏸ معلّق" + (r.holdReason ? " — " + (HOLD_AR[r.holdReason] || r.holdReason) : ""), done: "✅ انرفع " + fmtD(ms(r.doneAt)) + (r.doneBy ? " · " + r.doneBy : "") }[r.status] || r.status;
+  return `📋 ${String(r.patientName || "").trim()} — ${r.ref || ""}\n${TYPE_ADM[r.type] || ""} · فرع ${BR_AR[r.branch] || r.branch || "—"}${dates ? " · " + dates : ""}\n🩺 ${r.doctorName || r.stampDoctor || "—"}\n🪪 ${r.idNumber || "—"}\nالموقع: ${st}`;
 }
 // منصة صحة (أداة كمبيوتر المسؤول): الطلبات اللي انرفعت → نبحث في حساب فرعها ونطابق PSL/تاريخ الرفع وتاريخ الإجازة
 function sehaItems(k, list) {
@@ -454,7 +454,8 @@ const AI_RULES = `أنت «مساعد سابا» — رقم واتساب آلي 
 - لو قال «قولوا للطبيب/ذكّروه/كلموه»: خلّ remind_doctor = true وقل له بجملة وحدة إنك ذكّرت الطبيب (ولو ذكّرته قريب قل إن التذكير وصله).
 - خلّ staff_needed = true (مع staff_note مختصرة تشرح وش يبي) لما المراجع: يستعجل لأنه يحتاجها لدوام/جهة/موعد، أو يعترض أو زعلان، أو يسأل نفس السؤال للمرة الثالثة، أو يطلب يكلم موظف، أو يطلب شي ما تقدر تسويه. وقتها reply = جملة قصيرة إنك بلّغت الموظف المختص وبيتابع معه هنا.
 - لا تكرر نفس الرابط أو نفس الكلام اللي انقال قبل في المحادثة إلا إذا طلبه.
-- لو ما لقينا له طلب: اطلب منه رقم الطلب (يبدأ بـ SB-) أو يتابع من رابط المتابعة.`;
+- لو ما لقينا له طلب: اطلب منه رقم الطلب (يبدأ بـ SB-) أو يتابع من رابط المتابعة.
+- لو في بيانات الطلب «seha_live_check»: هذا اللي تأكدنا منه الحين من منصة صحة — اعتمده كحالة الإجازة وقوله للمراجع بمعناه (لا تقول «بانتظار اعتماد الطبيب» إذا يقول غير كذا)، ولا تذكر أي شي عن الدفع أو الرصيد.`;
 
 async function aiReply(key, text, facts) {
   if (!GEMINI_KEY || !aiAllowed(key)) return null;
@@ -654,12 +655,28 @@ async function onIncoming(m) {
   const fixLinkTxt = () => `${SITE_URL}?fix=${r.fixToken}`;
   const flds = fix ? (fix.get("fields") || []).map(k => FIELD_AR[k] || k).join("، ") : "";
 
+  // انرفعت من أكثر من 4 ساعات وللحين يسأل → نتأكد من منصة صحة (أداة كمبيوتر المسؤول). أقل من 4 ساعات: ما ندخل صحة
+  let sehaNote = "";
+  if (r.status === "done" && now - ms(r.doneAt) > 4 * 3600e3 && !it.social && agentOnline() && !isAdminPhone(senderPhone)) {
+    const c = sehaCache.get(r.ref || r.id);
+    let v = c && now - c.at < 30 * 60e3 ? c.v : null;
+    if (!v) {
+      const items = sehaItems({ ids: [] }, [r]);
+      const res = items.length ? await askSeha(items, 2 * 60e3).catch(() => null) : null;
+      v = sehaVerdict(res, items[0]); sehaCache.set(r.ref || r.id, { at: now, v }); if (sehaCache.size > 500) sehaCache.clear();
+      if (!v.ok) dmAdmin(`📨 مراجع يسأل عن إجازته (انرفعت من أكثر من 4 ساعات)\n${siteLine(r)}\n\n${res ? sehaText(res, items) : "🏥 أداة صحة ما ردت"}\n\n⚠ ${v.why || "ما تطابقت"}`).catch(() => {});
+      else if (/لم يتم الدفع/.test(v.row.pay || "") || /معلق/.test(v.row.status || "")) dmAdmin(`💳 ${String(r.patientName || "").trim()} (${r.ref || ""}) يسأل عن إجازته — في صحة: ${v.row.status}${v.row.pay ? " · " + v.row.pay : ""}\n👈 ${sehaMeaning(v.row, {}, r.branch)}`).catch(() => {});
+    }
+    if (v?.ok) sehaNote = patientSeha(v.row);
+  }
+
   if (GEMINI_KEY) {
     const STATUS_AR = { pending: "بالانتظار — الفريق بيرفعها على منصة صحة", held: fixOpen ? "معلّق — ننتظر المراجع يعدّل بياناته من الرابط" : (fix ? "وصلنا تعديله والفريق يكمل الرفع" : "قيد المراجعة عند الفريق"), done: "تم رفعها على منصة صحة — بانتظار اعتماد الطبيب ثم تظهر في صحتي" };
     const facts = {
       found: true, patient_first_name: name, request_ref: r.ref || "", type: TYPE_SHORT[r.type] || "",
       status: STATUS_AR[r.status] || r.status, leave_dates: r.type === "attendance" ? (r.visitDate || r.leaveStart || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" إلى "),
       uploaded_to_seha: r.status === "done", seha_number: r.sehaRef || "",
+      ...(sehaNote ? { seha_live_check: sehaNote } : {}),                            // تأكدنا الحين من منصة صحة — استخدمه بدل الحالة العامة
       correction_needed: !!fixOpen, correction_fields: fixOpen ? flds : "", correction_link: fixOpen ? fixLinkTxt() : "",
       correction_received: !!(fix && !fixOpen), doctor_reminded_recently: now - ms(r.doctorRemindedAt) <= 12 * 3600e3,
       track_link: `${SITE_URL}?track`, today: new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Riyadh" }),
@@ -719,6 +736,7 @@ async function onIncoming(m) {
   flag(); log.info({ ref: r.ref, intent: Object.keys(it).filter(k => it[k] === true) }, "رسالة مراجع");
 
   // ---- تم الرفع: نشرح الاعتماد + تذكير للطبيب
+  if (r.status === "done" && sehaNote) { if (!it.social) flag(); return statusReply(`${hello}${hi}، ${sehaNote}`); }
   if (r.status === "done") {
     let reminded = false;
     const dp = doctorPhoneFor(r);
