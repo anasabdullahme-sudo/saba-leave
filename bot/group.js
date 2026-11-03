@@ -590,7 +590,7 @@ async function removeDoctor(id, by) {
 /* ---------- طبيب مو موجود → رسالة للمسؤول على الخاص: يضيفه أو لا ---------- */
 const adminJids = new Map();
 const adminLog = [];                       // آخر رسائلنا للمسؤول (سياق لما يسأل «ليش؟»)
-export async function dmAdmin(text) {
+async function dmAdmin(text) {
   adminLog.push({ at: Date.now(), text: String(text).slice(0, 700) }); while (adminLog.length > 8) adminLog.shift();
   const sock = getSock(); if (!sock || !admins.length) return false;
   let ok = false;
@@ -705,13 +705,10 @@ const ASSIST = `أنت بوت قروب استقبال عيادات سابا (ف�
 - لو يسأل ليش سويت شي أو من وين جبت معلومة: جاوب بصراحة من السياق. لو أخطأت أو اخترعت (مثل وقت مو مكتوب) اعترف بجملة وحدة واقترح التصحيح.
 - لو يطلب تصحيح أو يعطيك معلومة: حط الأحداث في events بنفس أنواع القروب (للطبيب المقصود)، و reply يقول وش بتسوي.
 - لو يطلب ترجع آخر تعديل: undo = true.
-- لا تخترع أوقات أو أرقام ما قالها هو أو ما كانت في الرسالة.
-- لا تخمّن أبداً تخصص طبيب أو قسمه أو مين يغطي مكانه أو كشفيته أو غرفته: لو مو مكتوب في رسالة القروب أو في بيانات الأطباء قل «ما أعرف» واسأله. وإذا السؤال عن طبيب جديد ينتظر الإضافة، اعتمد على نص رسالة القروب الأصلية (مثل «اخصائي المسالك البولية»).`;
+- لا تخترع أوقات أو أرقام ما قالها هو أو ما كانت في الرسالة.`;
 async function adminAssist(m, text) {
   const recent = adminLog.filter(x => Date.now() - x.at < 2 * 3600e3);
   const items = ((await db.doc("bot/pending_clarify").get()).data()?.items || []).filter(i => Date.now() - i.at < 3 * 3600e3).slice(-3);
-  const pend = ((await db.doc("bot/pending_doctors").get()).data()?.items || []).filter(i => Date.now() - i.at < 7 * DAY);
-  items.push(...pend.map(i => ({ text: `[طبيب جديد ينتظر الإضافة #${i.code}: د. ${i.name}] ${i.text || ""}` })));
   if (!gemini || (!recent.length && !items.length)) { await dmAdmin("أنا معك 👋 لو تبغى تصحّح شي سويته، اسحب رسالتي (رد) واكتب الصح. ولو تبغى ترجع آخر تعديل اكتب «تراجع»."); return true; }
   const names = [...new Set((items.map(i => i.text).join(" ") + " " + recent.map(r => r.text).join(" ") + " " + text).match(/د\.?\s*[^\s،,.:]+(\s[^\s،,.:]+)?/g) || [])].slice(0, 6);
   const ds = names.map(nm => matchDoctor(nm.replace(/^د\.?\s*/, ""))).filter(Boolean);
@@ -752,12 +749,10 @@ export async function handleAdminMessage(m, phone, text) {
     if (/^(شغل|رجع|فعل) (ال)?تقارير/.test(n0)) { reportsOn = true; db.doc("bot/prefs").set({ reports: true }, { merge: true }).catch(() => {}); await dmAdmin("تمام، رجعت تقارير القروب ✅"); return true; } }
   try { if (await handleClarify(m, text)) return true; } catch (e) { log.warn({ err: String(e?.message || e) }, "تصحيح المسؤول"); }
   const n = norm(text);
-  const words = n.split(/\s+/).filter(Boolean).length;
-  // «نعم» / «لا» بس لو الرد قصير — «لا هو دكتور مسالك بنفس عيادة…» مو رفض، هذا جواب فيه تفاصيل
-  const yes = words <= 3 && (/^(نعم|ايوه|ايوا|اي|ايه|اضف|اضفه|ضيف|ضيفه|ضيفها|موافق|تمام|اوكي|ok|1)(?:\s|$)/.test(n) || /^(👍|✅)/.test(text));
-  const no = words <= 3 && (/^(لا|تجاهل|الغ|الغيه|لاتضيف|لا تضيف|2)(?:\s|$)/.test(n) || /^❌/.test(text));
+  const yes = /^(نعم|ايوه|ايوا|اي|ايه|اضف|اضفه|ضيف|ضيفه|ضيفها|موافق|تمام|اوكي|ok|1)(?:\s|$)/.test(n) || /^(👍|✅)/.test(text);
+  const no = /^(لا|تجاهل|الغ|الغيه|لاتضيف|لا تضيف|2)(?:\s|$)/.test(n) || /^❌/.test(text);
   const undo = /^تراجع/.test(n);
-  if (!yes && !no && !undo) { if (await detailedAdd(m, text, n)) return true; return adminAssist(m, text); }
+  if (!yes && !no && !undo) return adminAssist(m, text);
   if (undo) { await restorePrev(); return true; }
   const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
   const qt = q?.conversation || q?.extendedTextMessage?.text || "";
@@ -769,51 +764,21 @@ export async function handleAdminMessage(m, phone, text) {
   if (!it) { await dmAdmin(`عندي ${items.length} أطباء ينتظرون: ${items.map(i => "د. " + i.name + " #" + i.code).join("، ")}\nرد على رسالة الطبيب نفسها بـ «نعم» أو «لا».`); return true; }
   await ref.set({ items: items.filter(i => i.code !== it.code) });
   if (no) { await dmAdmin(`تمام، تجاهلت د. ${it.name}.`); return true; }
-  await addPendingDoctor(it, {});
-  return true;
-}
-// إضافة طبيب ينتظر موافقة — over: تفاصيل من المسؤول (القسم / غرفة / تحويلة / كشفية / نسخ من طبيب ثاني)
-async function addPendingDoctor(it, over) {
-  let added = "", line = "";
+  let added = "";
   await db.runTransaction(async tx => {
     const bref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(bref)).data(); if (!cur) return;
     const next = structuredClone(cur);
     if (next.departments.flatMap(x => x.doctors || []).some(x => norm(shortName(x.name)) === norm(it.name))) { added = "exists"; return; }
-    let dep = next.departments.find(x => x.id === (over.depId || it.depId));
+    let dep = next.departments.find(x => x.id === it.depId);
     if (!dep) { dep = { id: uid().slice(0, 7), name: it.dept || "أخرى", floor: "G", notes: "", doctors: [] }; next.departments.push(dep); }
-    const d = { id: uid().slice(0, 7), name: it.name, code: "", ext: over.ext ?? it.ext ?? "", room: over.room ?? it.room ?? "", fee: over.fee ?? it.fee ?? "",
-      workdays: it.days?.length ? it.days : [0, 1, 2, 3, 4, 6], shifts: it.shifts || [] };
-    (dep.doctors ||= []).push(d);
-    line = `${dep.name}${d.room ? " · غرفة " + d.room : ""}${d.ext ? " · تحويلة " + d.ext : ""}${d.fee ? " · كشفية " + d.fee : ""}${d.shifts.length ? " · الدوام " + d.shifts.map(x => hm(x.s) + "–" + hm(x.e)).join(" و ") : ""}`;
+    (dep.doctors ||= []).push({ id: uid().slice(0, 7), name: it.name, code: "", ext: it.ext || "", room: it.room || "", fee: it.fee || "",
+      workdays: it.days.length ? it.days : [0, 1, 2, 3, 4, 6], shifts: it.shifts || [] });
     next.log = [{ at: Date.now(), by: "البوت (موافقة المسؤول)", what: `طبيب جديد: د. ${it.name}` }, ...(cur.log || [])].slice(0, 60);
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "طبيب جديد من القروب" }); tx.set(bref, next);
     added = dep.name;
   });
-  await dmAdmin(added === "exists" ? `د. ${it.name} موجود أصلاً في الجدول.` : added ? `✅ انضاف د. ${it.name}\n${line}${over.like ? `\n(نفس بيانات د. ${over.like})` : ""}\nتقدر تعدّل بياناته من صفحة الأطباء.` : "ما قدرت أضيفه — جرّب من صفحة الأطباء.");
-  return added;
-}
-// جواب مفصّل على «أضيفه؟»: «هو دكتور مسالك بنفس عيادة د. خالد علام وبنفس الكشفية والتحويلة» → نضيفه بهالبيانات
-async function detailedAdd(m, text, n) {
-  const ref = db.doc("bot/pending_doctors");
-  const items = ((await ref.get()).data()?.items || []).filter(i => Date.now() - i.at < 7 * DAY);
-  const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-  const qt = q?.conversation || q?.extendedTextMessage?.text || "";
-  const code = (/#([A-Z0-9]{3})\b/.exec(qt) || [])[1];
-  let it = code ? items.find(i => i.code === code) : items.length === 1 ? items[0] : items.find(i => n.includes(norm(i.name)));
-  if (!it) return false;
-  const others = docs().filter(d => norm(shortName(d.name)) !== norm(it.name));
-  const like = /(نفس|مثل|زي|نفسه)/.test(n) ? others.find(d => { const sn = norm(shortName(d.name)).replace(/^(د|دكتور|دكتوره)\s+/, ""); return sn.split(" ").length >= 2 && n.includes(sn); }) || others.find(d => { const parts = norm(shortName(d.name)).split(" "); return parts.length >= 2 && n.includes(parts[0]) && n.includes(parts[parts.length - 1]); }) : null;
-  const depOf = d => (board?.departments || []).find(p => (p.doctors || []).some(x => x.id === d.id));
-  let dep = like ? depOf(like) : null;
-  if (!dep) dep = (board?.departments || []).find(p => norm(p.name).replace(/^ال/, "").split(" ").filter(w => w.length > 3).some(w => n.includes(w.replace(/^ال/, ""))));
-  if (!like && !dep) return false;                                                 // ما فهمت تفاصيل → المساعد
-  await ref.set({ items: items.filter(i => i.code !== it.code) });
-  const over = { depId: dep?.id || "" };
-  if (like) { over.like = shortName(like.name); for (const f of ["room", "ext", "fee"]) if (like[f]) over[f] = like[f]; }
-  const fee = /(كشفيه|كشف|سعر)\D{0,6}(\d{2,4})/.exec(latin(n)); if (fee) over.fee = fee[2];
-  const room = /(غرفه|عياده)\D{0,6}(\d{1,3})/.exec(latin(n)); if (room) over.room = room[2];
-  await addPendingDoctor(it, over);
+  await dmAdmin(added === "exists" ? `د. ${it.name} موجود أصلاً في الجدول.` : added ? `✅ انضاف د. ${it.name} في ${added}.\nتقدر تعدّل بياناته من صفحة الأطباء.` : "ما قدرت أضيفه — جرّب من صفحة الأطباء.");
   return true;
 }
 async function restorePrev() {
@@ -905,13 +870,4 @@ export async function handleGroupMessage(m) {
   // ✅ فهمها وطبّقها — ❓ فهم إنها عن طبيب بس ما عرف مين (يكتبون الاسم الثاني أو يردّون على رسالة فيها الاسم)
   const react = applied.length ? "✅" : "❓";
   try { await getSock()?.sendMessage(jid, { react: { text: react, key: m.key } }); } catch {}
-}
-
-// المسؤول يسأل «جدول مجدي» → وش مكتوب عنه في الجدول الحين (اللي تنقله البطاقة)
-export function boardInfo(q) {
-  const nm = String(q || "").replace(/^(د|دكتور|دكتوره)\.?\s*/, "").trim(); if (!nm || !board) return null;
-  const L = docs().filter(d => sameName(nm, d)); const d = L.length ? L[0] : matchDoctor(nm); if (!d) return "";
-  const t = nowR();
-  const vac = (board.vacations || []).filter(v => v.doctorId === d.id && (!v.end || v.end >= t.iso)).map(v => `${v.start} ← ${v.end || "بدون نهاية"}`);
-  return `📋 د. ${shortName(d.name)} — ${d.dep}\nالدوام: ${(d.shifts || []).map(x => hm(x.s) + "–" + hm(x.e)).join(" و ") || "—"}\nالأيام: ${(d.workdays || []).map(i => DAYN[i]).join("، ") || "—"}\nغرفة ${d.room || "—"} · تحويلة ${d.ext || "—"} · كشفية ${d.fee || "—"}\n${vac.length ? "🏖 إجازة: " + vac.join(" / ") : "✅ ما عنده إجازة"}${L.length > 1 ? `\n(فيه ${L.length} بنفس الاسم)` : ""}`;
 }

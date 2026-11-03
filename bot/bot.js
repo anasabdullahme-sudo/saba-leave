@@ -8,15 +8,13 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
-import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin, boardInfo } from "./group.js";
-import { initAgent, agentKey, agentOnline, agentReady, agentState, askSeha, sehaText, sehaVerdict, sehaMeaning, sehaIcon, patientSeha, hijri } from "./sehaagent.js";
-import { initArchive, archiveOn, archiveNew, ensureArchived, pruneArchive, archiveStats, wipeArchive, getImage } from "./archive.js";
+import { initGroup, handleGroupMessage, handleAdminMessage } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.17.2";
+const VERSION = "2.7.5";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -54,7 +52,7 @@ async function connect() {
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", ({ messages, type }) => {
     // رسائل القروب اللي وصلت والبوت طافي (append) — نعالج الأحدث من 6 ساعات
-    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) onGroupMessage(m).catch(() => {}); else if (m.key?.remoteJid && !m.key.remoteJid.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 10 * 60e3) bufferIncoming(m); } return; }   // رسايل خاصة وصلت والبوت يعيد التشغيل (آخر 10 دقايق) → نرد عليها
+    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) handleGroupMessage(m).catch(() => {}); } return; }
     if (type !== "notify") return;
     for (const m of messages || []) bufferIncoming(m);
   });
@@ -170,17 +168,9 @@ function trackItem(r) {
 }
 function startTrackSync() {
   const since = Timestamp.fromMillis(Date.now() - TRACK_DAYS * DAY);
-  let chain = Promise.resolve(), first = true;
+  let chain = Promise.resolve();
   db.collection("requests").where("createdAt", ">=", since).onSnapshot(s => {
-    let changes = s.docChanges().filter(c => c.type !== "removed");
-    // أول قراءة بعد تشغيل البوت: كل الطلبات تجي «جديدة» — كانت تنكتب كلها من جديد مع كل إعادة تشغيل (آلاف الكتابات → خلص حد Firestore المجاني)
-    // الحين: نحفظها في الذاكرة بس، ونكتب اللي تغيّر آخر 6 ساعات (وقت ما كان البوت طافي)
-    if (first) {
-      first = false;
-      const recent = Date.now() - 6 * 3600e3;
-      for (const ch of changes) { const r = ch.doc.data(); if (r.idNumber && r.phone && (ch.doc.updateTime?.toMillis?.() || 0) < recent) trackCache.set(ch.doc.id, { key: trackKey(r.idNumber, r.phone), json: JSON.stringify(trackItem(r)) }); }
-      changes = changes.filter(ch => (ch.doc.updateTime?.toMillis?.() || Date.now()) >= recent);
-    }
+    const changes = s.docChanges().filter(c => c.type !== "removed");
     chain = chain.then(async () => {
       for (const ch of changes) {
         const r = ch.doc.data(), id = ch.doc.id;
@@ -265,208 +255,6 @@ async function reply(jid, text, phone) {
 // ردود قصيرة (سلام، شكر، تمام…) — لو جت بعد رسالة منا ما نرد عليها
 const PLEASANT = /^(و?\s*عليكم\s*السلام.*|السلام\s*عليكم.*|تمام.*|تم|اوكي?|ok(ay)?|شكرا.*|مشكور.*|يعطيك.*|الله\s*يعافيك.*|جزاك.*|طيب|حاضر|ابشر.*|ان\s*شاء\s*الله|خلاص|[\u{1F300}-\u{1FAFF}\u2600-\u27BF\s]+)[\s!.؟?]*$/iu;
 const normMsg = s => latin(s).replace(/[\u064B-\u0652]/g, "").replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").trim();
-/* ---------- المسؤول يسأل عن مراجع (هوية/جوال/رقم طلب) → حالة طلباته ومع أي طبيب ---------- */
-const ST_ADM = { pending: "⏳ بالانتظار (ما انرفع على صحة)", held: "⏸ معلّق", done: "✅ انرفع على صحة", cancelled: "✖️ ملغي" };
-const HOLD_AR = { license: "ترخيص الطبيب", data: "خطأ في البيانات", other: "أخرى" };
-const fmtD = t => t ? new Intl.DateTimeFormat("ar-SA-u-nu-latn-ca-gregory", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", hour: "numeric", minute: "2-digit" }).format(new Date(t)) : "";
-function lookupKeys(text) {
-  const t = latin(text);
-  const ids = [...new Set((t.match(/(?<!\d)[12]\d{9}(?!\d)/g) || []))];
-  const phones = [...new Set((t.replace(/[\s-]/g, "").match(/(?<!\d)(?:00966|\+?966|0)?5\d{8}(?!\d)/g) || []).map(normPhone).filter(p => /^05\d{8}$/.test(p)))];
-  const refs = [...new Set((t.toUpperCase().match(/SB-?\s?[A-Z0-9]{5}/g) || []).map(r => "SB-" + r.replace(/^SB-?\s?/, "")))];
-  return { ids, phones, refs };
-}
-async function findRequests(k) {
-  const found = new Map(), col = db.collection("requests");
-  const add = s => s.docs.forEach(d => found.set(d.id, { id: d.id, ...d.data() }));
-  for (const v of k.ids) { add(await col.where("idNumber", "==", v).limit(20).get()); add(await col.where("companionId", "==", v).limit(20).get()); }
-  for (const v of k.phones) add(await col.where("phone", "==", v).limit(20).get());
-  for (const v of k.refs) add(await col.where("ref", "==", v).limit(5).get());
-  return [...found.values()].filter(r => !isDupe(r)).sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
-}
-
-/* ---------- قروب الكول سنتر: أي رسالة عن إجازة/منصة فيها هوية أو جوال → البوت يرد بحالة الطلب ---------- */
-const CC_NAME = String(process.env.CALLCENTER_GROUP || "call center").toLowerCase();
-const ccSubj = new Map(), ccDone = new Set(), sehaCache = new Map(), ccPending = new Map();   // ccPending: استفسارات ننتظر نرد عليها (لو أحد ردّ قبلنا → ما نرد)
-async function isCallCenter(jid) {
-  if (!ccSubj.has(jid)) { try { ccSubj.set(jid, String((await sock.groupMetadata(jid))?.subject || "").toLowerCase()); } catch { return false; } }
-  return ccSubj.get(jid).includes(CC_NAME);
-}
-const CC_LEAVE = /منص|اجاز|سكليف|سك ليف|مرافق|مشهد|صحتي|صحه|تقرير طبي|sick/i;
-async function handleCallCenter(m) {
-  const jid = m.key.remoteJid, msg = m.message || {};
-  if (m.key?.id) { if (ccDone.has(m.key.id)) return; ccDone.add(m.key.id); if (ccDone.size > 3000) ccDone.clear(); }
-  if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;
-  // أحد من القروب ردّ (سحب) على استفسار ننتظر نرد عليه → خلاص ما نرد عليه
-  const qid = (msg.extendedTextMessage || msg.imageMessage || msg.documentMessage)?.contextInfo?.stanzaId;
-  const who = m.key.participant || m.participant || "";
-  if (qid && ccPending.has(qid)) {
-    const p = ccPending.get(qid), qtext = (msg.extendedTextMessage?.text || msg.imageMessage?.caption || "📎").trim();
-    if (p.botIds?.has(qid) || (who && who === p.from && p.replied)) return;         // انرد عليه في القروب — ما نزعج المسؤول
-    if (who && who === p.from) return;                                             // صاحب الاستفسار يضيف شي قبل ما نرد → نكمل عادي
-    p.answered = true; log.info("قروب الكول سنتر: أحد ردّ على الاستفسار قبلنا"); return;
-  }
-  const ts = Number(m.messageTimestamp || 0) * 1000; if (ts && Date.now() - ts > 15 * 60e3) return;   // رسايل قديمة (البوت كان طافي) → ما نرد عليها متأخر
-  const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
-  if (!text || !CC_LEAVE.test(normMsg(text))) return;                            // مو عن إجازة (تأمين، نتائج، دكتور…) → ما نتدخل
-  if (!isOurBranch(text)) return;                                                  // بس الرسايل الموجهة لفرعنا (سابا 1 / البوادي)
-  const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return;
-  const pend = { answered: false, at: Date.now(), from: m.key.participant || m.participant || "", replied: false, botIds: new Set() }; ccPending.set(m.key.id, pend);
-  for (const [id, p] of ccPending) if (Date.now() - p.at > 12 * 3600e3) ccPending.delete(id);
-  const list = await findRequests(k), r = list[0], by = m.pushName || "الكول سنتر";
-  const head = `📨 قروب الكول سنتر (${by}):\n«${text.slice(0, 200)}»\n\n`;
-  const site = r ? siteLine(r) : ""; pend.site = site;
-  // 1) مو في الموقع / لسى ما انرفع → للمسؤول على الخاص بس (ممكن الموظفين ما رفعوها)
-  if (!r) {                                                                        // مو في الموقع: ممكن سلّمها للاستقبال ورفعوها على صحة مباشرة → نشيك صحة بالهوية
-    const sendG = async t => { if (pend.answered) return; try { const sent = await sock.sendMessage(jid, { text: t }, { quoted: m }); pend.replied = true; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } } catch {} };
-    if (!k.ids.length) return sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");                 // جوال بس ومو في الموقع — ما نقدر نبحث في صحة بدون هوية
-    if (!agentOnline()) { log.warn("قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
-    const br = branchFromText(text);
-    const items = k.ids.slice(0, 1).map(id => ({ id, branch: br }));
-    const res = await askSeha(items, 8 * 60e3).catch(() => null);
-    if (!res || res[0]?.err) { log.warn({ err: res?.[0]?.err }, "قروب الكول سنتر: صحة ما ردت — ما رديت"); return; }
-    const today = hijriNum(hijri(Date.now()));
-    const recent = (res[0].rows || []).filter(x => today - hijriNum(x.date) <= 14).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
-    if (recent) return sendG(`${sehaIcon(recent.pay && /لم يتم الدفع/.test(recent.pay) ? "معلق" : recent.status)} ${sehaMeaning(recent, {}, br)}`);
-    return sendG("المراجع ما رفعها بالشيت ولا سلّمها للاستقبال — بيتم رفعها الحين");   // بدون رسالة خاص
-  }
-  if (r.status !== "done") return dmAdmin(head + site + "\n\n⚠ للحين ما انرفعت على صحة — ما رديت في القروب.");
-  // 2) انرفعت → نتأكد من صحة (نفس الإجازة ونفس التاريخ) — مطابقة: نرد في القروب، غير كذا: للمسؤول
-  if (!agentOnline()) { log.warn({ ref: r.ref }, "قروب الكول سنتر: أداة صحة مو شغالة — ما رديت"); return; }
-  const items = sehaItems(k, [r]);
-  const res = await askSeha(items, 8 * 60e3).catch(() => null);                    // لو تحتاج دخول نفاذ ننتظرها شوي
-  const v = sehaVerdict(res, items[0]);
-  if (!res || res[0]?.err) { log.warn({ ref: r.ref, err: res?.[0]?.err }, "قروب الكول سنتر: صحة ما ردت — ما رديت"); return; }
-  if (!v.ok) return dmAdmin(head + site + "\n\n" + sehaText(res, items) + "\n\n⚠ " + (v.why || "ما تطابقت") + " — ما رديت في القروب.");   // ما انرفعت في صحة / التاريخ مختلف
-  const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
-  const out = `${sehaIcon(v.row.pay && /لم يتم الدفع/.test(v.row.pay) ? "معلق" : v.row.status)} ${sehaMeaning(v.row, items[0], r.branch)}`;
-  if (pend.answered) { log.info({ ref: r.ref }, "قروب الكول سنتر: انرد عليه قبلنا — ما رديت"); return; }
-  try { const sent = await sock.sendMessage(jid, { text: out }, { quoted: m }); pend.replied = true; pend.reply = out; if (sent?.key?.id) { pend.botIds.add(sent.key.id); ccPending.set(sent.key.id, pend); } log.info({ ref: r.ref, st: v.row.status }, "قروب الكول سنتر: رد بحالة صحة"); } catch (e) { log.warn({ err: String(e?.message || e) }, "رد قروب الكول سنتر"); }
-}
-// رسالة موجهة لفرعنا؟ «سابا 1» «سابا ١» «سابا /١» «١/ سابا» «سابا البوادي» «سابا بوادي» — غير كذا (سابا 7، الصفا…) ما نلمسها
-function isOurBranch(t) {
-  const n = normMsg(t).replace(/[\u200e\u200f]/g, "");
-  return /سابا\s*[\/\-_.]?\s*1(?!\d)/.test(n) || /(^|\s)1\s*[\/\-]?\s*سابا/.test(n) || /بوادي/.test(n);
-}
-// الفرع من رسالة الكول سنتر («سابا ١» = البوادي)
-function branchFromText(t) {
-  const n = normMsg(t);
-  if (/تالا|تاله/.test(n)) return "tala";
-  if (/سليمانيه/.test(n)) return "sulaimaniyah";
-  if (/حرمين/.test(n)) return "haramain";
-  if (/وطنك/.test(n)) return "watanak";
-  return "bawadi";
-}
-const hijriNum = s => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || ""); return m ? +m[1] * 354 + (+m[2] - 1) * 29.5 + +m[3] : 0; };
-// سطر الموقع (للمسؤول)
-function siteLine(r) {
-  const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" ← ");
-  const st = { pending: "⏳ بالانتظار (ما انرفع)", held: "⏸ معلّق" + (r.holdReason ? " — " + (HOLD_AR[r.holdReason] || r.holdReason) : ""), done: "✅ انرفع " + fmtD(ms(r.doneAt)) + (r.doneBy ? " · " + r.doneBy : "") }[r.status] || r.status;
-  return `📋 ${String(r.patientName || "").trim()} — ${r.ref || ""}\n${TYPE_ADM[r.type] || ""} · فرع ${BR_AR[r.branch] || r.branch || "—"}${dates ? " · " + dates : ""}\n🩺 ${r.doctorName || r.stampDoctor || "—"}\n🪪 ${r.idNumber || "—"}\nالموقع: ${st}`;
-}
-// منصة صحة (أداة كمبيوتر المسؤول): الطلبات اللي انرفعت → نبحث في حساب فرعها ونطابق PSL/تاريخ الرفع وتاريخ الإجازة
-function sehaItems(k, list) {
-  const done = list.filter(r => r.status === "done").slice(0, 2).map(r => ({ id: latin(r.idNumber || ""), branch: r.branch || "bawadi", psl: r.sehaRef || "", reqDate: hijri(ms(r.doneAt) || ms(r.createdAt)), leaveStart: r.type === "attendance" ? (r.visitDate || "") : (r.leaveStart || ""), leaveEnd: r.type === "attendance" ? (r.visitDate || "") : (r.leaveEnd || ""), type: r.type || "", doctor: r.doctorName || r.stampDoctor || "" }));
-  if (done.length) return done.filter(x => /^[12]\d{9}$/.test(x.id));
-  if (!list.length) return k.ids.slice(0, 2).map(id => ({ id, branch: "bawadi" }));    // مو في نظامنا → نشيك حساب البوادي بالهوية
-  return [];                                                                       // بالانتظار/معلّق → لسى ما انرفع على صحة
-}
-async function sehaFollow(jid, m, items) {
-  if (!items.length || !agentOnline()) return;
-  const res = await askSeha(items).catch(() => null);
-  const txt = res ? sehaText(res, items) : "🏥 ما قدرت أشيك في منصة صحة الحين (الأداة ما ردت)";   // sehaText يكتب السبب لو الأداة وقفت
-  await sock.sendMessage(jid, { text: txt }, m ? { quoted: m } : undefined).catch(() => {});
-  // وضع التشخيص (مؤقت): خطوات الأداة، ولو صار خطأ ملف كود الصفحة (بدون بيانات المرضى) — حوّله لـ Claude
-  if (m) return;                                                                    // للمسؤول على الخاص بس
-  for (const r of res || []) {
-    if (r.log?.length) await sock.sendMessage(jid, { text: `🛠 خطوات أداة صحة:\n${r.log.join("\n")}` }).catch(() => {});
-    if (r.debug?.html) {
-      const d = r.debug, html = `<!-- ${d.url} | page=${d.page} | account=${d.account} -->\n${d.html}`;
-      await sock.sendMessage(jid, { document: Buffer.from(html, "utf8"), mimetype: "text/html", fileName: `seha-debug-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.html`, caption: `🛠 كود صفحة صحة وقت المشكلة (${r.err || ""}) — حوّل هالملف لـ Claude` }).catch(() => {});
-    }
-  }
-}
-const adminJidSet = new Map();                                                    // jid → رقم المسؤول
-function rememberAdminJid(jid) {
-  if (!jid || adminJidSet.has(jid)) return;
-  const ph = (String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0] || "");
-  adminJidSet.set(jid, normPhone(ph));
-  db.doc("bot/prefs").set({ adminJids: [...adminJidSet.keys()].slice(-10) }, { merge: true }).catch(() => {});
-}
-function loadAdminJids() { db.doc("bot/prefs").get().then(d => { const ph = normPhone(String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0] || ""); for (const j of d.get("adminJids") || []) adminJidSet.set(j, ph); }).catch(() => {}); }
-// تشغيل/إيقاف البوت في قروب الكول سنتر (المسؤول: «وقف الكول سنتر» / «شغل الكول سنتر») — موقف افتراضياً
-let ccOn = false;
-function watchCcPref() { db.doc("bot/prefs").onSnapshot(d => { ccOn = d.get("callcenter") === true; }, () => {}); }
-async function onGroupMessage(m) {
-  if (await isCallCenter(m.key.remoteJid).catch(() => false)) return ccOn ? handleCallCenter(m) : undefined;
-  return handleGroupMessage(m);
-}
-
-let wipeAsk = 0;
-async function adminLookup(m, jid, text) {
-  const q = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-  if (q) return false;                                                              // رد على رسالة (استفسار/طبيب) → مو بحث
-  const n0 = normMsg(text);
-  // أرشيف الصور: «الأرشيف» = حالته، «احذف صور الأرشيف» = يمسحها كلها (بعد تأكيد)
-  if (/^(الارشيف|ارشيف الصور|حاله الارشيف)$/.test(n0)) {
-    const a = archiveStats();
-    await sock.sendMessage(jid, { text: !a ? "⚠ أرشيف الصور متوقف (ما فيه قرص دائم /data في Railway)." : `🗂 أرشيف الصور: ${a.count} صورة (${a.mb} MB)${a.oldest ? "\nأقدم صورة: " + fmtD(a.oldest) : ""}\nتنحفظ شهر وبعدها تنمسح لحالها.\nالمساحة الفاضية في القرص: ${a.freeMb} MB\n\nتطلب صورة: «صورة» + الهوية أو الجوال أو رقم الطلب.\nتمسح الأرشيف كله: «احذف صور الأرشيف».` });
-    return true;
-  }
-  if (/^(احذف|امسح) (صور )?(ال)?ارشيف( الصور)?$/.test(n0)) {
-    if (Date.now() - wipeAsk > 5 * 60000) { wipeAsk = Date.now(); const a = archiveStats(); await sock.sendMessage(jid, { text: `⚠ بتمسح ${a?.count || 0} صورة من الأرشيف نهائياً (ما ترجع).\nأكيد؟ أرسل «احذف صور الأرشيف» مرة ثانية خلال 5 دقايق.` }); return true; }
-    wipeAsk = 0; const n = wipeArchive(); await sock.sendMessage(jid, { text: `🗑 انمسحت ${n} صورة من الأرشيف.` }); return true;
-  }
-  if (/^(وقف|اوقف|طفي|سكر) (البوت )?(في |ب)?(قروب )?(ال)?كول ?سنتر$/.test(n0)) { await db.doc("bot/prefs").set({ callcenter: false }, { merge: true }); ccOn = false; await sock.sendMessage(jid, { text: "⏸ وقفت البوت في قروب الكول سنتر — ما راح يرد على شي هناك.\nترجّعه بـ «شغل الكول سنتر»." }); return true; }
-  if (/^(شغل|رجع|فعل) (البوت )?(في |ب)?(قروب )?(ال)?كول ?سنتر$/.test(n0)) { await db.doc("bot/prefs").set({ callcenter: true }, { merge: true }); ccOn = true; await sock.sendMessage(jid, { text: "▶️ رجّعت البوت في قروب الكول سنتر." }); return true; }
-  { const bm = /^(جدول|بيانات|دوام)\s+(.{2,40})$/.exec(n0);                                // «جدول مجدي» → وش في الجدول عنه
-    if (bm && !/\d{6,}/.test(bm[2])) { const r = boardInfo(bm[2]); if (r !== null) { await sock.sendMessage(jid, { text: r || `ما لقيت «${bm[2]}» في الجدول.` }); return true; } } }
-  if (/^(مفتاح|ربط) (اداه|أداة|اداة) صحه$/.test(n0.replace(/أ/g, "ا"))) {
-    await sock.sendMessage(jid, { text: `🔑 مفتاح أداة صحة الجانبية (لا ترسله لأحد):\n\n${agentKey()}\n\nانسخه وحطه في صفحة إعدادات الأداة على كمبيوترك.` });
-    return true;
-  }
-  if (/^(حاله )?(اداه|اداة) صحه$/.test(n0)) {
-    const st = agentState(), on = agentOnline();
-    const PG = { search: "صفحة البحث ✅", dashboard: "داخل صحة ✅", accounts: "صفحة اختيار الحساب", login: "مو داخل (صفحة الدخول)", redirect: "يتحوّل لنفاذ", iam: "في نفاذ ينتظر الموافقة", unknown: "صفحة غير معروفة" };
-    await sock.sendMessage(jid, { text: !st ? "🏥 أداة صحة للحين ما اشتغلت ولا مرة. أرسل «مفتاح أداة صحة» وحطه في إعداداتها." : `🏥 أداة صحة: ${on ? "شغّالة" : "⚠ مو متصلة (الكمبيوتر طافي أو كروم مقفل)"}\nآخر تواصل: ${fmtD(st.at)}\nالصفحة: ${PG[st.page] || st.page || "—"}${st.account ? "\nالحساب: " + st.account : ""}${st.msg ? "\n" + st.msg : ""}` });
-    return true;
-  }
-  const wantImg = /^(صوره|صور|الصوره)(\s|$)/.test(n0);
-  const k = lookupKeys(text); if (!k.ids.length && !k.phones.length && !k.refs.length) return false;
-  if (String(text).split(/\n/).length > 10 || String(text).length > 600) return false;
-  const list = await findRequests(k);
-  const keyTxt = [...k.ids.map(x => "هوية " + x), ...k.phones.map(x => "جوال " + x), ...k.refs].join(" · ");
-  if (!list.length) { await sock.sendMessage(jid, { text: `🔎 ما لقيت أي طلب بـ ${keyTxt}\n(بحثت في كل الفروع)${k.ids.length && agentOnline() ? "\n🏥 أشيك في منصة صحة…" : ""}` }); sehaFollow(jid, null, sehaItems(k, [])).catch(() => {}); return true; }
-  if (wantImg) {                                                                    // «صورة …» → نرسل صور التقارير (من الموقع أو الأرشيف)
-    let sent = 0;
-    for (const r of list.slice(0, 5)) {
-      const im = await getImage(r.imagePath).catch(() => null);
-      const cap = `${String(r.patientName || "").trim()} — ${r.ref || ""}\n${TYPE_ADM[r.type] || ""} · فرع ${BR_AR[r.branch] || r.branch || ""}${im?.from === "archive" ? "\n🗂 من الأرشيف (انمسحت من الموقع)" : ""}`;
-      if (!im) { await sock.sendMessage(jid, { text: `🚫 ${r.ref || ""} — الصورة مو موجودة (انمسحت من الموقع ومن الأرشيف)` }); continue; }
-      await sock.sendMessage(jid, im.pdf ? { document: im.buf, mimetype: "application/pdf", fileName: `${r.ref || "report"}.pdf`, caption: cap } : { image: im.buf, caption: cap });
-      sent++;
-    }
-    if (list.length > 5) await sock.sendMessage(jid, { text: `(أرسلت آخر 5 من ${list.length})` });
-    return true;
-  }
-  const lines = list.slice(0, 5).map((r, i) => {
-    const st = (ST_ADM[r.status] || r.status) + (r.status === "held" ? ` — ${HOLD_AR[r.holdReason] || r.holdReason || ""}${r.holdNote ? ": " + String(r.holdNote).slice(0, 80) : ""}` : "")
-      + (r.status === "done" ? `${r.sehaRef ? " — " + r.sehaRef : ""}${ms(r.doneAt) ? " · " + fmtD(ms(r.doneAt)) : ""}${r.doneBy ? " · " + r.doneBy : ""}\n   ينتظر اعتماد الطبيب في صحة` : "");
-    const dates = r.type === "attendance" ? (r.visitDate || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" → ");
-    return `${list.length > 1 ? (i + 1) + ") " : ""}*${String(r.patientName || "—").trim()}* — ${r.ref || ""}
-📄 ${TYPE_ADM[r.type] || r.type || ""} — فرع ${BR_AR[r.branch] || r.branch || "—"}${dates ? "\n📅 " + dates : ""}
-🩺 الطبيب: ${r.doctorName || r.stampDoctor || "— ما انكتب"}
-🪪 ${r.idNumber || "—"}${r.type === "companion" && r.companionId ? " · المرافق " + r.companionId : ""} · 📱 ${r.phone || "—"}
-📌 ${st}
-🕐 وصل ${fmtD(ms(r.createdAt))}`;
-  });
-  await sock.sendMessage(jid, { text: `🔎 ${list.length === 1 ? "لقيت طلب واحد" : `لقيت ${list.length} طلبات${list.length > 5 ? " (هذي آخر 5)" : ""}`}:\n\n${lines.join("\n\n")}` });
-  { const its = sehaItems(k, list), st = agentState();
-    if (its.length && !agentOnline()) await sock.sendMessage(jid, { text: `🏥 ما أقدر أشيك في صحة الحين — أداة صحة مو متصلة${st?.at ? " (آخر تواصل " + fmtD(st.at) + ")" : " (ما اشتغلت ولا مرة)"}.\nتأكد إن الكمبيوتر وكروم شغالين والأداة مفعّلة.` });
-    else if (its.length) await sock.sendMessage(jid, { text: `🏥 أشيك في صحة (حساب ${BR_AR[its[0].branch] || its[0].branch})… يوصلك الرد خلال دقيقة أو دقيقتين.` });
-    sehaFollow(jid, null, its).catch(() => {}); }
-  return true;
-}
 async function findByRef(ref) {
   const s = await db.collection("requests").where("ref", "==", ref).limit(1).get();
   return s.docs[0] || null;
@@ -527,8 +315,7 @@ const AI_RULES = `أنت «مساعد سابا» — رقم واتساب آلي 
 - لو قال «قولوا للطبيب/ذكّروه/كلموه»: خلّ remind_doctor = true وقل له بجملة وحدة إنك ذكّرت الطبيب (ولو ذكّرته قريب قل إن التذكير وصله).
 - خلّ staff_needed = true (مع staff_note مختصرة تشرح وش يبي) لما المراجع: يستعجل لأنه يحتاجها لدوام/جهة/موعد، أو يعترض أو زعلان، أو يسأل نفس السؤال للمرة الثالثة، أو يطلب يكلم موظف، أو يطلب شي ما تقدر تسويه. وقتها reply = جملة قصيرة إنك بلّغت الموظف المختص وبيتابع معه هنا.
 - لا تكرر نفس الرابط أو نفس الكلام اللي انقال قبل في المحادثة إلا إذا طلبه.
-- لو ما لقينا له طلب: اطلب منه رقم الطلب (يبدأ بـ SB-) أو يتابع من رابط المتابعة.
-- لو في بيانات الطلب «seha_live_check»: هذا اللي تأكدنا منه الحين من منصة صحة — اعتمده كحالة الإجازة وقوله للمراجع بمعناه (لا تقول «بانتظار اعتماد الطبيب» إذا يقول غير كذا)، ولا تذكر أي شي عن الدفع أو الرصيد.`;
+- لو ما لقينا له طلب: اطلب منه رقم الطلب (يبدأ بـ SB-) أو يتابع من رابط المتابعة.`;
 
 async function aiReply(key, text, facts) {
   if (!GEMINI_KEY || !aiAllowed(key)) return null;
@@ -635,7 +422,7 @@ function mergeBurst(list) {
 
 async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
-  if (!m.key?.fromMe && jid.endsWith("@g.us")) return onGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
+  if (!m.key?.fromMe && jid.endsWith("@g.us")) return handleGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
   if (m.key?.fromMe || !jid || jid.endsWith("@g.us") || jid.includes("broadcast") || jid.endsWith("@newsletter")) return;
   const msg = m.message || {};
   // تعديل رسالة، حذف، تفاعل (إيموجي على رسالة)… مو رسالة جديدة → نتجاهلها
@@ -649,25 +436,8 @@ async function onIncoming(m) {
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
-  let senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
-  // المسؤول: نحفظ معرّف محادثته (ولو جت رسالته بمعرّف @lid بدون رقم — مثلاً بعد إعادة تشغيل البوت — نعرفه برضو)
-  if (senderPhone && isAdminPhone(senderPhone)) rememberAdminJid(jid);
-  else if (!senderPhone && adminJidSet.has(jid)) senderPhone = adminJidSet.get(jid);
-  // المسؤول سحب رسالة (استفسار مراجع/تقرير) وكتب «شوف بصحتي وش حالته» → هذا أمر للبوت، مو رد للمراجع
-  if (text && isAdminPhone(senderPhone)) {
-    const ctx = msg.extendedTextMessage?.contextInfo, qm = ctx?.quotedMessage;
-    const qtext = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || "";
-    const nt = normMsg(text);
-    if (qtext && /^(شوف|شيك|تاكد|ابحث|دور|افحص|وش|ايش|كيف|متي)/.test(nt) && /(صحتي|صحه|منصه|حالت|الحال|وين وصل|انرفع|اعتمد|دقق)/.test(nt)) {
-      const k = lookupKeys(qtext);
-      if (k.ids.length || k.phones.length || k.refs.length) {
-        const keys = [...k.refs, ...k.ids, ...k.phones].join("\n");
-        if (await adminLookup({ message: { conversation: keys } }, jid, keys).catch(e => { log.warn({ err: String(e?.message || e) }, "بحث المسؤول"); return false; })) return;
-      }
-    }
-  }
+  const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
-  if (text && isAdminPhone(senderPhone) && await adminLookup(m, jid, text).catch(e => { log.warn({ err: String(e?.message || e) }, "بحث المسؤول"); return false; })) return;   // المسؤول أرسل هوية/جوال → حالة الطلب
   if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
   const t = latin(text).toUpperCase();
   const it = readIntent(text, media);
@@ -744,27 +514,12 @@ async function onIncoming(m) {
   const fixLinkTxt = () => `${SITE_URL}?fix=${r.fixToken}`;
   const flds = fix ? (fix.get("fields") || []).map(k => FIELD_AR[k] || k).join("، ") : "";
 
-  // انرفعت من أكثر من 4 ساعات وللحين يسأل → نتأكد من منصة صحة (أداة كمبيوتر المسؤول). أقل من 4 ساعات: ما ندخل صحة
-  let sehaNote = "";
-  if (r.status === "done" && now - ms(r.doneAt) > 4 * 3600e3 && !it.social && agentOnline() && !isAdminPhone(senderPhone)) {
-    const c = sehaCache.get(r.ref || r.id);
-    let v = c && now - c.at < 30 * 60e3 ? c.v : null;
-    if (!v) {
-      const items = sehaItems({ ids: [] }, [r]);
-      const res = items.length ? await askSeha(items, 2 * 60e3).catch(() => null) : null;
-      v = sehaVerdict(res, items[0]); sehaCache.set(r.ref || r.id, { at: now, v }); if (sehaCache.size > 500) sehaCache.clear();
-      if (!v.ok && res && !res[0]?.err) dmAdmin(`📨 مراجع يسأل عن إجازته (انرفعت من أكثر من 4 ساعات)\n${siteLine(r)}\n\n${sehaText(res, items)}\n\n⚠ ${v.why || "ما تطابقت"}`).catch(() => {});   // ما انرفعت في صحة / التاريخ مختلف بس
-    }
-    if (v?.ok) sehaNote = patientSeha(v.row);
-  }
-
   if (GEMINI_KEY) {
     const STATUS_AR = { pending: "بالانتظار — الفريق بيرفعها على منصة صحة", held: fixOpen ? "معلّق — ننتظر المراجع يعدّل بياناته من الرابط" : (fix ? "وصلنا تعديله والفريق يكمل الرفع" : "قيد المراجعة عند الفريق"), done: "تم رفعها على منصة صحة — بانتظار اعتماد الطبيب ثم تظهر في صحتي" };
     const facts = {
       found: true, patient_first_name: name, request_ref: r.ref || "", type: TYPE_SHORT[r.type] || "",
       status: STATUS_AR[r.status] || r.status, leave_dates: r.type === "attendance" ? (r.visitDate || r.leaveStart || "") : [r.leaveStart, r.leaveEnd].filter(Boolean).join(" إلى "),
       uploaded_to_seha: r.status === "done", seha_number: r.sehaRef || "",
-      ...(sehaNote ? { seha_live_check: sehaNote } : {}),                            // تأكدنا الحين من منصة صحة — استخدمه بدل الحالة العامة
       correction_needed: !!fixOpen, correction_fields: fixOpen ? flds : "", correction_link: fixOpen ? fixLinkTxt() : "",
       correction_received: !!(fix && !fixOpen), doctor_reminded_recently: now - ms(r.doctorRemindedAt) <= 12 * 3600e3,
       track_link: `${SITE_URL}?track`, today: new Date().toLocaleDateString("en-GB", { timeZone: "Asia/Riyadh" }),
@@ -824,7 +579,6 @@ async function onIncoming(m) {
   flag(); log.info({ ref: r.ref, intent: Object.keys(it).filter(k => it[k] === true) }, "رسالة مراجع");
 
   // ---- تم الرفع: نشرح الاعتماد + تذكير للطبيب
-  if (r.status === "done" && sehaNote) { if (!it.social) flag(); return statusReply(`${hello}${hi}، ${sehaNote}`); }
   if (r.status === "done") {
     let reminded = false;
     const dp = doctorPhoneFor(r);
@@ -881,6 +635,19 @@ async function applyFix(fref) {
 }
 
 /* ---------- قواعد Firestore: البوت ينشر نسخة المستودع لو تغيّرت (بدل ما المسؤول يلصقها يدوي) ---------- */
+// تنظيف لمرة وحدة: نشيل كل اللي انضاف يوم 2/11 (أداة صحة الجانبية، أرشيف الصور، إعدادات الكول سنتر) — رجعنا لنسخة 1.8.8
+async function cleanupNov2() {
+  try {
+    const st = await db.doc("bot/status").get();
+    if (st.get("cleanupNov2")) return;
+    for (const d of await db.collection("agent").listDocuments()) await db.recursiveDelete(d);
+    await db.doc("bot/agent").delete().catch(() => {});
+    await db.doc("bot/prefs").set({ callcenter: FieldValue.delete(), adminJids: FieldValue.delete() }, { merge: true }).catch(() => {});
+    try { fs.rmSync("/data/img-archive", { recursive: true, force: true }); } catch {}
+    await db.doc("bot/status").set({ cleanupNov2: TS() }, { merge: true });
+    log.info("نظّفت بيانات 2/11");
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "تنظيف 2/11"); }
+}
 async function deployRules() {
   try {
     const src = fs.readFileSync(new URL("./firestore.rules", import.meta.url), "utf8");
@@ -967,12 +734,7 @@ async function applyPatches() {
         const dd = docs.find(x => x.id === u.doctorId);
         const vs = (next.vacations || []).filter(v => (v.doctorId === u.doctorId || (u.code && String(v.code) === String(u.code)) || (dd && nmKey(v.name) === nmKey(dd.name)) || (u.name && nmKey(v.name) === nmKey(u.name))) && v.start <= u.end && (!v.end || v.end > u.end));
         vs.forEach(v => { v.end = u.end; });
-        let bad = [];
-        if (u.dropOpen) {                                                               // إجازة مفتوحة تبدأ بعد يوم المباشرة (انحطت بالغلط) → نشيلها
-          bad = (next.vacations || []).filter(v => (v.doctorId === u.doctorId || (u.code && String(v.code) === String(u.code)) || (u.name && nmKey(v.name) === nmKey(u.name))) && !v.end && v.start > u.end);
-          if (bad.length) next.vacations = next.vacations.filter(v => !bad.includes(v));
-        }
-        todo.push({ id: u.id, name: (vs[0] || bad[0]) ? `${String((vs[0] || bad[0]).name).split(" –")[0]} — خلصت إجازته ${u.end.split("-").reverse().slice(0, 2).join("/")}` : "", isDoc: true, upd: true, quiet: !vs.length && !bad.length });
+        todo.push({ id: u.id, name: vs[0]?.name || "", isDoc: true, upd: true, quiet: true });
       }
       for (const x of newDocs) {
         const dep = next.departments.find(q => q.id === x.depId); if (!dep) continue;
@@ -1005,8 +767,6 @@ async function applyPatches() {
       return todo;
     });
     if (added.length) log.info({ n: added.length }, "انضافت إجازات للجدول");
-    const shown = added.filter(a => !a.skip && a.name && !a.quiet);
-    if (shown.length) dmAdmin(`✅ عدّلت الجدول:\n${shown.map(a => "• " + (a.upd ? "تعديل: " : a.isDoc ? "طبيب جديد: " : "إجازة: ") + String(a.name).split(" –")[0]).join("\n")}`).catch(() => {});
     const newNames = added.filter(a => a.isDoc && !a.upd && a.name).map(a => nmKey(a.name));            // طبيب انضاف بالتعديل → نشيل سؤال «أضيفه؟» المعلّق عنه
     if (newNames.length) { const pr = db.doc("bot/pending_doctors"), pc = (await pr.get()).data(); if (pc?.items?.some(i => newNames.includes(nmKey(i.name)))) await pr.set({ items: pc.items.filter(i => !newNames.includes(nmKey(i.name))) }); }
   } catch (e) { log.error({ err: String(e?.message || e) }, "فشل إضافة الإجازات"); }
@@ -1071,8 +831,6 @@ async function cleanupImages() {
     }
     // دفعات صغيرة (حجم المستندات الممسوحة يتحسب على حد الدفعة 10MB — الكبيرة ترجع «Transaction too big»)
     const sizeOf = Object.fromEntries(imgs.docs.map(d => [d.id, d.get("size") || 300000]));
-    const tOf = Object.fromEntries(imgs.docs.map(d => [d.id, d.get("createdAt")?.toMillis?.() || 0]));
-    await ensureArchived(del.filter(id => tOf[id] > now - 30 * DAY));          // نسخة في الأرشيف قبل المسح (شهر)
     let b = db.batch(), n = 0, bytes = 0;
     for (const id of del) {
       b.delete(db.doc(`imageData/${id}`)); b.delete(db.doc(`images/${id}`)); n += 2; bytes += sizeOf[id] * 1.4;
@@ -1128,25 +886,20 @@ async function main() {
   }, e => log.error({ e }, "control listener"));
 
   // نبض كل دقيقتين ونص عشان اللوحة تعرف إن البوت شغال (كل نبضة = قراءة عند كل لوحة مفتوحة، فما نكثّر)
-  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 600000);   // كل 10 دقايق (كان كل دقيقتين ونص — كتابات كثيرة)
+  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 150000);
   // نبض عام (صفحة الأطباء تقراه كل 5 دقائق — لو وقف تطلع «تحديثات القروب متوقفة»)
   const pub = () => connected && db.doc("public/bot").set({ seen: Date.now() }, { merge: true }).catch(() => {});   // بس لو واتساب متصل (غيره ما توصل رسائل القروب)
-  pub(); setInterval(pub, 10 * 60000);
+  pub(); setInterval(pub, 5 * 60000);
 
   startTrackSync();
   watchDoctors();
   startFixApplier();
-  deployRules().then(seedBoard).then(applyPatches);
+  deployRules().then(seedBoard).then(applyPatches).then(cleanupNov2);
   if (!globalThis.__patchTimer) globalThis.__patchTimer = setInterval(applyPatches, 20 * 60000);   // تعديلات بتاريخ (طبيب يباشر بكرة) تنطبق في يومها
   initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock,
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
-  watchCcPref(); loadAdminJids();
-  initAgent({ db, log, dm: dmAdmin }).catch(e => log.warn({ err: String(e?.message || e) }, "وكيل صحة"));
-  initArchive({ db, log });
-  if (archiveOn()) { setTimeout(() => archiveNew(1000), 60000); setInterval(() => archiveNew(), 10 * 60000); }   // نسخة من كل صورة خلال 10 دقايق من رفعها
-  else log.warn("أرشيف الصور متوقف: ما فيه قرص /data");
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {
     const st = (await statusRef.get().catch(() => null))?.data() || {};
@@ -1154,7 +907,6 @@ async function main() {
     if (Date.now() - last > 20 * 3600000) await cleanupImages();
     await backupWeekly();
     await cleanupChats();
-    try { pruneArchive(); } catch (e) { log.warn({ err: String(e?.message || e) }, "تنظيف الأرشيف"); }
   };
   setTimeout(daily, 3 * 60000);
   setInterval(daily, 24 * 3600000);

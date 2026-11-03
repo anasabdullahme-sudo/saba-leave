@@ -914,7 +914,7 @@ async function openDrawer(id, holdNow) {
     $("#vOpen").href = url;
   } catch (e) {
     console.error(e);
-    if (e?.code === "image_deleted") { img.hidden = true; let g = $("#viewer .img-gone"); if (!g) { g = document.createElement("div"); g.className = "img-gone"; $("#viewer").prepend(g); } g.hidden = false; g.textContent = `صورة التقرير انمسحت من الموقع — بيانات الطلب موجودة. لو لها أقل من شهر: أرسل للبوت على الخاص «صورة ${x.ref || x.idNumber || ""}» ويرسلها لك من الأرشيف`; }
+    if (e?.code === "image_deleted") { img.hidden = true; let g = $("#viewer .img-gone"); if (!g) { g = document.createElement("div"); g.className = "img-gone"; $("#viewer").prepend(g); } g.hidden = false; g.textContent = "صورة التقرير انمسحت في التنظيف الشهري — بيانات الطلب موجودة"; }
     else toast("تعذّر تحميل الصورة");
   }
 }
@@ -1062,7 +1062,7 @@ function reroute(list) {
 }
 
 /* ---------- طلبات التعديل عبر بوت الواتساب ---------- */
-const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 1500000;
+const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 400000;
 const waPhone = p => { const d = String(p || "").replace(/\D/g, "").replace(/^966/, "").replace(/^0/, ""); return d.length === 9 ? "966" + d : ""; };
 function renderBot() {
   const b = $("#botPill"), on = botOnline(), qr = S.bot?.state === "qr";
