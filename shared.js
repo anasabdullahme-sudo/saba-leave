@@ -615,9 +615,10 @@ async function liveBackend(role) {
     login: (e, p) => AU.signInWithEmailAndPassword(auth, e, p),
     logout: () => AU.signOut(auth),
     watchPending(cb, onErr) {
-      return FS.onSnapshot(FS.query(col, FS.where("status", "in", ["pending", "held"])), s => {
+      // includeMetadataChanges: نعرف متى القائمة صارت «من السيرفر» (مو من ذاكرة المتصفح) — ما ياخذ قراءات زيادة
+      return FS.onSnapshot(FS.query(col, FS.where("status", "in", ["pending", "held"])), { includeMetadataChanges: true }, s => {
         const list = s.docs.map(toObj).sort((a, b) => a.createdAt - b.createdAt);
-        cb(list, s.docChanges().filter(c => c.type === "added" && !s.metadata.fromCache && !c.doc.metadata.hasPendingWrites).map(c => c.doc.id));
+        cb(list, s.docChanges().filter(c => c.type === "added" && !s.metadata.fromCache && !c.doc.metadata.hasPendingWrites).map(c => c.doc.id), { fromCache: s.metadata.fromCache });
       }, onErr);
     },
     async loadDone(branch, type, cursor, n = 30) {

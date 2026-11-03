@@ -42,6 +42,14 @@
   });
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && Object.keys(ch).some(k => (k === "sabaDone" || k.startsWith("sabaDone_")) && ch[k].newValue)) forwardDone(); });
+  // صفحة موظفين قديمة (قبل التحديث التلقائي) → نحدّثها لحالها لما تكون فاضية (ما فيه طلب مفتوح ولا كتابة) — مرة كل 10 دقايق بالكثير
+  setTimeout(function oldBoard() {
+    if (!alive() || !isBoard() || document.documentElement.dataset.sabaBoard) return;
+    const a = document.activeElement, busy = document.querySelector("#drawer.on, .modal:not([hidden])") || (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value);
+    if (busy) return setTimeout(oldBoard, 15000);
+    try { if (Date.now() - (+sessionStorage.getItem("sabaOldReload") || 0) < 10 * 60000) return; sessionStorage.setItem("sabaOldReload", String(Date.now())); } catch { return; }
+    location.reload();
+  }, 8000);
   // الطلب المفتوح في صحة بهالجهاز → اللوحة تحجزه («مفتوح عند فلان» عند الباقين)
   const active = () => alive() && chrome.storage.local.get("sabaReq", ({ sabaReq: r }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id }); });
   chrome.storage.onChanged.addListener((ch, area) => {

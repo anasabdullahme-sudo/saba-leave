@@ -526,8 +526,11 @@
   const navActive = () => !!req && reqAge() < 5 * 60000;
   const fillActive = () => !!req && reqAge() < 60 * 60000;
   // طلب ضغطت عليه «تم الرفع» أو «طلب تعديل» يختفي من القائمة — لين اللوحة ترجعه (مثلاً المراجع عدّل أو رجّعته للانتظار)
-  const isHidden = id => { const t = hidden[id]; return !!t && queueAt < t + 20000; };
-  const pendingQ = () => queue.filter(q => !isHidden(q.id) && q.id !== req?.id);
+  // «تم الرفع» اللي للحين ما تأكد من اللوحة (sabaDone_<وقت>) → الطلب يظل مخفي لين تأكد (مو 20 ثانية وبس)
+  let unacked = new Set();
+  const loadUnacked = () => chrome.storage.local.get(null, all => { const n = new Set(Object.entries(all).filter(([k, v]) => k.startsWith("sabaDone_") && v?.id).map(([, v]) => v.id)); const ch = n.size !== unacked.size || [...n].some(x => !unacked.has(x)); unacked = n; if (ch && TOP) { updateCount(); if (!req && !minimized) render(); } });
+  const isHidden = id => { if (unacked.has(id)) return true; const t = hidden[id]; return !!t && queueAt < t + 20000; };
+  const pendingQ = () => queueStale() ? [] : queue.filter(q => !isHidden(q.id) && q.id !== req?.id);   // قائمة قديمة → ما نعرض منها شي (ممكن فيها طلبات انرفعت من جهاز ثاني)
   const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
   const queueStale = () => !queueAt || Date.now() - queueAt > 3 * 60000;
   function bindDup() { const d = $("#dupOk"); if (d) d.onclick = () => { dupInfo = null; chrome.storage.local.remove("sabaDup"); render(); }; }
@@ -576,10 +579,11 @@
       pend.sort((a, b) => (!!a.lockedBy - !!b.lockedBy) || (here(b) - here(a)));     // اللي عند موظف ثاني تنزل تحت
       const free = pend.filter(q => !q.lockedBy);
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
-      b.innerHTML = `${dupHtml()}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
+      const sameId = q => q.idNumber && queue.some(o => o.id !== q.id && o.idNumber === q.idNumber && !isHidden(o.id));
+      b.innerHTML = `${dupHtml()}${queueStale() && queueAt ? `<div class="note" style="background:#FFF4E5;color:#8A4B00;font-weight:600">⏳ القائمة مو محدّثة — ما أعرض منها شي عشان ما ترفع طلب انرفع من جهاز ثاني. افتح صفحة الموظفين (أو حدّثها) وبتطلع الطلبات</div>` : ""}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
         ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
-        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
+        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
           || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
         ${queueStale() ? `<div class="note" style="background:#FFF4E5;color:#8A4B00">⚠ القائمة مو محدّثة${hh ? ` (آخر تحديث ${hh})` : ""} — افتح لوحة سابا، ولو مفتوحة حدّث صفحتها (F5)</div>` : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
@@ -812,6 +816,7 @@
   chrome.storage.local.get("sabaReqImg", d => { reqImg = d.sabaReqImg || null; if (reqImg && req?.id === reqImg.id) render(); });
   chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup"], d => {
     dupInfo = d.sabaDup && Date.now() - d.sabaDup.at < 30 * 60000 ? d.sabaDup : null;
+    loadUnacked();
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
     if (TOP && d.sabaPos) placeAt(d.sabaPos.x, d.sabaPos.y);
     queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; hidden = d.sabaHidden || {}; chrome.storage.local.remove("sabaDoneIds");
@@ -845,6 +850,7 @@
       else if (!minimized) render(); else updateCount();
     }
     if (ch.sabaHidden) hidden = ch.sabaHidden.newValue || {};
+    if (Object.keys(ch).some(k => k.startsWith("sabaDone_"))) loadUnacked();
     if (ch.sabaReqImg && TOP) { reqImg = ch.sabaReqImg.newValue || null; if (req && (!reqImg || reqImg.id === req.id)) render(); }
     if (ch.sabaReq) {
       req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;

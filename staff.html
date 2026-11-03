@@ -438,7 +438,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage } from "./shared.js?v=20261103c";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage } from "./shared.js?v=20261103d";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -513,8 +513,9 @@ function start() {
     S.unsub = () => {};                                                           // نخلي start() تعرف إننا شغالين
     clearTimeout(S.liveRetry); S.liveRetry = setTimeout(() => { if (S.unsub) S.unsub = api.watchPending(onPend, onPendErr); }, 60000);   // (لو طلع من الحساب لا نرجع)
   };
-  const onPend = (list, added) => {
+  const onPend = (list, added, meta = {}) => {
     if (S.liveErr) { S.liveErr = 0; renderLive(); toast("✓ رجع الاتصال — القائمة محدّثة"); loadDone(true); }
+    if (!meta.fromCache) { S.freshAt = Date.now(); S.stale = false; }               // القائمة جاية من السيرفر الحين (مو قديمة من ذاكرة المتصفح)
     const ids = new Map(list.map(x => [x.id, x]));
     // موظف ثاني رفع طلب → نحدّث «تم الرفع» بس لو الطلب من نفس الفرع والنوع اللي قدامك (توفير قراءات)
     if (prevIds && [...prevIds].some(([id, p]) => !ids.has(id) && p.branch === S.branch && p.type === S.type)) { clearTimeout(doneTimer); doneTimer = setTimeout(() => loadDone(true), 1500); }
@@ -547,9 +548,20 @@ function start() {
       else if (!S.done.some(r => r.id === S.openId)) { closeDrawer(); toast("هذا الطلب تمت معالجته من موظف ثاني"); }
     }
   };
+  S.stale = true;                                                                 // لين توصل أول قائمة من السيرفر ما نرسل شي للأداة
   S.unsub = api.watchPending(onPend, onPendErr);
+  S.resub = () => { S.stale = true; try { S.unsub?.(); } catch {} S.unsub = api.watchPending(onPend, onPendErr); };
   loadDone(true);
 }
+// الصفحة «نامت» (كروم يجمّد التبويب اللي ما أحد يستخدمه، أو الجهاز نام، أو انقطع النت) → قائمتها ممكن تكون قديمة:
+// ما نرسل للأداة شي لين نجيب القائمة من جديد من السيرفر (كان التبويب يصحى ويرسل قائمته القديمة → ترجع طلبات انرفعت من جهاز ثاني)
+let lastBeat = Date.now(), hiddenAt = 0;
+function wakeCheck() { const gap = Date.now() - lastBeat; lastBeat = Date.now(); if (gap > 150000 && S.resub) { console.info("صحت الصفحة بعد", Math.round(gap / 1000), "ث — أجيب القائمة من جديد"); S.resub(); } }
+setInterval(wakeCheck, 10000);
+document.addEventListener("resume", () => S.resub?.());
+addEventListener("online", () => S.resub?.());
+document.addEventListener("visibilitychange", () => { wakeCheck(); if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 120000) S.resub?.(); });
+document.documentElement.dataset.sabaBoard = "3";                                   // أداة صحة 1.9+ تعرف إن الصفحة محدّثة (القديمة تحدّثها لحالها)
 function renderLive() {
   let bar = document.getElementById("liveBar");
   if (!bar) { bar = document.createElement("div"); bar.id = "liveBar"; bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#FFF4E5;color:#8A4B00;border-bottom:1px solid #F0C98A;padding:8px 14px;font-weight:600;text-align:center"; document.body.prepend(bar); }
@@ -1456,7 +1468,8 @@ if (document.visibilityState === "visible") writeLead();
 try { for (const k of Object.keys(localStorage)) if (k.startsWith("saba_sd_") && Date.now() - +k.slice(8) > 864e5) localStorage.removeItem(k); } catch {}
 function postQueue() {
   try {
-    if (!extVersion || !S.pending || S.liveErr || !isLeader()) return;                          // القائمة قديمة → الأداة تبيّن «القائمة مو محدّثة» بنفسها
+    wakeCheck();
+    if (!extVersion || !S.pending || S.liveErr || S.stale || !isLeader()) return;   // قائمة قديمة/مو من السيرفر → لا نرسلها                          // القائمة قديمة → الأداة تبيّن «القائمة مو محدّثة» بنفسها
     window.postMessage({ type: "SABA_QUEUE", items: S.pending.map(x => ({ ...sehaPayload(x), sentAt: 0, lockedBy: openByOther(x) })) }, location.origin);
   } catch (err) { /* اللوحة لسى تحمّل */ }
 }
