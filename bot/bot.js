@@ -5,7 +5,7 @@
    - يرسلها للمريض واتساب، ويكتب النتيجة (sent / failed) عشان تظهر للموظف
    ========================================================================== */
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } from "baileys";
-import { initializeApp, cert } from "firebase-admin/app";
+import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
 import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin } from "./group.js";
@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.6";
+const VERSION = "2.7.7";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -655,6 +655,56 @@ function quotaErr(e) {
   quotaNoteAt = Date.now();
   dmAdmin("⚠️ حد Firebase المجاني اليومي خلص — الموقع ما يقدر يحفظ («تم الرفع» ورفع المراجعين) لين يتجدد الساعة 11 الصبح.\nلا تعيد تشغيل البوت، وبلّغ Claude.").catch(() => {});
 }
+// ---------- مراقبة حد Firebase اليومي (قراءة 50 ألف · كتابة 20 ألف · حذف 20 ألف) ----------
+// كل 15 دقيقة نسأل Cloud Monitoring كم استهلكنا من بداية اليوم (يتجدد 12 بالليل بتوقيت أمريكا = 10 أو 11 الصبح عندنا)
+// ولو قربنا (80% ثم 95%) نرسل لك واتساب — مرة وحدة لكل مستوى في اليوم
+const QUOTA = { read: 50000, write: 20000, delete: 20000 }, Q_AR = { read: "القراءة", write: "الكتابة", delete: "الحذف" };
+const quotaSent = new Map(); let quotaPermNote = 0;
+function quotaDayStart() {
+  const now = new Date();
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(now).map(x => [x.type, x.value]));
+  const laNow = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  const offset = laNow - Math.floor(now.getTime() / 1000) * 1000;              // فرق توقيت أمريكا عن UTC
+  return { start: Date.UTC(+p.year, +p.month - 1, +p.day) - offset, day: `${p.year}-${p.month}-${p.day}` };
+}
+const riyadhTime = ms => new Date(ms).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" });
+async function quotaUsage() {
+  const { access_token } = await getApp().options.credential.getAccessToken();
+  const { start, day } = quotaDayStart(), end = Date.now(), secs = Math.max(60, Math.floor((end - start) / 1000));
+  const out = { day, start };
+  for (const k of Object.keys(QUOTA)) {
+    const q = new URLSearchParams({ filter: `metric.type="firestore.googleapis.com/document/${k}_count"`, "interval.startTime": new Date(start).toISOString(), "interval.endTime": new Date(end).toISOString(),
+      "aggregation.alignmentPeriod": secs + "s", "aggregation.perSeriesAligner": "ALIGN_SUM", "aggregation.crossSeriesReducer": "REDUCE_SUM" });
+    const r = await fetch(`https://monitoring.googleapis.com/v3/projects/${serviceAccount().project_id}/timeSeries?${q}`, { headers: { Authorization: "Bearer " + access_token } });
+    if (!r.ok) { const e = new Error(`monitoring ${r.status}`); e.status = r.status; throw e; }
+    const j = await r.json();
+    out[k] = (j.timeSeries || []).reduce((a, t) => a + (t.points || []).reduce((b, pt) => b + +(pt.value?.int64Value || 0), 0), 0);
+  }
+  return out;
+}
+async function quotaWatch() {
+  try {
+    const u = await quotaUsage();
+    await statusRef.set({ quota: { read: u.read, write: u.write, delete: u.delete, at: TS() } }, { merge: true }).catch(() => {});
+    for (const k of Object.keys(QUOTA)) {
+      const pct = u[k] / QUOTA[k];
+      for (const lvl of [0.95, 0.8]) {
+        if (pct < lvl) continue;
+        const id = `${u.day}:${k}:${lvl}`; if (quotaSent.has(id)) break;
+        quotaSent.set(id, 1); if (lvl === 0.95) quotaSent.set(`${u.day}:${k}:0.8`, 1);
+        await dmAdmin(`${lvl === 0.95 ? "🚨" : "⚠️"} ${Q_AR[k]} في Firebase اليوم وصلت ${Math.round(u[k] / 1000)} ألف من ${QUOTA[k] / 1000} ألف (${Math.round(pct * 100)}%).\n` +
+          `${lvl === 0.95 ? "قربت تخلص — لو خلصت الموقع ما يحفظ «تم الرفع» ولا رفع المراجعين." : "انتبه: لا تعيد تشغيل البوت ولا تفتح صفحات كثيرة."}\nيتجدد الحد الساعة ${riyadhTime(u.start + 24 * 3600e3)}.`);
+        break;
+      }
+    }
+  } catch (e) {
+    log.warn({ err: String(e?.message || e) }, "مراقبة حد Firebase");
+    if ((e.status === 403 || e.status === 401) && Date.now() - quotaPermNote > 7 * 24 * 3600e3) {
+      quotaPermNote = Date.now();
+      dmAdmin("ℹ️ أبغى أراقب لك استهلاك Firebase اليومي (وأنبهك قبل ما يخلص) بس ما عندي صلاحية.\nمن console.cloud.google.com ← IAM ← حساب firebase-adminsdk ← Edit ← Add role ← «Monitoring Viewer» ← Save.").catch(() => {});
+    }
+  }
+}
 async function cleanupNov2() {
   try {
     const st = await db.doc("bot/status").get();
@@ -906,6 +956,7 @@ async function main() {
 
   // نبض كل دقيقتين ونص عشان اللوحة تعرف إن البوت شغال (كل نبضة = قراءة عند كل لوحة مفتوحة، فما نكثّر)
   setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).then(quotaOk, quotaErr), 300000);
+  setTimeout(quotaWatch, 2 * 60000); setInterval(quotaWatch, 15 * 60000);
   // نبض عام (صفحة الأطباء تقراه كل 5 دقائق — لو وقف تطلع «تحديثات القروب متوقفة»)
   const pub = () => connected && db.doc("public/bot").set({ seen: Date.now() }, { merge: true }).catch(() => {});   // بس لو واتساب متصل (غيره ما توصل رسائل القروب)
   pub(); setInterval(pub, 5 * 60000);
