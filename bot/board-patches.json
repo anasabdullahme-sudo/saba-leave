@@ -596,6 +596,26 @@
      }
     ]
    }
+  },
+  {
+   "id": "p0311a1",
+   "doctorId": "67suwo6",
+   "ifName": "أمين",
+   "copyFrom": "jr2t4gw",
+   "fields": [
+    "room",
+    "ext",
+    "fee",
+    "shifts"
+   ],
+   "set": {
+    "name": "أمين محمد علي محمود",
+    "fullName": "أمين محمد علي محمود",
+    "workdays": [
+     1,
+     2
+    ]
+   }
   }
  ],
  "today": [

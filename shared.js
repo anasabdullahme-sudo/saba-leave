@@ -834,7 +834,8 @@ function demoBackend() {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
       return (load() || []).filter(x => x.status === "done" && x.branch === branch && x.type === type && x.doneAt >= +d0).length;
     },
-    async markDone(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) { x.status = "done"; x.doneAt = Date.now(); x.doneBy = by; } save(l); },
+    async markDone(id, by, extra = {}) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy, doneAt: x.doneAt }); if (x) Object.assign(x, extra, { status: "done", doneAt: Date.now(), doneBy: by }); save(l); },
+    async getStatus(id) { const x = load().find(r => r.id === id); return x ? { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt || 0, ref: x.ref || "", patientName: x.patientName || "" } : null; },
     async claim(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.openedBy = by; x.openedAt = Date.now(); } save(l); },
     async undoDone(id) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.status = "pending"; x.doneAt = null; x.doneBy = null; } save(l); },
     async markHeld(id, reason, note, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) Object.assign(x, { status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }); save(l); },

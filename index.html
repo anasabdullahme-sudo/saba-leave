@@ -139,6 +139,19 @@ form{padding:18px}
 .loading .f input{color:transparent;background:linear-gradient(90deg,#F1F7FB 25%,#E3F1F9 50%,#F1F7FB 75%);background-size:200% 100%;animation:shim 1.2s infinite;pointer-events:none}
 @keyframes shim{to{background-position:-200% 0}}
 .submit{margin-top:10px;width:100%}
+.submit.big{height:58px;font-size:18px}
+.dc{margin-top:16px;border:2px solid #EF9F27;background:#FFF7E6;border-radius:16px;padding:14px}
+.dc-t{font-weight:700;color:#633806;font-size:16px}
+.dc-r{display:flex;align-items:center;gap:8px;margin:12px 0 6px}
+.dc-d{flex:1;min-width:0;background:#fff;border:1px solid #F5C97A;border-radius:12px;padding:8px 4px;text-align:center;display:flex;flex-direction:column}
+.dc-d b{font-size:20px;color:#412402;direction:ltr}.dc-d small{font-size:12.5px;color:#854F0B}
+.dc-ar{color:#854F0B;font-size:20px}.dc-n{text-align:center;font-weight:700;color:#633806}
+.dc-h{font-size:13.5px;color:#854F0B;margin-top:8px;line-height:1.6}
+.fixdate{display:block;margin:12px auto 0;background:none;border:1px solid var(--line);border-radius:10px;padding:9px 14px;font:inherit;font-size:13.5px;color:var(--muted);cursor:pointer}
+#fixDateBox{margin-top:10px;border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+#fixDateBox[hidden]{display:none}
+#fixDateBox input{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+#fixDateBox .grid2{gap:8px}.fxerr{color:var(--red);font-size:13px}
 .fine{font-size:13px;color:var(--muted);text-align:center;margin-top:12px;line-height:1.7}
 .note{margin:14px 18px 0;padding:12px 14px;border-radius:12px;background:#FFF7E8;color:#7A5200;font-size:14px;line-height:1.6;display:none}
 .note.on{display:block}
@@ -310,7 +323,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk } from "./shared.js?v=20261031a";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk } from "./shared.js?v=20261103a";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -606,12 +619,24 @@ function renderForm() {
   else h += `<div class="grid2">${F("leaveStart", "بداية الإجازة", { ...date, req: true })}${F("leaveEnd", "نهاية الإجازة", { ...date, err: "النهاية لازم تكون بعد البداية أو نفس اليوم (يوم/شهر/سنة)" })}</div>`;
   h += F("doctorName", "اسم الطبيب المعالج", { req: true, ph: "كما هو مكتوب في التقرير" });
   h += F("phone", "رقم الجوال", { req: true, mode: "tel", ph: "05xxxxxxxx", max: 14, ltr: true, err: "اكتب رقم جوال سعودي صحيح يبدأ بـ 05" });
-  h += `<button class="btn btn-primary submit" id="btnSend" type="submit">إرسال الطلب</button>
+  h += `<div id="dateCheck"></div>
+        <button class="btn btn-primary submit big" id="btnSend" type="submit">إرسال الطلب</button>
+        <button type="button" class="fixdate" id="btnFixDate">إرسال مع طلب تعديل التاريخ</button>
+        <div id="fixDateBox" hidden>
+          <b>وش التاريخ الصحيح؟</b>
+          ${t === "attendance" ? `<input id="fxD1" data-fx placeholder="يوم الحضور: يوم/شهر/سنة" inputmode="numeric" maxlength="10">`
+            : `<div class="grid2"><input id="fxD1" data-fx placeholder="من: يوم/شهر/سنة" inputmode="numeric" maxlength="10"><input id="fxD2" data-fx placeholder="إلى: يوم/شهر/سنة" inputmode="numeric" maxlength="10"></div>`}
+          <input id="fxDNote" placeholder="ملاحظة (اختياري)" maxlength="80">
+          <div id="fxDErr" class="fxerr" hidden></div>
+          <button type="button" class="btn btn-primary" id="btnFixSend">أرسل مع طلب التعديل</button>
+        </div>
         <p class="fine">بإرسالك الطلب توافق على استخدام بياناتك لرفع الإجازة على منصة صحة فقط.</p>`;
   $("#form").innerHTML = h;
   $("#form").querySelectorAll("input[data-date]").forEach(i => { i.addEventListener("input", () => { i.value = fmtDateInput(i.value); }); attachDatePicker(i); });
+  $("#form").querySelectorAll("input[data-fx]").forEach(i => i.addEventListener("input", () => { i.value = fmtDateInput(i.value); $("#fxDErr").hidden = true; }));
+  state.fixDate = null;
   $("#form").querySelectorAll("input[name=idNumber],input[name=companionId]").forEach(i => i.addEventListener("input", () => { i.value = latinDigits(i.value).replace(/\D/g, ""); }));
-  $("#form").querySelectorAll("input").forEach(i => i.addEventListener("input", () => { i.closest(".f").classList.remove("bad", "ai"); }));
+  $("#form").querySelectorAll("input").forEach(i => i.addEventListener("input", () => { i.closest(".f")?.classList.remove("bad", "ai"); }));
 }
 
 function setField(k, v) {
@@ -628,6 +653,7 @@ function fillFromAI(r) {
   setField("leaveEnd", isoToDmy(r.leave_end) || addDaysDmy(start, days));
   setField("visitDate", isoToDmy(r.visit_date || r.leave_start));
   lockDates();
+  showDateCheck();
   setField("doctorName", r.doctor_name);
   setField("phone", r.mobile ? normPhone(r.mobile) : "");
   setField("companionName", r.companion_name || r.accompanied_by);
@@ -636,6 +662,36 @@ function fillFromAI(r) {
   setField("relationship", r.relationship);
 }
 
+// «تأكد من تاريخ إجازتك»: التاريخ كبير وواضح فوق زر الإرسال (لكل الطلبات) — لو المسح قرأه غلط يضغط «إرسال مع طلب تعديل التاريخ»
+const WD_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+const dmyMs = d => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ""); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) : NaN; };
+function showDateCheck() {
+  const box = $("#dateCheck"); if (!box) return;
+  const v = k => latinDigits($(`#form [name="${k}"]`)?.value || "").trim();
+  const att = state.type === "attendance", a = att ? v("visitDate") : v("leaveStart"), b = att ? a : (v("leaveEnd") || a);
+  const ta = dmyMs(a), tb = dmyMs(b);
+  if (isNaN(ta) || isNaN(tb) || tb < ta) { box.innerHTML = ""; return; }
+  const n = Math.round((tb - ta) / 864e5) + 1;
+  const cell = (lbl, d, t) => `<div class="dc-d"><small>${lbl}</small><b>${d}</b><small>${WD_AR[new Date(t).getUTCDay()]}</small></div>`;
+  box.innerHTML = `<div class="dc"><div class="dc-t">⚠ تأكد من ${att ? "تاريخ الحضور" : "تاريخ إجازتك"}</div>
+    <div class="dc-r">${att ? cell("يوم الحضور", a, ta) : n === 1 ? cell("يوم الإجازة", a, ta) : cell("من", a, ta) + `<span class="dc-ar">←</span>` + cell("إلى", b, tb)}</div>
+    ${att ? "" : `<div class="dc-n">${n === 1 ? "يوم واحد" : n === 2 ? "يومين" : n <= 10 ? n + " أيام" : n + " يوم"}</div>`}
+    <div class="dc-h">لو التاريخ ما يطابق اللي في التقرير، اضغط «إرسال مع طلب تعديل التاريخ».</div></div>`;
+}
+$("#form").addEventListener("input", e => { if (DATE_FIELDS.includes(e.target.name)) showDateCheck(); });
+$("#form").addEventListener("change", e => { if (DATE_FIELDS.includes(e.target.name)) showDateCheck(); });
+$("#form").addEventListener("click", e => {
+  if (e.target.id === "btnFixDate") { const bx = $("#fixDateBox"); bx.hidden = !bx.hidden; if (!bx.hidden) setTimeout(() => { bx.scrollIntoView({ block: "center", behavior: "smooth" }); $("#fxD1")?.focus(); }, 50); }
+  if (e.target.id === "btnFixSend") {
+    const d1 = latinDigits($("#fxD1")?.value || "").trim(), d2 = latinDigits($("#fxD2")?.value || "").trim(), note = ($("#fxDNote")?.value || "").trim();
+    const err = t => { const x = $("#fxDErr"); x.textContent = t; x.hidden = false; };
+    if (!d1 && !d2 && note.length < 3) return err("اكتب التاريخ الصحيح أو ملاحظة");
+    if ((d1 && !validDmy(d1)) || (d2 && !validDmy(d2))) return err("اكتب التاريخ كذا: يوم/شهر/سنة (مثال 03/11/2026)");
+    if (d1 && d2 && dmyMs(d2) < dmyMs(d1)) return err("النهاية لازم تكون بعد البداية أو نفس اليوم");
+    state.fixDate = { d1, d2, note };
+    $("#form").requestSubmit();
+  }
+});
 // تواريخ الإجازة اللي انقرت من التقرير تنقفل — المريض ما يعدّلها أبداً (الموظف يتأكد منها من الصورة)
 const DATE_FIELDS = ["leaveStart", "leaveEnd", "visitDate"];
 function lockDates() {
@@ -701,7 +757,9 @@ $("#form").addEventListener("submit", async e => {
     const ref = makeRef();
     const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
     slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);
-    const flag = dateFlagFor(fd, ai);
+    const fx = state.fixDate;
+    const fxTxt = fx ? `🙋 المراجع يقول التاريخ غلط${fx.d1 || fx.d2 ? ` — كتب: ${state.type === "attendance" ? fx.d1 : `${fx.d1 || "؟"} ← ${fx.d2 || "؟"}`}` : ""}${fx.note ? ` · «${fx.note}»` : ""}` : "";
+    const flag = [fxTxt, dateFlagFor(fd, ai)].filter(Boolean).join(" · ").slice(0, 200);
     const create = withFlag => api.createRequest({
       ref, type: state.type,
       patientName: clean(fd.patientName), patientNameEn: clean(ai.patient_name_en), idNumber: latinDigits(fd.idNumber),
@@ -725,7 +783,7 @@ $("#form").addEventListener("submit", async e => {
     if (err?.code === "duplicate") return showDuplicate();
     console.error(err);
     showFail(err, "#note");
-  } finally { state.sending = false; clearTimeout(slow); btn.disabled = false; btn.textContent = "إرسال الطلب"; }
+  } finally { state.sending = false; state.fixDate = null; clearTimeout(slow); btn.disabled = false; btn.textContent = "إرسال الطلب"; }
 });
 
 $("#btnCopyRef").onclick = async () => {
