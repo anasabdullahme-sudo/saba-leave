@@ -380,7 +380,7 @@ async function resetExpired() {
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
-  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [];
+  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [];
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi_today");
     const cur = fresh((await tx.get(ref)).data(), t.iso);
@@ -454,6 +454,11 @@ async function apply(evs, ctx) {
       }
       const key = d ? d.id : "x:" + norm(e.name);
       if (!d && e.kind !== "present") continue;                         // طبيب مو في الجدول: نقبل بس «موجود» (مؤقت)
+      // أي شي يدل إنه موجود اليوم وهو عليه إجازة → رجع من إجازته: نقفلها (الجدول والبطاقة يطلع فيها موجود)
+      if (d && HERE_KINDS.has(e.kind) && !heres.some(x => x.d.id === d.id) && onVacation(d, t.iso)) {
+        heres.push({ d }); applied.push("vacation_end");
+        (ctx.rep ||= []).push(`🔙 د. ${shortName(d.name)} — كان عليه إجازة وهو موجود اليوم: قفلت الإجازة\n   الموقع: يطلع «موجود» بدل «في إجازة»`);
+      }
       // أوقات بدون ص/م: «٩:٤٥» الساعة 8 بالليل = 21:45، و«موجود إلى ١» = 1 بعد نص الليل
       const pm = m => (m != null && m < 720 && m < t.m - 30 && m + 720 > t.m - 30) ? m + 720 : m;
       const nextDay = m => (m != null && m < t.m - 30) ? m + 1440 : m;
@@ -522,6 +527,7 @@ async function apply(evs, ctx) {
   if (plans.length) await db.doc("board/bawadi_plan").set({ items: FieldValue.arrayUnion(...plans), at: Date.now() }, { merge: true });
   if (upd.length) await updateSchedules(upd, ctx);
   if (backs.length) await endVacations(backs, ctx);
+  if (heres.length) await endVacationsToday(heres, ctx);
   for (const x of leavers) await askRemove(x.d, x.e, ctx);
   for (const x of newDocs) await askAdmin(x, ctx);
   return applied;
@@ -564,6 +570,28 @@ async function endVacations(list, ctx) {
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "نهاية إجازة" }); tx.set(ref, next);
   });
+}
+// «موجود» وهو في إجازة: الإجازة اللي بدأت قبل اليوم تخلص أمس، واللي تبدأ اليوم تتأخر لبكرة (أو تنشال لو هي يوم واحد)
+const HERE_KINDS = new Set(["present", "starts_at", "late", "free", "resume", "busy", "appointments_only", "leaves_at", "stop"]);
+function onVacation(d, iso) { return (board?.vacations || []).some(v => (v.doctorId === d.id || (d.code && String(v.code) === String(d.code))) && v.start <= iso && (!v.end || v.end >= iso)); }
+async function endVacationsToday(list, ctx) {
+  const iso = nowR().iso, y = isoPlus(iso, -1), tm = isoPlus(iso, 1), names = [];
+  await db.runTransaction(async tx => {
+    const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data(); if (!cur) return;
+    const next = structuredClone(cur); let n = 0;
+    for (const { d } of list) {
+      const mine = v => (v.doctorId === d.id || (d.code && String(v.code) === String(d.code))) && v.start <= iso && (!v.end || v.end >= iso);
+      const hit = (next.vacations || []).filter(mine); if (!hit.length) continue;
+      for (const v of hit) { if (v.start < iso) v.end = y; else if (v.end && v.end <= iso) v.drop = true; else v.start = tm; n++; }
+      names.push(shortName(d.name));
+    }
+    if (!n) return;
+    next.vacations = (next.vacations || []).filter(v => !v.drop);
+    next.log = [{ at: Date.now(), by: `البوت (${ctx.by})`, what: `رجع من الإجازة (موجود اليوم): ${names.map(x => "د. " + x).join("، ")}` }, ...(cur.log || [])].slice(0, 60);
+    next.updatedAt = Date.now(); next.updatedBy = "البوت";
+    tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "نهاية إجازة (موجود)" }); tx.set(ref, next);
+  });
+  if (!reportsOn) for (const nm of names) await dmAdmin(`🔙 د. ${nm} كان عليه إجازة وجات رسالة إنه موجود اليوم — قفلت إجازته، وصار يطلع «موجود».\n(من رسالة ${ctx.by})\n\nلو غلط رد «تراجع».`);
 }
 // طبيب بيروح من الفرع → نسأل المسؤول «أشيله؟»
 async function askRemove(d, e, ctx) {
