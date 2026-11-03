@@ -532,12 +532,37 @@
   const isHidden = id => { if (unacked.has(id)) return true; const t = hidden[id]; return !!t && queueAt < t + 20000; };
   const pendingQ = () => queueStale() ? [] : queue.filter(q => !isHidden(q.id) && q.id !== req?.id);   // قائمة قديمة → ما نعرض منها شي (ممكن فيها طلبات انرفعت من جهاز ثاني)
   const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
-  const queueStale = () => !queueAt || Date.now() - queueAt > 3 * 60000;
+  // القائمة لازم تكون جديدة: اللوحة ترسلها كل 15 ثانية، فلو مر 45 ثانية بدونها (اللوحة نايمة/مقفلة) ما نعرضها.
+  // ولما يرجع الموظف لصحة نطلب قائمة جديدة على طول، ولين توصل ما نعرض القديمة
+  let wantAt = 0;
+  const queueStale = () => !queueAt || Date.now() - queueAt > 45000 || (!!wantAt && queueAt < wantAt - 5000);
+  const askQueue = () => { if (!TOP || !alive()) return; wantAt = Date.now(); chrome.storage.local.set({ sabaWantQueue: wantAt }); setTimeout(() => { if (!req && !minimized) render(); else updateCount(); }, 2600); };
+  if (TOP) { document.addEventListener("visibilitychange", () => { if (!document.hidden) askQueue(); }); addEventListener("focus", askQueue); setTimeout(askQueue, 1500); }
   function bindDup() { const d = $("#dupOk"); if (d) d.onclick = () => { dupInfo = null; chrome.storage.local.remove("sabaDup"); render(); }; }
   function setMin(v) { minimized = v; $("#p").classList.toggle("min", v); $("#min").textContent = v ? "+" : "–"; }
   function updateCount() { const c = $("#cnt"), n = pendingQ().filter(q => !q.lockedBy).length; c.hidden = !n; c.textContent = n; }
   let lockWarned = null;
-  function useReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
+  function openReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
+  // قبل ما نفتح طلب من القائمة: نسأل صفحة الموظفين تتأكد من قاعدة البيانات إنه ما انرفع (من جهاز ثاني) — عشان ما ينرفع مرتين
+  let checking = null;
+  function useReq(q) {
+    if (checking) return;
+    const at = Date.now(); checking = { id: q.id, at }; toastLocal("⏳ أتأكد إن الطلب ما انرفع…");
+    const done = r => {
+      chrome.storage.onChanged.removeListener(l); clearTimeout(tm); checking = null;
+      if (!r) { toastLocal("⚠ صفحة الموظفين ما ردّت — افتحها (أو حدّثها) وحاول مرة ثانية"); render(); return; }
+      if (r.status === "done") {
+        dupInfo = { id: q.id, ref: q.ref || "", by: r.by || "", doneAt: r.doneAt || 0, name: q.patientName || "", at: Date.now() };
+        hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden, sabaDup: dupInfo }); setMin(false); render(); return;
+      }
+      if (r.status === "gone") { toastLocal("هذا الطلب انحذف أو انتقل"); hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden }); render(); return; }
+      openReq(q);
+    };
+    const l = (ch, area) => { const v = area === "local" && ch.sabaCheckRes?.newValue; if (v && v.at === at) done(v); };
+    chrome.storage.onChanged.addListener(l);
+    const tm = setTimeout(() => done(null), 5000);
+    chrome.storage.local.set({ sabaCheck: { id: q.id, at } });
+  }
   const TYPE_AR = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
   const LTR = new Set(["fileNo", "idNumber", "companionId", "dob", "companionDob", "phone", "leaveStart", "leaveEnd", "visitDate", "ref", "leaveDays", "patientNameEn"]);
 
@@ -580,12 +605,12 @@
       const free = pend.filter(q => !q.lockedBy);
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
       const sameId = q => q.idNumber && queue.some(o => o.id !== q.id && o.idNumber === q.idNumber && !isHidden(o.id));
-      b.innerHTML = `${dupHtml()}${queueStale() && queueAt ? `<div class="note" style="background:#FFF4E5;color:#8A4B00;font-weight:600">⏳ القائمة مو محدّثة — ما أعرض منها شي عشان ما ترفع طلب انرفع من جهاز ثاني. افتح صفحة الموظفين (أو حدّثها) وبتطلع الطلبات</div>` : ""}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
+      b.innerHTML = `${dupHtml()}${queueStale() && queueAt ? (wantAt && Date.now() - wantAt < 2500 ? `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏳ يحدّث القائمة…</div>` : `<div class="note" style="background:#FFF4E5;color:#8A4B00;font-weight:600">⏳ القائمة مو محدّثة — ما أعرض منها شي عشان ما ترفع طلب انرفع من جهاز ثاني. افتح صفحة الموظفين (أو حدّثها) وبتطلع الطلبات</div>`) : ""}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
         ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
-        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
+        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}${q.dateFlag ? ` <i class="lkb" style="background:#FDECEC;color:#9B1C1C">${/🙋/.test(q.dateFlag) ? "🙋 تعديل تاريخ" : "⚠ تاريخ"}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
           || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
-        ${queueStale() ? `<div class="note" style="background:#FFF4E5;color:#8A4B00">⚠ القائمة مو محدّثة${hh ? ` (آخر تحديث ${hh})` : ""} — افتح لوحة سابا، ولو مفتوحة حدّث صفحتها (F5)</div>` : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
+        ${queueStale() && !queueAt ? "" : queueStale() ? "" : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
       const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(free[0]);
       root.querySelectorAll(".qi").forEach(el => el.onclick = () => {
@@ -619,6 +644,7 @@
         ${reqImg?.id === req.id ? `<button class="lnk" id="viewImg2">📄 صورة التقرير — كبّرها</button>` : `<div class="tiny">صورة التقرير تطلع هنا لما تكون لوحة سابا مفتوحة</div>`}</div>
       </div>
       ${alertHtml}
+      ${req.dateFlag ? `<div class="acc wrong" style="font-weight:600;background:#FDECEC;color:#9B1C1C;border-color:#F5B5B5">${/🙋/.test(req.dateFlag) ? "🙋 <b>المراجع يقول التاريخ غلط</b>" : "⚠ <b>انتبه للتاريخ</b>"}<br><span style="font-weight:500">${esc(req.dateFlag.replace(/^🙋 المراجع يقول التاريخ غلط( — )?/, ""))}</span><br><span style="font-weight:400;font-size:12px">تأكد من التاريخ من صورة التقرير قبل الرفع</span></div>` : ""}
       <div class="acc ${acc.state}">${accTxt}</div>
       <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button></div>
       <div class="links"><label class="tg" style="font-size:12px"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية</label><button class="lnk" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق الطلب</button><button class="lnk" id="diag">تقرير فني</button></div>
@@ -687,6 +713,7 @@
       if (im) { im.onerror = () => { im.remove(); }; im.src = reqImg.url; }          // لو صحة منعت عرض الصورة هنا، الزر يفتحها في تبويب
     }
     $("#done").onclick = () => {
+      if (!req) return;                                                            // ضغطتين ورا بعض
       const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
       // كل «تم الرفع» في خانة لحاله (sabaDone_<وقت>) لين اللوحة تأكد إنها حفظته — كذا ضغطتين ورا بعض ما تمسح وحدة الثانية
       const at = Date.now(), d = { id: req.id, ref: req.ref, psl, at };

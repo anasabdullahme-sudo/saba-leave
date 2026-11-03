@@ -438,7 +438,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage } from "./shared.js?v=20261103d";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage } from "./shared.js?v=20261103e";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1443,6 +1443,7 @@ function sehaPayload(x) {
     companionName: pick("companionName"), companionId: pick("companionId"), companionDob: pick("companionDob"), relationship: pick("relationship"),
     doctorName: pick("doctorName"), stampDoctor: pick("stampDoctor"), reason: pick("reason"), nationality: pick("nationality"), gender: pick("gender"),
     submitDate: x.createdAt ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(x.createdAt)) : "",   // يوم إرسال المراجع ← تاريخ الدخول/الخروج في صحة
+    dateFlag: x.dateFlag && !x.dateChecked ? String(x.dateFlag).slice(0, 220) : "",   // تنبيه التاريخ (المراجع يقول غلط / شطب بالقلم…) — يطلع في الأداة بعد
     sentAt: Date.now(),
   };
 }
@@ -1496,6 +1497,14 @@ addEventListener("message", async e => {
   if (e.source !== window || !e.data || typeof e.data !== "object") return;
   const m = e.data;
   if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; extReadyAt = Date.now(); renderExtHint(); renderExtLink(); postQueue(); }
+  if (m.type === "SABA_QUEUE_REQ") postQueue();                                    // الأداة رجع لها الموظف وتبي القائمة الحين
+  if (m.type === "SABA_CHECK" && m.id) {                                           // الأداة بتفتح طلب: نتأكد من قاعدة البيانات نفسها إنه ما انرفع
+    let r = null;
+    try { r = await api.getStatus?.(m.id, true); } catch (e) { console.warn("check", e); return; }          // ما قدرنا نوصل للسيرفر → ما نرد (الأداة تقول «ما ردّت»)
+    const res = r ? { status: r.status, by: r.doneBy, doneAt: r.doneAt } : { status: api.getStatus ? "gone" : "pending" };
+    window.postMessage({ type: "SABA_CHECK_RES", at: m.at, id: m.id, ...res }, location.origin);
+    if (res.status === "done") { const x = S.pending.find(q => q.id === m.id); if (x) { S.pending = S.pending.filter(q => q.id !== m.id); renderCounts(); renderPending(); postQueue(); } }
+  }
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
@@ -1585,7 +1594,7 @@ function renderExtLink() {
 setInterval(() => { if (!extVersion) return; extPingAt = Date.now(); window.postMessage({ type: "SABA_EXT_PING" }, location.origin); setTimeout(renderExtLink, 5500); }, 60000);
 window.postMessage({ type: "SABA_EXT_PING" }, location.origin);
 renderExtHint();
-setInterval(postQueue, 60000);
+setInterval(postQueue, 15000);                                                   // نبضة القائمة للأداة كل 15 ثانية (رسالة داخل الجهاز — ما تاخذ قراءات)
 relayDoctorAlerts(api);   // تنبيهات قروب الاستقبال (وقف/فاضي/غائب…) → الإضافة تعرضها فوق أي صفحة   // نبضة: الإضافة تعرف إن القائمة محدّثة (ولو وقفت تنبّه الموظف يحدّث اللوحة)
 
 /* ---------- toast ---------- */

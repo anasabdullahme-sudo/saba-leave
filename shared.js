@@ -650,7 +650,7 @@ async function liveBackend(role) {
       tx.update(ref, { ...extra, status: "done", doneAt: FS.serverTimestamp(), doneBy: by });   // رقم PSL مع «تم الرفع» بكتابة وحدة (كان كتابتين → الطلب يرجع ثانيتين)
     }),
     // حالة طلب واحد من قاعدة البيانات نفسها (قراءة وحدة)
-    async getStatus(id) { const d = await FS.getDoc(FS.doc(col, id)); if (!d.exists()) return null; const x = d.data(); return { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt?.toMillis?.() || 0, ref: x.ref || "", patientName: x.patientName || "" }; },
+    async getStatus(id, server) { const d = await (server ? FS.getDocFromServer : FS.getDoc)(FS.doc(col, id)); if (!d.exists()) return null; const x = d.data(); return { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt?.toMillis?.() || 0, ref: x.ref || "", patientName: x.patientName || "" }; },
     claim: (id, by) => FS.updateDoc(FS.doc(col, id), { openedBy: by, openedAt: FS.serverTimestamp() }),
     undoDone: id => FS.runTransaction(db, async tx => {
       const ref = FS.doc(col, id), cur = await tx.get(ref);

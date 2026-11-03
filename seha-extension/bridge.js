@@ -32,6 +32,7 @@
     if (m.type === "SABA_SEHA_FILL" && m.payload) {
       chrome.storage.local.set({ sabaReq: m.payload, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }, () => post({ type: "SABA_SEHA_FILL_ACK", ref: m.payload.ref }));
     }
+    if (m.type === "SABA_CHECK_RES" && m.at) chrome.storage.local.set({ sabaCheckRes: { at: m.at, id: m.id, status: m.status, by: m.by || "", doneAt: m.doneAt || 0 } });
     if (m.type === "SABA_QUEUE" && Array.isArray(m.items)) chrome.storage.local.set({ sabaQueue: { at: Date.now(), items: m.items.slice(0, 200) } });
     // اللوحة تقول: هذا الطلب انرفع من قبل → الأداة في صحة تنبّه الموظف
     if (m.type === "SABA_SEHA_DONE_DUP" && m.id) chrome.storage.local.set({ sabaDup: { id: m.id, ref: m.ref || "", by: m.by || "", doneAt: m.doneAt || 0, name: m.name || "", at: Date.now() } });
@@ -42,6 +43,8 @@
   });
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && Object.keys(ch).some(k => (k === "sabaDone" || k.startsWith("sabaDone_")) && ch[k].newValue)) forwardDone(); });
+  chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaWantQueue?.newValue && isBoard() && alive()) post({ type: "SABA_QUEUE_REQ" }); });   // الأداة تطلب قائمة جديدة
+  chrome.storage.onChanged.addListener((ch, area) => { const c = area === "local" && ch.sabaCheck?.newValue; if (c && isBoard() && alive()) post({ type: "SABA_CHECK", id: c.id, at: c.at }); });   // الأداة تسأل: انرفع؟
   // صفحة موظفين قديمة (قبل التحديث التلقائي) → نحدّثها لحالها لما تكون فاضية (ما فيه طلب مفتوح ولا كتابة) — مرة كل 10 دقايق بالكثير
   setTimeout(function oldBoard() {
     if (!alive() || !isBoard() || document.documentElement.dataset.sabaBoard) return;
