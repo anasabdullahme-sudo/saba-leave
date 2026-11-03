@@ -642,6 +642,93 @@
     "depName": "طب اسر",
     "id": "amn0311"
    }
+  },
+  {
+   "id": "p0411al0",
+   "doctorId": "4hb8w81",
+   "findName": [
+    "ولاء منصور"
+   ],
+   "addAliases": [
+    "ولاء عبدالستار منصور"
+   ]
+  },
+  {
+   "id": "p0411al1",
+   "doctorId": "frniwgd",
+   "findName": [
+    "حسين عبدالحميد"
+   ],
+   "addAliases": [
+    "حسن عبدالحميد حسن"
+   ]
+  },
+  {
+   "id": "p0411al2",
+   "doctorId": "w75r3rv",
+   "findName": [
+    "نشوى السقا"
+   ],
+   "addAliases": [
+    "نشوى عبدالكافي السقا"
+   ]
+  },
+  {
+   "id": "p0411al3",
+   "doctorId": "ps0w1ai",
+   "findName": [
+    "رشا الوزيري"
+   ],
+   "addAliases": [
+    "رشا الوزيري محمد"
+   ]
+  },
+  {
+   "id": "p0411al4",
+   "doctorId": "i7pxyfl",
+   "findName": [
+    "مجد العدواني"
+   ],
+   "addAliases": [
+    "مجد معيوف العدواني",
+    "مجد معيوف فالح العدواني"
+   ]
+  },
+  {
+   "id": "p0411al5",
+   "doctorId": "jdonfil",
+   "findName": [
+    "أبو الفضل",
+    "ابو الفضل"
+   ],
+   "addAliases": [
+    "أحمد أبو الفضل",
+    "أحمد خالد إبراهيم"
+   ]
+  },
+  {
+   "id": "p0411al6",
+   "doctorId": "bxm6z5u",
+   "findName": [
+    "سارة الجارحي",
+    "ساره الجارحي"
+   ],
+   "addAliases": [
+    "سارة الشوربجي",
+    "ساره الشوربجي"
+   ]
+  },
+  {
+   "id": "p0411al7",
+   "doctorId": "amn0311",
+   "findName": [
+    "أمين محمد علي",
+    "أمين كيماوي"
+   ],
+   "addAliases": [
+    "أمين كيماوي",
+    "Amin Kemawi"
+   ]
   }
  ],
  "today": [

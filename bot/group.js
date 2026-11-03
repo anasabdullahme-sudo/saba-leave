@@ -64,6 +64,7 @@ const toMin = s => { const x = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); retu
 const uid = () => Math.random().toString(36).slice(2, 10);
 const docs = () => (board?.departments || []).flatMap(p => p.doctors.map(d => ({ ...d, dep: p.name, fl: d.floor || p.floor })));
 const shortName = n => String(n || "").split(/\s*[–-]\s*/)[0].trim();
+const allNames = d => [shortName(d.name), d.fullName, ...(d.aliases || [])].filter(Boolean);   // أسماء أثير/الواتس الثانية (aliases)
 const deAl = t => t.length > 4 && t.startsWith("ال") ? t.slice(2) : t;
 const STOP = new Set(["د", "دكتور", "دكتوره", "الدكتور", "الدكتوره", "دكتورة", "د.", "dr"]);
 
@@ -72,7 +73,8 @@ function matchDoctor(name, dept) {
   const toks = norm(name).split(" ").filter(t => t && !STOP.has(t)).map(deAl);
   const L = docs();
   if (toks.length) {
-    const score = d => { const dn = norm(shortName(d.name)).split(" ").map(deAl); let s = 0; toks.forEach((t, i) => { if (dn.includes(t)) s += i === 0 ? 3 : 2; else if (dn.some(x => x.startsWith(t) && t.length >= 3)) s += 1; }); return s; };
+    const score1 = nm => { const dn = norm(nm).split(" ").map(deAl); let s = 0; toks.forEach((t, i) => { if (dn.includes(t)) s += i === 0 ? 3 : 2; else if (dn.some(x => x.startsWith(t) && t.length >= 3)) s += 1; }); return s; };
+    const score = d => Math.max(score1(shortName(d.name)), ...(d.aliases || []).map(score1));
     const ranked = L.map(d => [d, score(d)]).filter(x => x[1] >= 2).sort((a, b) => b[1] - a[1]);
     if (ranked.length === 1 || (ranked.length > 1 && ranked[0][1] > ranked[1][1])) return ranked[0][0];
     if (ranked.length > 1 && dept) { const nd = norm(dept); const f = ranked.filter(x => norm(x[0].dep).includes(nd) || nd.includes(norm(x[0].dep))); if (f.length === 1) return f[0][0]; }
@@ -121,7 +123,7 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
 async function aiParse(text, quoted) {
   if (!gemini) return null;
   const t = nowR();
-  const list = docs().map(d => `${d.id} | ${shortName(d.name)}${d.fullName ? " (" + d.fullName + ")" : ""} | ${d.dep}`).join("\n");
+  const list = docs().map(d => { const o = allNames(d).slice(1); return `${d.id} | ${shortName(d.name)}${o.length ? " (" + o.join(" / ") + ")" : ""} | ${d.dep}`; }).join("\n");
   const body = {
     systemInstruction: { parts: [{ text: PROMPT.replace("{TODAY}", `${t.iso} (${["الأحد","الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][t.wd]})`).replace("{NOW}", hm(t.m)).replace("{LIST}", list) }] },
     contents: [{ role: "user", parts: [{ text: (quoted ? `رسالة مقتبسة (اللي ردّ عليها): «${quoted}»\n` : "") + `الرسالة: «${text}»` }] }],
@@ -157,7 +159,7 @@ function fuzzyPick(s) {
   for (let i = 0; i < w.length - 1; i++) { const d = matchDoctor(w[i] + " " + w[i + 1]); if (d) return d; }
   for (const t of w) { if (t.length < 3) continue; const d = matchDoctor(t); if (d) return d; }
   for (const t of w) { if (t.length < 4) continue; const f = L.filter(d => deAl(norm(d.dep)) === deAl(t)); if (f.length === 1) return f[0]; }   // «دكتور العيون»
-  for (const t of w) { if (t.length < 5) continue; const f = L.filter(d => norm(shortName(d.name)).split(" ").map(deAl).some(x => x.length >= 5 && lev1(x, deAl(t)))); if (f.length === 1) return f[0]; }   // «السجيدي» ≈ السنجيدي
+  for (const t of w) { if (t.length < 5) continue; const f = L.filter(d => allNames(d).flatMap(nm => norm(nm).split(" ")).map(deAl).some(x => x.length >= 5 && lev1(x, deAl(t)))); if (f.length === 1) return f[0]; }   // «السجيدي» ≈ السنجيدي
   return null;
 }
 // إجازة بتواريخ (بدون Gemini): «اجازة من الان الى يوم 30»، «المباشرة السبت 31»، «من يوم السبت … اجازة لمدة اسبوع»
@@ -203,7 +205,7 @@ const DAYN = ["الأحد", "الإثنين", "الثلاثاء", "الأربع�
 // تعديل دائم (دوام/طبيب جديد) يحتاج تطابق كامل: كل كلمة من الاسم المكتوب لازم تكون في اسم الطبيب (سارة النمر ≠ سارة الجارحي)
 const nameToks = x => norm(shortName(x)).split(" ").filter(t => t && !STOP.has(t)).map(deAl);
 function sameName(given, d) {
-  const g = nameToks(given), dn = [...nameToks(d.name), ...(d.fullName ? nameToks(d.fullName) : [])]; if (!g.length) return false;
+  const g = nameToks(given), dn = allNames(d).flatMap(nameToks); if (!g.length) return false;
   return g.every(t => dn.some(x => x === t || (t.length >= 4 && x.length >= 4 && lev1(t, x))));
 }
 function strictFind(given) { const L = docs().filter(d => sameName(given, d)); return L.length === 1 ? L[0] : null; }
@@ -615,6 +617,32 @@ async function removeDoctor(id, by) {
   return name;
 }
 
+/* ---------- يتعلّم الأسماء: اسم ما انعرف في القروب والمسؤول قال مين هو → يحفظه للمرة الجاية ---------- */
+const cleanAlias = n => String(n || "").replace(/^(د|دكتور|دكتوره|الدكتور|الدكتوره|dr)\.?\s+/i, "").replace(/\s+/g, " ").trim().slice(0, 40);
+async function learnAliases(origEvs, newEvs) {
+  const ids = [...new Set((newEvs || []).map(e => e.doctor_id || matchDoctor(e.name, e.dept)?.id).filter(Boolean))];
+  if (ids.length !== 1) return;                                                       // نتعلّم بس لما التصحيح عن طبيب واحد
+  const id = ids[0], d = docs().find(x => x.id === id); if (!d) return;
+  const names = [...new Set((origEvs || []).map(e => cleanAlias(e.name)).filter(n => norm(n).replace(/\s/g, "").length >= 3))]
+    .filter(n => !sameName(n, d) && matchDoctor(n)?.id !== id);
+  if (!names.length) return;
+  let saved = [];
+  await db.runTransaction(async tx => {
+    const ref = db.doc("board/bawadi"), cur = (await tx.get(ref)).data(); if (!cur) return;
+    const next = structuredClone(cur);
+    for (const p of next.departments) for (const x of p.doctors || []) if (x.id === id) {
+      const have = new Set((x.aliases || []).map(norm));
+      saved = names.filter(n => !have.has(norm(n)));
+      if (saved.length) x.aliases = [...(x.aliases || []), ...saved].slice(-8);
+    }
+    if (!saved.length) return;
+    next.log = [{ at: Date.now(), by: "البوت (تعلّم من المسؤول)", what: `اسم ثاني لد. ${shortName(d.name)}: ${saved.join("، ")}` }, ...(cur.log || [])].slice(0, 60);
+    next.updatedAt = Date.now(); next.updatedBy = "البوت";
+    tx.set(ref, next);
+  });
+  if (saved.length) await dmAdmin(`📝 حفظت «${saved.join("» و«")}» اسم ثاني لد. ${shortName(d.name)} — المرة الجاية بفهمه على طول.`);
+}
+
 /* ---------- طبيب مو موجود → رسالة للمسؤول على الخاص: يضيفه أو لا ---------- */
 const adminJids = new Map();
 const adminLog = [];                       // آخر رسائلنا للمسؤول (سياق لما يسأل «ليش؟»)
@@ -722,6 +750,7 @@ async function handleClarify(m, text) {
   await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
   const cctx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + " (تصحيح)", rep: [] };
   const applied = await apply(evs, cctx);
+  if (applied.length && how === "حسب كلامك") learnAliases(it.evs, evs).catch(e => log.warn({ err: String(e?.message || e) }, "تعلّم الاسم"));
   await dmAdmin(applied.length ? `✅ طبّقتها ${how}:\n${cctx.rep.length ? cctx.rep.join("\n") : describeEvs(evs)}` : "ما انطبق شي — تأكد من اسم الطبيب.");
   if (applied.length && it.key?.id) { try { await getSock()?.sendMessage(it.key.remoteJid, { react: { text: "✅", key: { ...it.key, participant: it.key.participant || undefined } } }); } catch {} }
   return true;

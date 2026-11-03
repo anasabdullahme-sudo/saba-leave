@@ -323,7 +323,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk } from "./shared.js?v=20261103e";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104a";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -564,11 +564,12 @@ async function onPhoto(file) {
     if (docType && docType !== state.type && !(state.type === "companion" && docType === "sick") && r?.quality !== "not_document") {   // اختار مرافق؟ ما نحوّله لمرضية
       switched = state.type; setType(docType); renderForm(); setLoading(true);
     }
+    resolveAiDates(state.ai, state.type);               // الكود يصحّح ترتيب اليوم/الشهر ويقارن النسختين والعمر
     fillFromAI(state.ai);
     if (switched) {
       $("#note").innerHTML = `حوّلنا طلبك إلى «<b>${typeName(state.type)}</b>» لأن التقرير كذا. <button type="button" id="undoType" style="all:unset;cursor:pointer;color:#0082D4;font-weight:700;text-decoration:underline">لا، اختياري «${typeName(switched)}» صحيح</button>`;
       $("#note").classList.add("on");
-      $("#undoType").onclick = () => { setType(switched); renderForm(); fillFromAI(state.ai); $("#note").classList.remove("on"); };
+      $("#undoType").onclick = () => { setType(switched); renderForm(); resolveAiDates(state.ai, state.type); fillFromAI(state.ai); $("#note").classList.remove("on"); };
     }
     // مو تقرير إجازة (وصفة علاج، تحليل، فاتورة…) → ما نقبله
     state.notLeave = r?.document_kind === "other" || r?.quality === "not_document" || !leaveTitleOk(r?.doc_title);   // العنوان فوق لازم «إجازة مرضية» (أو مشهد)
@@ -672,7 +673,8 @@ function showDateCheck() {
   const ta = dmyMs(a), tb = dmyMs(b);
   if (isNaN(ta) || isNaN(tb) || tb < ta) { box.innerHTML = ""; return; }
   const n = Math.round((tb - ta) / 864e5) + 1;
-  const cell = (lbl, d, t) => `<div class="dc-d"><small>${lbl}</small><b>${d}</b><small>${WD_AR[new Date(t).getUTCDay()]}</small></div>`;
+  const MON = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+  const cell = (lbl, d, t) => { const x = new Date(t); return `<div class="dc-d"><small>${lbl}</small><b>${d}</b><small>${WD_AR[x.getUTCDay()]} ${x.getUTCDate()} ${MON[x.getUTCMonth()]}</small></div>`; };
   box.innerHTML = `<div class="dc"><div class="dc-t">⚠ تأكد من ${att ? "تاريخ الحضور" : "تاريخ إجازتك"}</div>
     <div class="dc-r">${att ? cell("يوم الحضور", a, ta) : n === 1 ? cell("يوم الإجازة", a, ta) : cell("من", a, ta) + `<span class="dc-ar">←</span>` + cell("إلى", b, tb)}</div>
     ${att ? "" : `<div class="dc-n">${n === 1 ? "يوم واحد" : n === 2 ? "يومين" : n <= 10 ? n + " أيام" : n + " يوم"}</div>`}
@@ -708,6 +710,7 @@ function lockDates() {
 function dateFlagFor(fd, ai) {
   const out = [];
   if (String(ai.date_altered || "").toLowerCase() === "yes") out.push("⚠ " + (String(ai.date_alter_note || "").trim() || "التاريخ عليه تعديل بالقلم في التقرير"));
+  if (ai.date_check) out.push(ai.date_check);
   const aiVal = { leaveStart: isoToDmy(ai.leave_start), leaveEnd: isoToDmy(ai.leave_end) || addDaysDmy(isoToDmy(ai.leave_start), parseInt(latinDigits(ai.leave_days || "").replace(/\D/g, "")) || 0), visitDate: isoToDmy(ai.visit_date || ai.leave_start) };
   const keys = state.type === "attendance" ? ["visitDate"] : ["leaveStart", "leaveEnd"];
   const typed = keys.filter(k => fd[k] && !aiVal[k]);
@@ -749,11 +752,9 @@ $("#form").addEventListener("submit", async e => {
       btn.textContent = "نكمّل رفع الصورة…";
       try { await state.uploadP; } catch { await (state.uploadP = withRetry(() => api.uploadImage(state.blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")).then(p => (state.imagePath = p))); }
     }
-    // الأولوية: الطبيب الموقّع بالختم ← الاسم المكتوب ← مطابقة الذكاء
-    const ai = state.ai, m = matchDoctor(fd.doctorName), ms = matchDoctor(ai.stamp_doctor_name || "");
-    // اقتراح الذكاء ما ينقبل إلا إذا يتوافق مع الاسم المكتوب/الختم (يمنع خلط حسام ↔ حسين)
-    const doc = [ms.doctor, doctorById(ai.stamp_doctor_id), m.doctor, doctorById(ai.doctor_id)].filter(Boolean)
-      .find(d => doctorFits(d, fd.doctorName, ai.stamp_doctor_name)) || null;
+    // الختم له الأولوية: ختم يختلف عن المكتوب = طبيب الختم (حتى لو مو في القائمة → البوادي). ما فيه ختم = المكتوب
+    const ai = state.ai;
+    const { doc } = chooseDoctor(fd.doctorName, ai.stamp_doctor_name || "", { printed: ai.doctor_id, stamp: ai.stamp_doctor_id });
     const ref = makeRef();
     const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
     slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);
@@ -767,7 +768,7 @@ $("#form").addEventListener("submit", async e => {
       leaveStart: fd.leaveStart || "", leaveEnd: fd.leaveEnd || "", leaveDays: clean(ai.leave_days, 40),
       visitDate: fd.visitDate || "",
       companionName: clean(fd.companionName), companionId: latinDigits(fd.companionId || ""), companionDob: fd.companionDob || "", relationship: clean(fd.relationship, 60),
-      doctorName: clean(fd.doctorName), doctorId: doc?.id || "", branch: doc?.branch || m.branch,
+      doctorName: clean(fd.doctorName), doctorId: doc?.id || "", branch: doc?.branch || DEFAULT_BRANCH,
       imagePath: state.imagePath, aiFilled: !!Object.keys(ai).length, aiQuality: clean(ai.quality, 20),
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),

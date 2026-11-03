@@ -81,6 +81,8 @@ export const DOCTORS = [
   { id: "wafaa-mohamed",    branch: "watanak", ar: "وفاء محمد",    en: "Wafaa Mohamed",       alt: ["Wafa Mohammed", "Wafaa Muhammad"] },
   { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen",       alt: ["Ilham Shahin", "Elham Shahin"] },
   // سابا البوادي (أي طبيب غير مذكور يروح للبوادي تلقائياً — هنا بس عشان يتعرّف على الاسم العربي)
+  { id: "amin-mahmoud",     branch: "bawadi", ar: "أمين محمد علي محمود", en: "Amin Mohammed Ali Mahmoud", alt: ["أمين كيماوي", "امين كيماوي", "Amin Kemawi", "Amin Kimawi", "Amin Kemawy", "Amin Mohamed Ali Mahmoud"] },
+  { id: "ahmed-abulfadl",   branch: "bawadi", ar: "أحمد أبو الفضل", en: "Ahmed Abu Elfadl", alt: ["أحمد إبراهيم أبو الفضل", "احمد ابو الفضل", "أحمد خالد إبراهيم", "احمد خالد ابراهيم", "Ahmed Abo Elfadl", "Ahmed Abouelfadl", "Ahmed Abo El Fadl", "Ahmed Khaled Ibrahim"] },
   { id: "ikramy-sharkawy",  branch: "bawadi", ar: "إكرامي الشرقاوي", en: "Ekramy Elsharkawy",   alt: ["اكرامي الشرقاوي", "إكرامي عبدالسلام الشرقاوي", "Ikramy Elsharkawy", "Ekramy El-Sharkawy", "Ekramy Abdelsalam Elsharkawy", "Abdelsalam Al sharqawy"] },
   { id: "hussam-hameed",    branch: "bawadi", ar: "حسام الدين حميد", en: "Hussam Alden Hameed", alt: ["حسام الدين محمد", "حسام حميد", "Hussam Aldin Hameed", "Hussam Aldin Mohammed", "Hussam Eldin Hamid", "Hossam Eldin Hamid", "Hossam Aldin Mohamed"] },
   { id: "mohamed-wali",     branch: "bawadi", ar: "محمد والي",     en: "Mohamed Wali",        alt: ["محمد والى", "Mohammed Wali", "Mohamed Waly", "Mohamed Wally", "Mohammad Wali"] },
@@ -90,7 +92,7 @@ export const DOCTORS = [
   { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
   { id: "fatma-ibrahim",     branch: "haramain", ar: "فاطمة إبراهيم",   en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمه ابراهيم", "Fatma Ibrahim Mohamed Ibrahim", "Fatima Ibrahim", "Fatmah Ibraheem", "Fatma Ebrahim", "Fatima Mohamed Ibrahim"] },
   { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
-  { id: "sara-shoreiji",     branch: "haramain", ar: "سارة الجارحي",    en: "Sara Fouad Elgarhi",  alt: ["سارة فؤاد الجارحي", "ساره فؤاد الجارحي", "سارة فؤاد", "Sara Elgarhi", "Sarah Elgarhi", "Sara El-Garhy", "Sara Elgarhy", "Sarah Fouad Elgarhy"] },
+  { id: "sara-shoreiji",     branch: "haramain", ar: "سارة الجارحي",    en: "Sara Fouad Elgarhi",  alt: ["سارة الشوربجي", "ساره الشوربجي", "سارة فؤاد الشوربجي", "ساره فؤاد الشوربجى الجارحى", "Sarah El-Shourbagy", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara El Shorbagy", "Sara Fouad Elshorbagy", "سارة فؤاد الجارحي", "ساره فؤاد الجارحي", "سارة فؤاد", "Sara Elgarhi", "Sarah Elgarhi", "Sara El-Garhy", "Sara Elgarhy", "Sarah Fouad Elgarhy"] },
 ];
 export const doctorById = id => DOCTORS.find(d => d.id === id);
 
@@ -193,6 +195,27 @@ export function doctorFits(doc, ...names) {
     const f = normName(v).split(" ")[0];
     return toks.some(t => t === f || (t.length > 3 && f.length > 3 && lev(t, f) <= 1));
   });
+}
+
+/** طبيب الطلب: الختم له الأولوية. ختم مختلف عن المكتوب = طبيب الختم (حتى لو مو في القائمة → البوادي).
+ *  ما فيه ختم (أو ما انقرأ) = المكتوب. يرجّع { doc, byStamp } */
+const GENERIC = new Set(["dr", "doctor", "د", "دكتور", "دكتوره", "محمد", "mohammed", "mohamed", "mohammad", "muhammad", "احمد", "ahmed", "ahmad", "علي", "ali", "عبد", "abdel", "abdul",
+  "general", "practitioner", "specialist", "consultant", "اخصائي", "اخصائيه", "استشاري", "استشاريه", "الطبيب", "العام", "طبيب", "عام"]);
+const docToks = s => normName(s).split(" ").map(t => t.replace(/^(ال|al|el)(?=..)/, "")).filter(t => t.length > 1 && !["dr", "د", "doctor", "دكتور", "دكتوره"].includes(t));
+export function sameDoctorName(a, b) {
+  const x = docToks(a), y = [...new Set(docToks(b))]; if (!x.length || !y.length) return false;
+  const hit = y.filter(t => x.some(u => tokEq(t, u)));                          // كلمات مختلفة من الاسم الثاني لقيناها في الأول
+  return hit.some(t => !GENERIC.has(t)) || hit.length >= 2;
+}
+const allNames = d => [d.ar, d.en, ...(d.alt || [])].join(" ");
+export function chooseDoctor(printed, stamp, ids = {}) {
+  const fit = (d, n) => d && doctorFits(d, n) ? d : null;
+  const pDoc = matchDoctor(printed).doctor || fit(doctorById(ids.printed), printed);
+  if (!docToks(stamp).length) return { doc: pDoc, byStamp: false };              // ما فيه ختم → المكتوب
+  const sDoc = matchDoctor(stamp).doctor || fit(doctorById(ids.stamp), stamp);
+  const same = sDoc && pDoc ? sDoc.id === pDoc.id : sameDoctorName(printed, stamp) || (!!sDoc && sameDoctorName(allNames(sDoc), printed)) || (!!pDoc && sameDoctorName(allNames(pDoc), stamp));
+  if (same || !normName(printed)) return { doc: sDoc || pDoc, byStamp: false };
+  return { doc: sDoc, byStamp: true };                                           // الختم يختلف → طبيب الختم
 }
 
 /* ---------- أدوات عامة ---------- */
@@ -333,6 +356,62 @@ const blobToDataURL = b => new Promise(res => { const r = new FileReader(); r.on
 /* ==========================================================================
    تعليمات القراءة الذكية
    ========================================================================== */
+/* ---------- تاريخ الإجازة: الكود يقرر، مو الذكاء ----------
+   الذكاء أحياناً يقلب 03-11 إلى 11 مارس. التقرير فيه التاريخ مرتين (جنب الإنجليزي وجنب العربي) + العمر (يطلع منه يوم الكشف).
+   نقارن الثلاثة، ونختار الأقرب ليوم الرفع، وأي شك = تنبيه للموظف. */
+const DAY = 864e5;
+const utc = (y, m, d) => { const t = Date.UTC(y, m - 1, d), x = new Date(t); return y > 1900 && m >= 1 && m <= 12 && x.getUTCDate() === d && x.getUTCMonth() === m - 1 ? t : null; };
+const isoOf = t => new Date(t).toISOString().slice(0, 10);
+function printedDate(s) {                                   // المطبوع في سابا: يوم-شهر-سنة. لو جا سنة-شهر-يوم نقبله بعد
+  const n = latinDigits(String(s || "")).match(/\d+/g); if (!n || n.length < 3) return null;
+  return n[0].length === 4 ? utc(+n[0], +n[1], +n[2]) : n[2].length === 4 ? utc(+n[2], +n[1], +n[0]) : null;
+}
+function visitFromAge(dob, age) {                           // الميلاد + «30 Y - 4 M - 23 D» = يوم طباعة التقرير (يوم الكشف)
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dob || "")), a = latinDigits(String(age || "")).match(/(\d+)\s*Y\D*(\d+)\s*M\D*(\d+)\s*D/i);
+  if (!b || !a) return null;
+  const t = Date.UTC(+b[1] + +a[1], +b[2] - 1 + +a[2], +b[3]) + +a[3] * DAY;
+  return isNaN(t) ? null : t;
+}
+export function resolveAiDates(ai, type, now = Date.now()) {
+  if (!ai || typeof ai !== "object") return ai;
+  const att = type === "attendance", key = att ? "visit_date" : "leave_start";
+  const today = utc(...new Date(now + 3 * 3600e3).toISOString().slice(0, 10).split("-").map(Number));   // يوم الرفع بتوقيت الرياض
+  const near = t => t != null && today - t >= -DAY && today - t <= 45 * DAY;
+  const visit = visitFromAge(ai.dob, ai.age_printed);
+  const fitsVisit = t => visit == null || (t - visit >= -DAY && t - visit <= (att ? DAY : 2 * DAY));   // الإجازة تبدأ يوم الكشف أو اللي بعده
+  const en = printedDate(ai.start_printed_en), ar = printedDate(ai.start_printed_ar), orig = ai[key] || ai.leave_start || "";
+  let pick = null; const warn = [];
+  const badCopy = [[ai.start_printed_en, en], [ai.start_printed_ar, ar]].some(([raw, t]) => String(raw || "").trim() && t == null);   // نسخة انقرت بس مو تاريخ صحيح (31-04 / 00-01)
+  if (badCopy) warn.push("نسخة من التاريخ ما انقرت زين");
+  if (en != null && ar != null && en !== ar) {
+    warn.push(`التاريخ مكتوب مرتين ومختلف (${isoOf(en).split("-").reverse().join("/")} و ${isoOf(ar).split("-").reverse().join("/")}) — يمكن معدّل بالقلم`);
+    pick = visit != null && [en, ar].some(fitsVisit) ? [en, ar].filter(fitsVisit).sort((p, q) => Math.abs(p - visit) - Math.abs(q - visit))[0] : [en, ar].sort((p, q) => Math.abs(today - p) - Math.abs(today - q))[0];
+  } else if (en != null || ar != null) {
+    pick = en ?? ar;
+    if ((en == null || ar == null) && !badCopy && (visit == null || pick !== visit)) warn.push("التاريخ انقرأ من نسخة وحدة بس");
+  } else {
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(orig));     // ما قرا النص: نجرب الترتيبين ونختار الأقرب ليوم الرفع
+    if (m) {
+      const c = [...new Set([utc(+m[1], +m[2], +m[3]), utc(+m[1], +m[3], +m[2])].filter(t => t != null))];
+      const good = c.filter(t => near(t) && fitsVisit(t)).sort((p, q) => (today - p) - (today - q));
+      pick = good[0] ?? c.filter(near).sort((p, q) => (today - p) - (today - q))[0] ?? c[0] ?? null;
+      if (c.length > 1 && c.filter(t => near(t) && fitsVisit(t)).length > 1) warn.push("اليوم والشهر ممكن ينقلبون");
+    }
+  }
+  if (pick == null) return ai;
+  if (!near(pick)) warn.push(today - pick > 0 ? `التاريخ قبل يوم الرفع بـ ${Math.round((today - pick) / DAY)} يوم` : "التاريخ بعد يوم الرفع");
+  if (visit != null && !fitsVisit(pick)) warn.push(`ما يطابق يوم الكشف من العمر (${isoOf(visit).split("-").reverse().join("/")})`);
+  const iso = isoOf(pick);
+  if (iso !== orig) {                                        // تغيّر عن قراءة الذكاء: نعدّل النهاية بنفس الطريقة
+    const days = parseInt(latinDigits(ai.leave_days || "").replace(/\D/g, "")) || 0;
+    if (!att) ai.leave_end = days ? isoOf(pick + (days - 1) * DAY) : "";
+    ai.date_fixed = orig ? `${orig} ← ${iso}` : iso;
+  }
+  ai[key] = iso; if (!att && !ai.visit_date) ai.visit_date = "";
+  ai.date_check = warn.length ? "⚠ " + warn.join(" · ") : "";
+  return ai;
+}
+
 function aiPrompt(type) {
   const list = DOCTORS.map(d => `- id="${d.id}" | ${d.ar} | ${d.en}${d.alt?.length ? " | " + d.alt.join(" / ") : ""}`).join("\n");
   return `You read phone photos of Saba Clinics (سابا) printed reports. Photos may be tilted, curled, folded, shadowed, partly cropped, or upside down.
@@ -343,10 +422,11 @@ Top-right block, English label on the left, value in the middle, Arabic label on
   Patient ID / رقم الملف الطبي  → a 7-digit clinic FILE number. This is NOT the national ID. Put it ONLY in patient_file_no.
   National ID / رقم الهوية الوطنية → 10 digits starting with 1 (Saudi) or 2 (Iqama). Put it in id_number.
   Name / الاسم → English name in CAPITALS, with the Arabic name printed in small text right under it.
-  Nationality, Age ("33 Y - 6 M - 28 D", ignore), Date of Birth (YYYY-MM-DD), Gender.
+  Nationality, Age ("33 Y - 6 M - 28 D" → copy exactly into age_printed), Date of Birth (YYYY-MM-DD), Gender.
 Middle block:
   "Sick Leave for ( N ) one day / منحه إجازة مرضية لمدة ( N ) يوم" → leave_days = N
-  "Starting from DD-MM-YYYY / اعتباراً من" → leave_start (note: DAY-MONTH-YEAR here, unlike Date of Birth)
+  "Starting from DD-MM-YYYY / اعتباراً من" → leave_start (note: DAY-MONTH-YEAR here, unlike Date of Birth).
+    This date is printed TWICE: once after "Starting from" (English side) and once before "اعتباراً من" (Arabic side). Copy each one EXACTLY as printed, character by character, into start_printed_en and start_printed_ar (e.g. "03-11-2026") — do not reorder or convert them; read each copy on its own, even if they differ (a pen may have changed one).
   "Mobile number / رقم الجوال" → 12 digits like 9665XXXXXXXX
   "Accompanied By / برفقة" → usually empty; if filled it is the companion's name.
   "reason / السبب" → diagnosis text (English or Arabic).
@@ -368,7 +448,7 @@ ${list}
 - doc_title: the main title printed at the top of the document, exactly as written (Arabic and/or English), e.g. "Sick Leave Report / تقرير بإجازة مرضية" or "Drug Prescription / وصفة طبية".
 - document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise — IMPORTANT: a drug prescription (Drug Prescription / وصفة طبية / وصفة علاجية, a list of medicines with dosage), lab or radiology results, an invoice/receipt, an appointment card, a referral, or any medical report that does NOT grant leave days is "other", even if it shows the patient and doctor details.
 - For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
-- For attendance: visit_date = the visit date.
+- For attendance: visit_date = the visit date; copy the printed visit date exactly into start_printed_en / start_printed_ar too (each printed copy separately).
 - quality: "good", "blurry" (text hard to read), "cropped" (key fields cut off), or "not_document".
 - date_altered: "yes" if the leave dates or days (Starting from / leave days / end date / visit date) look handwritten, written or corrected with a pen, crossed out, overwritten, scratched, covered with correction fluid, or otherwise manually changed on top of the printed text; "no" if they are cleanly printed.
 - date_alter_note: when date_altered is "yes", a short Arabic note of what you saw (e.g. "تاريخ البداية مكتوب بالقلم فوق المطبوع")، else "".
@@ -399,7 +479,7 @@ function blockPage() {
 /* ------------- نسخة التجربة داخل Claude (قاعدة بيانات + قراءة بـ Claude) ------------- */
 const AI_KEYS = ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
   "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
-  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note"];
+  "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note","start_printed_en","start_printed_ar","age_printed"];
 async function artifactBackend() {
   const [db, sample, assets, user] = await Promise.all(["db", "sample", "assets", "user"].map(n => window.claude.use(n).catch(() => null)));
   if (!db) return null;
@@ -519,7 +599,7 @@ async function liveBackend(role) {
     const props = {};
     ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
      "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
-     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note"].forEach(k => props[k] = S.string());
+     "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note","start_printed_en","start_printed_ar","age_printed"].forEach(k => props[k] = S.string());
     props.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] });
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
     const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });

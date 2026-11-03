@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.8.1";
+const VERSION = "2.8.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -734,8 +734,9 @@ async function quotaWatch() {
     }
   } catch (e) {
     log.warn({ err: String(e?.message || e) }, "مراقبة حد Firebase");
+    if ((e.status === 403 || e.status === 401) && !quotaPermNote) quotaPermNote = (await statusRef.get().catch(() => null))?.data()?.quotaPermAt || 1;   // نتذكر آخر تنبيه حتى بعد إعادة التشغيل (قراءة وحدة)
     if ((e.status === 403 || e.status === 401) && Date.now() - quotaPermNote > 7 * 24 * 3600e3) {
-      quotaPermNote = Date.now();
+      quotaPermNote = Date.now(); statusRef.set({ quotaPermAt: quotaPermNote }, { merge: true }).catch(() => {});
       dmAdmin("ℹ️ أبغى أراقب لك استهلاك Firebase اليومي (وأنبهك قبل ما يخلص) بس ما عندي صلاحية.\nمن console.cloud.google.com ← IAM ← حساب firebase-adminsdk ← Edit ← Add role ← «Monitoring Viewer» ← Save.").catch(() => {});
     }
   }
@@ -860,6 +861,7 @@ async function applyPatches() {
         if (u.copyFrom || u.copyFromName) { const src = nd.find(d => d.id === u.copyFrom) || byName(u.copyFromName), empty = v => !v || (Array.isArray(v) && !v.length); if (src) for (const f of u.fields || []) if (empty(t[f]) && !empty(src[f])) t[f] = structuredClone(src[f]); }
         for (const [k, v] of Object.entries(u.set || {})) t[k] = v;
         for (const [k, v] of Object.entries(u.fill || {})) if (!t[k]) t[k] = v;
+        if (u.addAliases) { const have = new Set((t.aliases || []).map(nz)); t.aliases = [...(t.aliases || []), ...u.addAliases.filter(a => !have.has(nz(a)))].slice(-8); }   // أسماء ثانية (أثير/الواتس) — نضيف بدون ما نمسح اللي تعلّمه البوت
         if (u.rename) { const m = /\s*[–-]\s*(.+)$/.exec(t.name); t.name = u.rename + (m ? " – " + m[1] : ""); }
         todo.push({ id: u.id, name: t.name, isDoc: true, upd: true, quiet: !u.rename && !u.copyFrom });
       }
