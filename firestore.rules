@@ -90,6 +90,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // رسالة واتساب للمراجع من اللوحة (نص + ملف صغير): الموظف ينشئها، البوت يرسلها ويحدّث حالتها
+    match /outbox/{id} {
+      allow get: if isStaff();
+      allow list, update, delete: if false;
+      allow create: if isStaff() && autoId(id)
+        && request.resource.data.keys().hasOnly(['reqId', 'text', 'file', 'by', 'at', 'sendStatus'])
+        && request.resource.data.sendStatus == 'queued'
+        && request.resource.data.reqId is string && request.resource.data.reqId.size() > 0 && request.resource.data.reqId.size() <= 40
+        && request.resource.data.text is string && request.resource.data.text.size() <= 1500
+        && request.resource.data.by is string && request.resource.data.by.size() <= 60
+        && (!('file' in request.resource.data) || (request.resource.data.file.b64 is string && request.resource.data.file.b64.size() < 1000000
+            && request.resource.data.file.name is string && request.resource.data.file.name.size() <= 120
+            && request.resource.data.file.mime in ['image/jpeg', 'image/png', 'application/pdf']));
+    }
+
     // زر الطبيب (من أثير): الطبيب يرسل حالته بس (وقف/أستقبل/انتظار/مواعيد) — البوت يقرأها ويطبّقها ويحذفها
     match /signals/{id} {
       allow create: if autoId(id)

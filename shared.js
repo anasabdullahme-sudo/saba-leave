@@ -676,6 +676,13 @@ async function liveBackend(role) {
       }
       return ST.getDownloadURL(ST.ref(st, path));
     },
+    /* --- رسالة واتساب للمراجع من اللوحة (نص + ملف) — البوت يرسلها من رقمه ويمسح الملف بعدها --- */
+    async sendWa(data) {
+      const ref = FS.doc(FS.collection(db, "outbox"));
+      await FS.setDoc(ref, { ...data, sendStatus: "queued", at: FS.serverTimestamp() });
+      return ref.id;
+    },
+    watchWa(id, cb) { return FS.onSnapshot(FS.doc(db, "outbox", id), d => cb(d.exists() ? d.data() : null), e => cb({ sendStatus: "failed", sendError: e.code || e.message })); },
     /* --- طلبات التعديل (الموظف ← بوت الواتساب ← المريض) --- */
     newFixId: () => FS.doc(FS.collection(db, "fixes")).id,
     async createFix(req, data, id) {
@@ -861,6 +868,8 @@ function demoBackend() {
     async unhold(id) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); save(l); },
     async update(id, patch) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, patch); save(l); },
     imageUrl: async path => path,
+    async sendWa(data) { const id = "wa" + Date.now(); api._wa = { ...data, sendStatus: "queued" }; setTimeout(() => { api._wa = { ...api._wa, sendStatus: "sent" }; }, 1500); return id; },
+    watchWa(id, cb) { cb(api._wa); const t = setInterval(() => cb(api._wa), 500); return () => clearInterval(t); },
     // طلبات التعديل (تجريبي) — لتجربة البوت: localStorage.saba_demo_bot = "1"
     newFixId: () => Array.from({ length: 20 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 62)]).join(""),
     async createFix(req, data, id) {

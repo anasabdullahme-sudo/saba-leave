@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.9";
+const VERSION = "2.8.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -68,7 +68,7 @@ async function connect() {
       // رقم البوت للعامة (زر «استفسر واتساب» في صفحة المراجع)
       db.doc("public/bot").set({ wa: String(me).split(/[:@]/)[0], at: TS(), seen: Date.now() }, { merge: true }).catch(() => {});
       log.info({ me }, "واتساب متصل");
-      drain();
+      drain(); drainWa();
     }
     if (connection === "close") {
       connected = false;
@@ -135,6 +135,41 @@ async function drain() {
     }
   } catch (e) { log.error({ e }, "drain"); }
   finally { busy = false; if (queue.size && connected) setTimeout(drain, 1000); }
+}
+
+/* ---------- رسالة واتساب للمراجع من اللوحة (outbox): نص + ملف (صورة/PDF) ----------
+   الموظف ينشئها من اللوحة، والبوت يرسلها لجوال المراجع اللي في الطلب (مو رقم من المتصفح) ويمسح الملف بعد الإرسال */
+const waQueue = new Set(); let waBusy = false;
+async function sendWaOne(id) {
+  const ref = db.doc(`outbox/${id}`);
+  const o = await db.runTransaction(async tx => { const d = await tx.get(ref); if (!d.exists || d.get("sendStatus") !== "queued") return null; tx.update(ref, { sendStatus: "sending" }); return d.data(); });
+  if (!o) return;
+  try {
+    const r = (await db.doc(`requests/${o.reqId}`).get()).data();
+    if (!r) throw new Error("الطلب مو موجود");
+    const num = toJidNumber(r.phone); if (!num) throw new Error("رقم جوال المراجع غير صحيح");
+    const [w] = await sock.onWhatsApp(num); if (!w?.exists) throw new Error("رقم المراجع ما عليه واتساب");
+    const text = String(o.text || "").trim().slice(0, 1500);
+    if (!text && !o.file?.b64) throw new Error("ما فيه نص ولا ملف");
+    if (o.file?.b64) {
+      const buf = Buffer.from(o.file.b64, "base64");
+      if (/^image\//.test(o.file.mime)) await sock.sendMessage(w.jid, { image: buf, mimetype: o.file.mime, caption: text || undefined });
+      else await sock.sendMessage(w.jid, { document: buf, mimetype: o.file.mime || "application/pdf", fileName: o.file.name || "ملف.pdf", caption: text || undefined });
+    } else await sock.sendMessage(w.jid, { text });
+    markOut(w.jid, num); if (text) remember(chatKey(w.jid, normPhone(num)), "model", text);
+    await ref.update({ sendStatus: "sent", sentAt: TS(), file: FieldValue.delete() });
+    log.info({ id, req: o.reqId }, "رسالة من اللوحة انرسلت");
+  } catch (e) {
+    log.warn({ id, err: String(e?.message || e) }, "رسالة من اللوحة ما انرسلت");
+    await ref.update({ sendStatus: "failed", sendError: String(e?.message || e).slice(0, 200), file: FieldValue.delete() }).catch(() => {});
+  }
+}
+async function drainWa() {
+  if (waBusy || !connected || !waQueue.size) return;
+  waBusy = true;
+  try { for (const id of [...waQueue]) { if (!connected) break; waQueue.delete(id); await sendWaOne(id); await sleep(1500 + Math.random() * 1500); } }
+  catch (e) { log.error({ e }, "drainWa"); }
+  finally { waBusy = false; if (waQueue.size && connected) setTimeout(drainWa, 1000); }
 }
 
 /* ==========================================================================
@@ -924,6 +959,11 @@ async function main() {
   db.collection("fixes").where("sendStatus", "==", "queued").onSnapshot(
     s => { s.docs.forEach(d => queue.add(d.id)); drain(); },
     e => log.error({ e }, "fixes listener"));
+  const stuckWa = await db.collection("outbox").where("sendStatus", "==", "sending").get().catch(() => ({ docs: [] }));
+  for (const d of stuckWa.docs) await d.ref.update({ sendStatus: "failed", sendError: "انقطع البوت أثناء الإرسال — أعد الإرسال", file: FieldValue.delete() }).catch(() => {});
+  db.collection("outbox").where("sendStatus", "==", "queued").onSnapshot(
+    s => { s.docs.forEach(d => waQueue.add(d.id)); drainWa(); },
+    e => log.error({ e }, "outbox listener"));
 
   // أوامر المسؤول من اللوحة (فك الربط)
   const started = Date.now();
