@@ -33,18 +33,26 @@
   const lev1 = (a, b) => { if (Math.abs(a.length - b.length) > 1) return false; let i = 0, j = 0, e = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++e > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } } return e + (a.length - i) + (b.length - j) <= 1; };
   const near = (a, b) => a === b || (a.length >= 4 && b.length >= 4 && lev1(a, b)) || (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a)));
   const docs = () => (board?.departments || []).flatMap(p => (p.doctors || []).map(d => ({ ...d, dep: p, fl: d.floor || p.floor })));
+  // التخصص: «الطب الباطني» في أثير = «الباطنية» في الجدول. null = ما عرفناه (ما نحكم به)
+  const SPEC = [["teeth", /اسنان|تقويم|لثه|جذور/], ["int", /باطن/], ["surg", /جراح/], ["obgyn", /نساء|ولاده/], ["peds", /اطفال/], ["cardio", /قلب/], ["ent", /انف|اذن|حنجره/],
+    ["eye", /عيون|رمد/], ["psych", /نفسي/], ["uro", /مسالك|بولي/], ["ortho", /عظام/], ["pt", /علاج طبيعي|طبيعي/], ["diet", /تغذيه/], ["derm", /جلد/], ["family", /اسره/], ["gp", /عام/]];
+  const specOf = s => { const x = norm(s); for (const [k, re] of SPEC) if (re.test(x)) return k; return null; };
   function matchAthir(text) {
-    const full = toks(String(text).split("|")[0]);
+    const [nm, sp = ""] = String(text).split("|"), full = toks(nm), spec = specOf(sp);
     if (!full.length) return null;
     const scored = docs().map(d => {
       const bt = toks(String(d.name).split(/\s*[–-]\s*/)[0]); let hit = bt.filter(t => full.some(f => near(f, t))).length, n = bt.length, first = bt[0] && near(bt[0], full[0]);
-      if (d.fullName) {                                                  // الاسم الكامل من شيت الموظفين: أثير يكتب أجزاء منه (وائل محمد الهجين ⊂ وائل محمد عبدالله الهجين)
-        const ft = toks(d.fullName), fh = full.filter(f => ft.some(t => near(f, t))).length;
-        if (ft[0] && near(ft[0], full[0]) && fh >= Math.min(3, full.length) && fh > hit) { hit = fh; n = full.length; first = true; }
+      // قوي = كل كلمات اسم الجدول موجودة في أثير بنفس الحروف (ايهاب المتولي ⊂ ايهاب محمد محمود المتولي)
+      let strong = hit === n && bt.every(t => full.includes(t));
+      for (const fn of [d.fullName, ...(d.aliases || [])].filter(Boolean)) {   // الاسم الكامل / أسماء ثانية: أثير يكتب أجزاء منه (وائل محمد الهجين ⊂ وائل محمد عبدالله الهجين)
+        const ft = toks(fn), fh = full.filter(f => ft.some(t => near(f, t))).length, fx = full.filter(f => ft.includes(f)).length;
+        if (ft[0] && near(ft[0], full[0]) && fh >= Math.min(3, full.length, ft.length) && (fh > hit || (fh === hit && !strong))) { hit = fh; n = full.length; first = true; strong = fx === full.length || fx >= 3; }
       }
-      return [d, hit, n, first];
+      // تطابق ضعيف (حرف مختلف أو كلمة ناقصة) مع تخصص مختلف = دكتور ثاني: أشرف عوض أمين (جراحة) ≠ أشرف الأمير (طب أسرة)
+      const ds = specOf(d.dep?.name), clash = spec && ds && spec !== ds;
+      return [d, hit + (strong ? .5 : 0) + (spec && ds === spec ? .25 : 0), n, first && !(clash && !strong), hit];
     })
-      .filter(([, hit, n, first]) => first && (hit >= 2 || (n === 1 && hit === 1))).sort((a, b) => b[1] - a[1]);
+      .filter(([, , n, first, hit]) => first && (hit >= 2 || (n === 1 && hit === 1))).sort((a, b) => b[1] - a[1]);
     return scored.length && (scored.length === 1 || scored[0][1] > scored[1][1]) ? scored[0][0] : null;
   }
 
