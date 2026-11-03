@@ -1062,7 +1062,7 @@ function reroute(list) {
 }
 
 /* ---------- طلبات التعديل عبر بوت الواتساب ---------- */
-const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 400000;
+const botOnline = () => !!S.bot && S.bot.state === "connected" && Date.now() - (S.bot.lastSeen || 0) < 700000;
 const waPhone = p => { const d = String(p || "").replace(/\D/g, "").replace(/^966/, "").replace(/^0/, ""); return d.length === 9 ? "966" + d : ""; };
 function renderBot() {
   const b = $("#botPill"), on = botOnline(), qr = S.bot?.state === "qr";

@@ -8,13 +8,13 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
-import { initGroup, handleGroupMessage, handleAdminMessage } from "./group.js";
+import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.7.5";
+const VERSION = "2.7.6";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -168,9 +168,17 @@ function trackItem(r) {
 }
 function startTrackSync() {
   const since = Timestamp.fromMillis(Date.now() - TRACK_DAYS * DAY);
-  let chain = Promise.resolve();
+  let chain = Promise.resolve(), first = true;
   db.collection("requests").where("createdAt", ">=", since).onSnapshot(s => {
-    const changes = s.docChanges().filter(c => c.type !== "removed");
+    let changes = s.docChanges().filter(c => c.type !== "removed");
+    // أول قراءة بعد ما يشتغل البوت: كل الطلبات تجي «جديدة» — كانت تنكتب كلها من جديد مع كل إعادة تشغيل (آلاف الكتابات → خلص حد Firebase المجاني يوم 2/11)
+    // الحين نحفظها في الذاكرة بس، ونكتب اللي تغيّر آخر 6 ساعات (يمكن تغيّرت والبوت طافي)
+    if (first) {
+      first = false;
+      const recent = Date.now() - 6 * 3600e3;
+      for (const ch of changes) { const r = ch.doc.data(); if (r.idNumber && r.phone && (ch.doc.updateTime?.toMillis?.() || 0) < recent) trackCache.set(ch.doc.id, { key: trackKey(r.idNumber, r.phone), json: JSON.stringify(trackItem(r)) }); }
+      changes = changes.filter(ch => (ch.doc.updateTime?.toMillis?.() || Date.now()) >= recent);
+    }
     chain = chain.then(async () => {
       for (const ch of changes) {
         const r = ch.doc.data(), id = ch.doc.id;
@@ -636,6 +644,17 @@ async function applyFix(fref) {
 
 /* ---------- قواعد Firestore: البوت ينشر نسخة المستودع لو تغيّرت (بدل ما المسؤول يلصقها يدوي) ---------- */
 // تنظيف لمرة وحدة: نشيل كل اللي انضاف يوم 2/11 (أداة صحة الجانبية، أرشيف الصور، إعدادات الكول سنتر) — رجعنا لنسخة 1.8.8
+// تنبيه: لو حد Firebase المجاني خلص (الكتابة ترفض) نرسل لك واتساب — مرة كل 6 ساعات بس
+let quotaDown = 0, quotaNoteAt = 0;
+function quotaOk() { if (quotaDown) { quotaDown = 0; dmAdmin("✅ رجع Firebase يحفظ عادي — الموقع والموظفين شغالين.").catch(() => {}); } }
+function quotaErr(e) {
+  const m = String(e?.message || e) + " " + (e?.code ?? "");
+  if (!/RESOURCE_EXHAUSTED|quota|\b8\b/i.test(m)) return;
+  quotaDown ||= Date.now();
+  if (Date.now() - quotaNoteAt < 6 * 3600e3) return;
+  quotaNoteAt = Date.now();
+  dmAdmin("⚠️ حد Firebase المجاني اليومي خلص — الموقع ما يقدر يحفظ («تم الرفع» ورفع المراجعين) لين يتجدد الساعة 11 الصبح.\nلا تعيد تشغيل البوت، وبلّغ Claude.").catch(() => {});
+}
 async function cleanupNov2() {
   try {
     const st = await db.doc("bot/status").get();
@@ -886,7 +905,7 @@ async function main() {
   }, e => log.error({ e }, "control listener"));
 
   // نبض كل دقيقتين ونص عشان اللوحة تعرف إن البوت شغال (كل نبضة = قراءة عند كل لوحة مفتوحة، فما نكثّر)
-  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).catch(() => {}), 150000);
+  setInterval(() => statusRef.set({ lastSeen: TS() }, { merge: true }).then(quotaOk, quotaErr), 300000);
   // نبض عام (صفحة الأطباء تقراه كل 5 دقائق — لو وقف تطلع «تحديثات القروب متوقفة»)
   const pub = () => connected && db.doc("public/bot").set({ seen: Date.now() }, { merge: true }).catch(() => {});   // بس لو واتساب متصل (غيره ما توصل رسائل القروب)
   pub(); setInterval(pub, 5 * 60000);
