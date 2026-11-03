@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.8.0";
+const VERSION = "2.8.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -850,10 +850,14 @@ async function applyPatches() {
       const nd = next.departments.flatMap(d => d.doctors || []);
       const nz = x => String(x || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
       for (const u of ups) {
-        const t = nd.find(d => d.id === u.doctorId); if (!t) { todo.push({ id: u.id, name: "", skip: true }); continue; }
+        // الطبيب: بالـ id، وإلا بالاسم (لو الـ id في الجدول الحي غير)، وإلا نضيفه في القسم (orAdd)
+        const byName = names => { for (const n of [].concat(names || [])) { const m = nd.filter(d => nz(d.name).includes(nz(n)) || (d.fullName && nz(d.fullName).includes(nz(n)))); if (m.length === 1) return m[0]; } return null; };
+        let t = nd.find(d => d.id === u.doctorId) || byName(u.findName);
+        if (!t && u.orAdd) { const dep = next.departments.find(q => nz(q.name).includes(nz(u.orAdd.depName))); if (dep) { t = { id: u.orAdd.id, name: u.set?.name || u.orAdd.name || "", code: "", ext: "", room: "", fee: "", floor: "", workdays: [], shifts: [] }; (dep.doctors ||= []).push(t); nd.push(t); } }
+        if (!t) { todo.push({ id: u.id, name: "", skip: true }); continue; }
         if (u.ifName && !nz(t.name).includes(nz(u.ifName))) { todo.push({ id: u.id, name: "", skip: true }); continue; }   // الطبيب تغيّر من الصفحة — ما نلمسه
         if (u.ifShifts && JSON.stringify((t.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(u.ifShifts)) { todo.push({ id: u.id, name: "", skip: true }); continue; }   // تصحيح بس لو الغلط صار فعلاً
-        if (u.copyFrom) { const src = nd.find(d => d.id === u.copyFrom), empty = v => !v || (Array.isArray(v) && !v.length); if (src) for (const f of u.fields || []) if (empty(t[f]) && !empty(src[f])) t[f] = structuredClone(src[f]); }
+        if (u.copyFrom || u.copyFromName) { const src = nd.find(d => d.id === u.copyFrom) || byName(u.copyFromName), empty = v => !v || (Array.isArray(v) && !v.length); if (src) for (const f of u.fields || []) if (empty(t[f]) && !empty(src[f])) t[f] = structuredClone(src[f]); }
         for (const [k, v] of Object.entries(u.set || {})) t[k] = v;
         for (const [k, v] of Object.entries(u.fill || {})) if (!t[k]) t[k] = v;
         if (u.rename) { const m = /\s*[–-]\s*(.+)$/.exec(t.name); t.name = u.rename + (m ? " – " + m[1] : ""); }
