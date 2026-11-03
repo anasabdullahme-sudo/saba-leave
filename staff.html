@@ -1369,7 +1369,10 @@ function isLeader() {
 const claimLead = () => { if (document.visibilityState === "visible") { writeLead(); postQueue(); } };
 addEventListener("visibilitychange", claimLead); addEventListener("focus", claimLead);
 setInterval(() => { if (readLead()?.id === TAB_ID) writeLead(); }, 30000);
-addEventListener("pagehide", () => { if (readLead()?.id === TAB_ID) try { localStorage.removeItem(LEAD_KEY); } catch {} });
+addEventListener("pagehide", () => {
+  if (readLead()?.id === TAB_ID) try { localStorage.removeItem(LEAD_KEY); } catch {}
+  for (const at of S.sehaBusy || []) if ((LSx.get("saba_sd_" + at) || "").startsWith(TAB_ID + "|")) LSx.set("saba_sd_" + at, "");   // ننقفل وفي يدنا «تم الرفع» ما خلص → التبويب الثاني ياخذه
+});
 if (document.visibilityState === "visible") writeLead();
 try { for (const k of Object.keys(localStorage)) if (k.startsWith("saba_sd_") && Date.now() - +k.slice(8) > 864e5) localStorage.removeItem(k); } catch {}
 function postQueue() {
@@ -1429,18 +1432,27 @@ function alreadyDone({ id, ref, by, doneAt, name, at }) {
 }
 const ackSeha = m => window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
 async function handleSehaDone(m) {
-  // نفس الضغطة توصل لكل تبويبات اللوحة المفتوحة → تبويب واحد بس يتكفّل فيها
-  const lk = "saba_sd_" + (m.at || 0), owner = LSx.get(lk);
-  if (owner && owner !== TAB_ID) return;                                           // التبويب الثاني هو اللي يأكّد للأداة
-  if (!owner) { LSx.set(lk, TAB_ID); await new Promise(r => setTimeout(r, 80)); if (LSx.get(lk) !== TAB_ID) return; }
-  if (S.sehaBusy?.has(m.at)) return; (S.sehaBusy ||= new Set()).add(m.at);
+  // نفس الضغطة توصل لكل تبويبات اللوحة المفتوحة → تبويب واحد بس يتكفّل فيها.
+  // لو التبويب اللي أخذها انقفل/تحدّث قبل ما يحفظ، تبويب ثاني يكمّلها بعد ثواني (كانت تضيع)
+  const lk = "saba_sd_" + (m.at || 0);
+  const lock = () => { const [id, t] = (LSx.get(lk) || "").split("|"); return id ? { id, t: +t || 0 } : null; };
+  const later = () => setTimeout(() => handleSehaDone(m), 9000);
+  const L = lock();
+  if (L?.id === "done") { ackSeha(m); return; }
+  if (L && L.id !== TAB_ID && Date.now() - L.t < 8000) { later(); return; }      // تبويب ثاني شغّال عليها — نتأكد بعد شوي
+  if (S.sehaBusy?.has(m.at)) return;
+  LSx.set(lk, TAB_ID + "|" + Date.now()); await new Promise(r => setTimeout(r, 80));
+  if (lock()?.id !== TAB_ID) { later(); return; }
+  (S.sehaBusy ||= new Set()).add(m.at);
+  let ok = false;
+  const finish = () => { ok = true; LSx.set(lk, "done|" + Date.now()); ackSeha(m); };
   try {
     const find = l => l.find(r => r.id === m.id || (m.ref && r.ref === m.ref));
     const x = find(S.pending) || find(S.held);
-    if (x) { doneMsgQueue = null; if ((await markDone(x.id, { fromSeha: m, extra: m.psl ? { sehaRef: m.psl } : {} })) !== false) ackSeha(m); return; }
+    if (x) { doneMsgQueue = null; if ((await markDone(x.id, { fromSeha: m, extra: m.psl ? { sehaRef: m.psl } : {} })) !== false) finish(); return; }
     const d = S.done.find(r => r.id === m.id || (m.ref && r.ref === m.ref));
     if (d) {
-      ackSeha(m);
+      finish();
       const dAt = typeof d.doneAt === "number" ? d.doneAt : d.doneAt?.toMillis?.() || 0;
       const mine = d.doneBy === myName() && Math.abs(dAt - (m.at || 0)) < 10 * 60000;   // نفس الضغطة وصلت مرتين → عادي
       if (!mine && dAt) alreadyDone({ id: d.id, ref: d.ref, by: d.doneBy, doneAt: dAt, name: d.patientName, at: m.at });
@@ -1451,23 +1463,23 @@ async function handleSehaDone(m) {
     const st = await api.getStatus?.(m.id).catch(() => null);
     if (!st) { doneMsgQueue = m; return; }                                         // ما قدرنا نقرا — نحاول مع القائمة الجاية / النبضة الجاية
     if (st.status === "done") {
-      ackSeha(m); doneMsgQueue = null;
+      finish(); doneMsgQueue = null;
       if (!(st.doneBy === myName() && Math.abs(st.doneAt - (m.at || 0)) < 10 * 60000)) alreadyDone({ id: m.id, ref: st.ref, by: st.doneBy, doneAt: st.doneAt, name: st.patientName, at: m.at });
       return;
     }
     try {
       await api.markDone(m.id, myName(), m.psl ? { sehaRef: m.psl } : {});
-      ackSeha(m); doneMsgQueue = null;
+      finish(); doneMsgQueue = null;
       (S.doneLocal ||= new Map()).set(m.id, Date.now());
       S.pending = S.pending.filter(r => r.id !== m.id); S.held = S.held.filter(r => r.id !== m.id);
       renderCounts(); renderPending(); renderHeld(); postQueue(); loadDone(true);
       toast(`تم نقل ${st.patientName || "الطلب"} إلى "تم الرفع"`);
     } catch (e) {
       console.error("seha done (server)", e);
-      if (e?.code === "already_done") { ackSeha(m); return; }
+      if (e?.code === "already_done") { finish(); return; }
       toast("⚠ «تم الرفع» من صحة ما انحفظ — بنحاول مرة ثانية بعد دقيقة (" + (e?.code || e?.message || "خطأ") + ")");   // ما نأكّد للأداة → ترسله مرة ثانية مع النبضة الجاية
     }
-  } finally { S.sehaBusy.delete(m.at); }
+  } finally { S.sehaBusy.delete(m.at); if (!ok && lock()?.id === TAB_ID) LSx.set(lk, ""); }   // ما انحفظ → نفك القفل عشان المحاولة الجاية
 }
 // نبضة كل دقيقة للأداة: تتأكد إنها للحين متصلة بهالصفحة + ترسل أي «تم الرفع» ما وصل (الأداة تعيده مع كل نبضة لين نأكّده)
 let extReadyAt = 0, extPingAt = 0;
