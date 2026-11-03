@@ -28,6 +28,8 @@
       chrome.storage.local.set({ sabaReq: m.payload, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }, () => post({ type: "SABA_SEHA_FILL_ACK", ref: m.payload.ref }));
     }
     if (m.type === "SABA_QUEUE" && Array.isArray(m.items)) chrome.storage.local.set({ sabaQueue: { at: Date.now(), items: m.items.slice(0, 200) } });
+    // اللوحة تقول: هذا الطلب انرفع من قبل → الأداة في صحة تنبّه الموظف
+    if (m.type === "SABA_SEHA_DONE_DUP" && m.id) chrome.storage.local.set({ sabaDup: { id: m.id, ref: m.ref || "", by: m.by || "", doneAt: m.doneAt || 0, name: m.name || "", at: Date.now() } });
     if (m.type === "SABA_SEHA_DONE_ACK") {
       chrome.storage.local.get("sabaDone", ({ sabaDone }) => { if (sabaDone && sabaDone.at === m.at) chrome.storage.local.remove("sabaDone"); });
     }

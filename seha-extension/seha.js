@@ -530,6 +530,7 @@
   const pendingQ = () => queue.filter(q => !isHidden(q.id) && q.id !== req?.id);
   const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
   const queueStale = () => !queueAt || Date.now() - queueAt > 3 * 60000;
+  function bindDup() { const d = $("#dupOk"); if (d) d.onclick = () => { dupInfo = null; chrome.storage.local.remove("sabaDup"); render(); }; }
   function setMin(v) { minimized = v; $("#p").classList.toggle("min", v); $("#min").textContent = v ? "+" : "–"; }
   function updateCount() { const c = $("#cnt"), n = pendingQ().filter(q => !q.lockedBy).length; c.hidden = !n; c.textContent = n; }
   let lockWarned = null;
@@ -557,6 +558,13 @@
     if (keys.length) chrome.storage.local.remove(keys);
     return got;
   }
+  // «تم رفعه مسبقاً» (من لوحة سابا): تنبيه أحمر فوق لين الموظف يضغط «فهمت»
+  let dupInfo = null;
+  const dupHtml = () => {
+    if (!dupInfo || Date.now() - dupInfo.at > 30 * 60000) return "";
+    const t = dupInfo.doneAt ? new Date(dupInfo.doneAt).toLocaleTimeString("ar-SA", { hour: "numeric", minute: "2-digit" }) : "";
+    return `<div class="acc wrong" style="font-weight:700;background:#FDECEC;color:#9B1C1C;border-color:#F5B5B5">⚠ ${dupInfo.name ? "«" + esc(dupInfo.name) + "» " : "هذا الطلب "}تم رفعه مسبقاً${dupInfo.by ? " — رفعه " + esc(dupInfo.by) : ""}${t ? " الساعة " + esc(t) : ""}<br><span style="font-weight:500">لا ترفعه مرة ثانية في صحة. لو رفعته الحين بالغلط، احذف المكرر من صحة.</span> <button class="lnk" id="dupOk">فهمت</button></div>`;
+  };
   function render() {
     if (!TOP) return;
     const b = $("#body");
@@ -568,7 +576,7 @@
       pend.sort((a, b) => (!!a.lockedBy - !!b.lockedBy) || (here(b) - here(a)));     // اللي عند موظف ثاني تنزل تحت
       const free = pend.filter(q => !q.lockedBy);
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
-      b.innerHTML = `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
+      b.innerHTML = `${dupHtml()}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
         ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
         <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
@@ -581,7 +589,7 @@
         if (q.lockedBy && lockWarned !== q.id) { lockWarned = q.id; return toastLocal(`${q.lockedBy} فاتح هالطلب — لو متأكد اضغط عليه مرة ثانية`); }
         lockWarned = null; useReq(q);
       });
-      bindPaste(); return;
+      bindDup(); bindPaste(); return;
     }
     const acc = accountState(req);
     const accTxt = !req.account ? "فرع بدون حساب صحة محدد — تأكد من الحساب يدوياً"
@@ -599,7 +607,7 @@
     const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(fxType));
     const need = fxType === req.type ? [] : fxType === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : [];
     const lockedNow = queue.find(q => q.id === req.id)?.lockedBy;
-    b.innerHTML = `${lockedNow ? `<div class="acc wrong" style="font-weight:600">⚠ ${esc(lockedNow)} فاتح نفس الطلب الحين — تأكدوا مين يرفعه عشان ما ينرفع مرتين</div>` : ""}
+    b.innerHTML = `${dupInfo && req && dupInfo.id === req.id ? dupHtml() : ""}${lockedNow ? `<div class="acc wrong" style="font-weight:600">⚠ ${esc(lockedNow)} فاتح نفس الطلب الحين — تأكدوا مين يرفعه عشان ما ينرفع مرتين</div>` : ""}
       <div class="card ${reqImg?.id === req.id ? "withimg" : ""}">
         ${reqImg?.id === req.id ? `<button class="thumb" id="viewImg" title="افتح صورة التقرير">${reqImg.pdf ? '<span class="pdf">PDF</span>' : '<img alt="">'}<i>🔍</i></button>` : ""}
         <div><div class="nm">${esc(req.patientName)}</div>
@@ -624,6 +632,7 @@
     const foot = $("#foot"); foot.hidden = false;
     foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة سابا</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
     $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
+    bindDup();
     const ao = $("#alertOk"); if (ao) ao.onclick = () => { sehaAlert = null; chrome.storage.local.remove("sabaAlert"); render(); };
     const fo = $("#fxOpen"); if (fo) fo.onclick = () => { fixOpen = true; fxType = req.type; fxChecked = []; fxNoteVal = ""; render(); };
     if (fixOpen) {
@@ -799,7 +808,8 @@
 
   // ---------- تشغيل ----------
   chrome.storage.local.get("sabaReqImg", d => { reqImg = d.sabaReqImg || null; if (reqImg && req?.id === reqImg.id) render(); });
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert"], d => {
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup"], d => {
+    dupInfo = d.sabaDup && Date.now() - d.sabaDup.at < 30 * 60000 ? d.sabaDup : null;
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
     if (TOP && d.sabaPos) placeAt(d.sabaPos.x, d.sabaPos.y);
     queue = d.sabaQueue?.items || []; queueAt = d.sabaQueue?.at || 0; hidden = d.sabaHidden || {}; chrome.storage.local.remove("sabaDoneIds");
@@ -814,6 +824,14 @@
     if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
+    if (ch.sabaDup && TOP) {
+      dupInfo = ch.sabaDup.newValue || null;
+      if (dupInfo) {
+        hidden = hideId(dupInfo.id); chrome.storage.local.set({ sabaHidden: hidden });   // نشيله من قائمة الطلبات
+        setMin(false); toastLocal("⚠ هذا الطلب تم رفعه مسبقاً");
+      }
+      render();
+    }
     if (ch.sabaAlert && TOP) { sehaAlert = ch.sabaAlert.newValue || null; if (sehaAlert) { setMin(false); toastLocal("⚠ صحة أضافت خانة جديدة"); } render(); }
     if (ch.sabaQueue) {
       const sig = () => JSON.stringify(pendingQ().map(q => [q.id, q.type, q.branch, q.patientName, q.lockedBy || ""]));

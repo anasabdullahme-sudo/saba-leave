@@ -487,11 +487,23 @@ function start() {
   });
   api.watchAnsweredFixes?.(list => { S.answered = new Map(list.map(f => [f.reqId, f])); list.forEach(applyAnswered); renderHeld(); });
   let prevIds = null, doneTimer;
-  S.unsub = api.watchPending((list, added) => {
+  // الاتصال المباشر انقطع (مثلاً خلص حد Firebase)؟ نعيد الاتصال لحالنا كل دقيقة، ولا نرسل للأداة قائمة قديمة
+  const onPendErr = err => {
+    console.warn("pending listener", err);
+    if (!S.liveErr) { S.liveErr = Date.now(); renderLive(); }
+    try { S.unsub?.(); } catch {}
+    S.unsub = () => {};                                                           // نخلي start() تعرف إننا شغالين
+    clearTimeout(S.liveRetry); S.liveRetry = setTimeout(() => { if (S.unsub) S.unsub = api.watchPending(onPend, onPendErr); }, 60000);   // (لو طلع من الحساب لا نرجع)
+  };
+  const onPend = (list, added) => {
+    if (S.liveErr) { S.liveErr = 0; renderLive(); toast("✓ رجع الاتصال — القائمة محدّثة"); loadDone(true); }
     const ids = new Map(list.map(x => [x.id, x]));
     // موظف ثاني رفع طلب → نحدّث «تم الرفع» بس لو الطلب من نفس الفرع والنوع اللي قدامك (توفير قراءات)
     if (prevIds && [...prevIds].some(([id, p]) => !ids.has(id) && p.branch === S.branch && p.type === S.type)) { clearTimeout(doneTimer); doneTimer = setTimeout(() => loadDone(true), 1500); }
     prevIds = ids;
+    // اللي ضغطنا عليه «تم الرفع» وللحين ما وصل تأكيده: ما نرجّعه للقائمة (كان يرجع ثانيتين ويختفي)
+    for (const [id, t] of S.doneLocal || []) if (!ids.has(id) || Date.now() - t > 60000) S.doneLocal.delete(id);
+    if (S.doneLocal?.size) list = list.filter(x => !S.doneLocal.has(x.id));
     S.pending = list.filter(x => x.status !== "held");
     S.held = list.filter(x => x.status === "held");
     const fresh = S.pending.filter(x => added.includes(x.id));
@@ -516,8 +528,15 @@ function start() {
       if (x) { fillDrawerMeta(x); const o = openByOther(x); $("#dOpenInfo").hidden = !o; if (o) $("#dOpenInfo").textContent = `هذا الطلب مفتوح الآن عند ${o}. تأكد منه قبل الرفع حتى لا ينرفع مرتين.`; }
       else if (!S.done.some(r => r.id === S.openId)) { closeDrawer(); toast("هذا الطلب تمت معالجته من موظف ثاني"); }
     }
-  }, err => toast("انقطع الاتصال بقاعدة البيانات: " + (err.code || err.message)));
+  };
+  S.unsub = api.watchPending(onPend, onPendErr);
   loadDone(true);
+}
+function renderLive() {
+  let bar = document.getElementById("liveBar");
+  if (!bar) { bar = document.createElement("div"); bar.id = "liveBar"; bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#FFF4E5;color:#8A4B00;border-bottom:1px solid #F0C98A;padding:8px 14px;font-weight:600;text-align:center"; document.body.prepend(bar); }
+  bar.hidden = !S.liveErr;
+  bar.textContent = "⚠ القائمة مو محدّثة — انقطع الاتصال بقاعدة البيانات، يعيد الاتصال لحاله كل دقيقة… (لا ترفع شي من القائمة لين يرجع)";
 }
 
 function buildNav() {
@@ -734,25 +753,28 @@ async function archiveExactDupes(list) {
 }
 
 /* ---------- تم الرفع ---------- */
-async function markDone(id) {
+async function markDone(id, opt = {}) {
   const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id); if (!x) return;
   const by = myName();
   // تحديث فوري في الواجهة
   S.pending = S.pending.filter(r => r.id !== id); S.held = S.held.filter(r => r.id !== id);
+  (S.doneLocal ||= new Map()).set(id, Date.now());                                // لين يأكدها السيرفر: ما يرجع يطلع في القائمة
   const doneItem = { ...x, status: "done", doneAt: Date.now(), doneBy: by };
   if (x.branch === S.branch && x.type === S.type) { S.done.unshift(doneItem); S.doneToday++; }
   renderCounts(); renderPending(); renderHeld(); renderDone();
   if (S.openId === id) closeDrawer();
   try {
-    await api.markDone(id, by);
+    await api.markDone(id, by, opt.extra || {});
     toast(`تم نقل ${x.patientName} إلى "تم الرفع"`, "تراجع", async () => {
       await api.undoDone(id);
       S.done = S.done.filter(r => r.id !== id); S.doneToday = Math.max(0, S.doneToday - 1); renderDone();
     });
   } catch (e) {
     console.error(e);
+    if (e?.code === "already_done" && opt.fromSeha) { alreadyDone({ id, ref: x.ref, by: e.by, doneAt: e.doneAt || 0, name: x.patientName, at: opt.fromSeha.at }); loadDone(true); return; }
     if (e?.code === "already_done" || e?.code === "permission-denied") { toast(`هذا الطلب سبق رفعه${e.by ? " من " + e.by : ""}`); loadDone(true); return; }
     toast("ما تم الحفظ — تأكد من الاتصال");
+    S.doneLocal?.delete(id);
     (x.status === "held" ? S.held : S.pending).push(x); S.done = S.done.filter(r => r.id !== id); renderCounts(); renderPending(); renderHeld(); renderDone();
   }
 }
@@ -1332,7 +1354,7 @@ function sehaPayload(x) {
 // قائمة الطلبات المنتظرة → للإضافة (تظهر داخل صحة بعد «تم الرفع» عشان تختار اللي بعده)
 function postQueue() {
   try {
-    if (!extVersion || !S.pending) return;
+    if (!extVersion || !S.pending || S.liveErr) return;                          // القائمة قديمة → الأداة تبيّن «القائمة مو محدّثة» بنفسها
     window.postMessage({ type: "SABA_QUEUE", items: S.pending.map(x => ({ ...sehaPayload(x), sentAt: 0, lockedBy: openByOther(x) })) }, location.origin);
   } catch (err) { /* اللوحة لسى تحمّل */ }
 }
@@ -1362,23 +1384,46 @@ addEventListener("message", async e => {
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
-  if (m.type === "SABA_ACTIVE" && m.id && (S.pending.some(r => r.id === m.id) || S.held.some(r => r.id === m.id))) { (S.sentSeha ||= new Set()).add(m.id); claimReq(m.id); sendReqImg(m.id); }
+  if (m.type === "SABA_ACTIVE" && m.id && (S.pending.some(r => r.id === m.id) || S.held.some(r => r.id === m.id))) { (S.sentSeha ||= new Set()).add(m.id); claimReq(m.id); sendReqImg(m.id); checkNotDone(m.id); }
   if (m.type === "SABA_RELEASE" && m.id) { S.sentSeha?.delete(m.id); if (S.openId !== m.id) releaseReq(m.id); }
   if (m.type === "SABA_SEHA_ALERT") { chime(); toast(`⚠ صحة غيّرت شي في النموذج: ${(m.labels || []).join("، ") || "خانات ما تتعبّى"} — من قائمة الإضافة اضغط «تقرير فني» وأرسله لـ Claude`, "تمام", () => {}); }
 });
 let doneMsgQueue = null;
+// الطلب انرفع من قبل؟ نقرا حالته من قاعدة البيانات نفسها (مو من القائمة اللي قدامنا) — قراءة وحدة
+const checkedAt = new Map();
+async function checkNotDone(id) {
+  if (Date.now() - (checkedAt.get(id) || 0) < 10 * 60000) return; checkedAt.set(id, Date.now());
+  try {
+    const r = await api.getStatus?.(id);
+    if (r?.status === "done") alreadyDone({ id, ref: r.ref, by: r.doneBy, doneAt: r.doneAt, name: r.patientName });
+  } catch (e) { console.warn("checkNotDone", e); }
+}
+// تنبيه «تم رفعه مسبقاً»: هنا في اللوحة + في أداة صحة (من نسخة 1.8.9)، ونشيله من القائمة
+function alreadyDone({ id, ref, by, doneAt, name, at }) {
+  const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id);
+  const nm = name || x?.patientName || "";
+  const t = doneAt ? new Date(doneAt).toLocaleTimeString("ar-SA", { hour: "numeric", minute: "2-digit" }) : "";
+  window.postMessage({ type: "SABA_SEHA_DONE_DUP", id, ref: ref || x?.ref || "", by: by || "", doneAt: doneAt || 0, name: nm, at: at || 0 }, location.origin);
+  if (x) { S.pending = S.pending.filter(r => r.id !== id); S.held = S.held.filter(r => r.id !== id); renderCounts(); renderPending(); renderHeld(); postQueue(); }
+  chime(); toast(`⚠ ${nm ? "«" + nm + "» " : "هذا الطلب "}تم رفعه مسبقاً${by ? " — رفعه " + by : ""}${t ? " الساعة " + t : ""}. لا ترفعه مرة ثانية في صحة.`);
+}
 async function handleSehaDone(m) {
   const find = l => l.find(r => r.id === m.id || (m.ref && r.ref === m.ref));
   const x = find(S.pending) || find(S.held);
   if (!x) {
-    if (S.done.some(r => r.id === m.id || r.ref === m.ref)) window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
+    const d = S.done.find(r => r.id === m.id || (m.ref && r.ref === m.ref));
+    if (d) {
+      window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
+      const dAt = typeof d.doneAt === "number" ? d.doneAt : d.doneAt?.toMillis?.() || 0;
+      const mine = Math.abs(dAt - (m.at || 0)) < 10 * 60000;                       // نفس الضغطة وصلت مرتين (أو انرفع بنفس الدقايق) → عادي
+      if (!mine && dAt) alreadyDone({ id: d.id, ref: d.ref, by: d.doneBy, doneAt: dAt, name: d.patientName, at: m.at });
+    }
     else doneMsgQueue = m; // القائمة لسى ما وصلت
     return;
   }
   window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
   doneMsgQueue = null;
-  if (m.psl) { try { await api.update(x.id, { sehaRef: m.psl }); x.sehaRef = m.psl; } catch (err) { console.error(err); } }
-  markDone(x.id);
+  markDone(x.id, { fromSeha: m, extra: m.psl ? { sehaRef: m.psl } : {} });
 }
 window.postMessage({ type: "SABA_EXT_PING" }, location.origin);
 renderExtHint();

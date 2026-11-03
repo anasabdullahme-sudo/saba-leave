@@ -624,11 +624,13 @@ async function liveBackend(role) {
       const q = FS.query(col, FS.where("status", "==", "done"), FS.where("branch", "==", branch), FS.where("type", "==", type), FS.where("doneAt", ">=", FS.Timestamp.fromDate(d0)));
       return (await FS.getCountFromServer(q)).data().count;
     },
-    markDone: (id, by) => FS.runTransaction(db, async tx => {
+    markDone: (id, by, extra = {}) => FS.runTransaction(db, async tx => {
       const ref = FS.doc(col, id), cur = await tx.get(ref);
-      if (cur.exists() && cur.data().status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.data().doneBy });
-      tx.update(ref, { status: "done", doneAt: FS.serverTimestamp(), doneBy: by });
+      if (cur.exists() && cur.data().status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.data().doneBy, doneAt: cur.data().doneAt?.toMillis?.() || 0 });
+      tx.update(ref, { ...extra, status: "done", doneAt: FS.serverTimestamp(), doneBy: by });   // رقم PSL مع «تم الرفع» بكتابة وحدة (كان كتابتين → الطلب يرجع ثانيتين)
     }),
+    // حالة طلب واحد من قاعدة البيانات نفسها (قراءة وحدة)
+    async getStatus(id) { const d = await FS.getDoc(FS.doc(col, id)); if (!d.exists()) return null; const x = d.data(); return { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt?.toMillis?.() || 0, ref: x.ref || "", patientName: x.patientName || "" }; },
     claim: (id, by) => FS.updateDoc(FS.doc(col, id), { openedBy: by, openedAt: FS.serverTimestamp() }),
     undoDone: id => FS.runTransaction(db, async tx => {
       const ref = FS.doc(col, id), cur = await tx.get(ref);
