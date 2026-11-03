@@ -267,6 +267,25 @@ export async function devKey(n) {
 }
 export const arNum = n => String(n).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
 /* ---------- تنبيهات الأطباء (من قروب الاستقبال) → إضافة كروم تعرضها فوق أي صفحة ---------- */
+// تحديث تلقائي للصفحة لما ننزّل نسخة جديدة (بدل F5 على كل جهاز): كل 5 دقايق نسأل GitHub عن الصفحة (ما ياخذ من قراءات Firebase)،
+// ولو تغيّرت نحدّثها — بس لما الموظف مو في نص شغل (isBusy)، وإلا نطلع شريط ونحدّث أول ما يفضى
+export function autoUpdate(isBusy = () => false) {
+  if (!/^https:/.test(location.protocol)) return;
+  let base = "", pend = false, bar = null;
+  const sig = async () => { const r = await fetch(location.pathname + "?_=" + Date.now(), { method: "HEAD", cache: "no-store" }); return r.ok ? (r.headers.get("etag") || r.headers.get("last-modified") || "") : ""; };
+  sig().then(x => { base = x; }).catch(() => {});
+  const busy = () => { try { const a = document.activeElement; return !!isBusy() || (!!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !!a.value); } catch { return true; } };
+  const tryReload = () => {
+    if (!pend) return;
+    if (!busy()) { location.reload(); return; }
+    if (!bar) { bar = document.createElement("div"); bar.style.cssText = "position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:10000;background:#EAF6FC;color:#0B4A87;border:1px solid #B9DDF2;border-top:0;border-radius:0 0 10px 10px;padding:6px 14px;font:600 13px 'IBM Plex Sans Arabic',system-ui,sans-serif;direction:rtl"; bar.textContent = "⟳ فيه تحديث للصفحة — بتتحدث لحالها أول ما تخلص"; document.body.append(bar); }
+  };
+  setInterval(async () => {
+    if (!pend) { try { const x = await sig(); if (x && base && x !== base) pend = true; else if (x && !base) base = x; } catch {} }
+    tryReload();
+  }, 5 * 60000);
+  setInterval(tryReload, 15000);                                                   // لو فيه تحديث معلّق: نشيك كل 15 ثانية هل فضي
+}
 export function relayDoctorAlerts(api, onLocal) {
   const seen = new Set(); let first = true;
   return api.watchToday?.(t => {

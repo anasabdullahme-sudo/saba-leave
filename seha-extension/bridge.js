@@ -8,10 +8,15 @@
   const alive = () => { try { if (chrome.runtime?.id) return true; } catch {} ac.abort(); clearInterval(timer); return false; };
   const listen = fn => window.addEventListener("message", e => { if (!alive()) return; try { const r = fn(e); r?.catch?.(() => {}); } catch { alive(); } }, on);
 
+  // كل «تم الرفع» ما تأكد للحين (sabaDone_<وقت>، وsabaDone القديمة) → نرسله للوحة؛ اللوحة تحفظ وترد ACK ونمسحه
   function forwardDone() {
     if (!alive()) return;
-    chrome.storage.local.get("sabaDone", ({ sabaDone }) => {
-      if (sabaDone) post({ type: "SABA_SEHA_DONE", id: sabaDone.id, ref: sabaDone.ref, psl: sabaDone.psl || "", at: sabaDone.at });
+    chrome.storage.local.get(null, all => {
+      const items = Object.entries(all).filter(([k]) => k.startsWith("sabaDone_")).map(([, v]) => v).filter(v => v && v.at);
+      if (all.sabaDone?.at && !items.some(v => v.at === all.sabaDone.at)) items.push(all.sabaDone);
+      const old = Object.keys(all).filter(k => k.startsWith("sabaDone_") && Date.now() - (all[k]?.at || 0) > 3 * 864e5);
+      if (old.length) chrome.storage.local.remove(old);                              // أقدم من 3 أيام → نتركه
+      for (const d of items.sort((a, b) => a.at - b.at)) if (Date.now() - d.at < 3 * 864e5) post({ type: "SABA_SEHA_DONE", id: d.id, ref: d.ref, psl: d.psl || "", at: d.at });
     });
   }
   function announce() {
@@ -31,11 +36,12 @@
     // اللوحة تقول: هذا الطلب انرفع من قبل → الأداة في صحة تنبّه الموظف
     if (m.type === "SABA_SEHA_DONE_DUP" && m.id) chrome.storage.local.set({ sabaDup: { id: m.id, ref: m.ref || "", by: m.by || "", doneAt: m.doneAt || 0, name: m.name || "", at: Date.now() } });
     if (m.type === "SABA_SEHA_DONE_ACK") {
+      chrome.storage.local.remove("sabaDone_" + m.at);
       chrome.storage.local.get("sabaDone", ({ sabaDone }) => { if (sabaDone && sabaDone.at === m.at) chrome.storage.local.remove("sabaDone"); });
     }
   });
 
-  chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaDone?.newValue) forwardDone(); });
+  chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && Object.keys(ch).some(k => (k === "sabaDone" || k.startsWith("sabaDone_")) && ch[k].newValue)) forwardDone(); });
   // الطلب المفتوح في صحة بهالجهاز → اللوحة تحجزه («مفتوح عند فلان» عند الباقين)
   const active = () => alive() && chrome.storage.local.get("sabaReq", ({ sabaReq: r }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id }); });
   chrome.storage.onChanged.addListener((ch, area) => {

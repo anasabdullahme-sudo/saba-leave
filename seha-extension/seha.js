@@ -684,7 +684,9 @@
     }
     $("#done").onclick = () => {
       const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
-      chrome.storage.local.set({ sabaDone: { id: req.id, ref: req.ref, psl, at: Date.now() }, sabaHidden: hideId(req.id) }, () => {
+      // كل «تم الرفع» في خانة لحاله (sabaDone_<وقت>) لين اللوحة تأكد إنها حفظته — كذا ضغطتين ورا بعض ما تمسح وحدة الثانية
+      const at = Date.now(), d = { id: req.id, ref: req.ref, psl, at };
+      chrome.storage.local.set({ ["sabaDone_" + at]: d, sabaDone: d, sabaHidden: hideId(req.id) }, () => {
         chrome.storage.local.remove("sabaReq");
         toastLocal("تم ✓ — بيتحدث الطلب في لوحة سابا");
       });
