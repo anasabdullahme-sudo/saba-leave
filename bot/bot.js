@@ -8,13 +8,13 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
-import { initGroup, handleGroupMessage, handleAdminMessage, dmAdmin } from "./group.js";
+import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.1";
+const VERSION = "2.9.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -609,6 +609,7 @@ async function onIncoming(m) {
   // ماجد: ما ينعامل كمراجع أبداً — ملف = للموقع، كلام = نطلب الملف
   if (team === "majed") {
     if (media) await saveTeamFile(m, "majed");
+    else if (text && await handleMajedMessage(m, text)) { /* رد على سؤال البوت عن رسالته في القروب */ }
     else if (now - (lastReply.get(jid + "#majed") || 0) > 60e3) { lastReply.set(jid + "#majed", now); await sock.sendMessage(jid, { text: "الرجاء إرسال الملف لإرفاقه بالموقع 📎" }).catch(() => {}); }
     return;
   }
@@ -1159,7 +1160,7 @@ async function main() {
   if (!globalThis.__patchTimer) globalThis.__patchTimer = setInterval(applyPatches, 20 * 60000);   // تعديلات بتاريخ (طبيب يباشر بكرة) تنطبق في يومها
   initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock,
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
-  initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
+  initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {

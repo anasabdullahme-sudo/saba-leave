@@ -6,7 +6,7 @@ const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
 const DAY = 864e5;
 
-let db, log, getSock, gemini, models, admins = [];
+let db, log, getSock, gemini, models, admins = [], majed = "";
 let groupJid = "";                       // نعرفه من اسم القروب أول مرة
 const subjects = new Map();             // jid → اسم القروب (كاش)
 let board = null, today = null, lastBoardAt = 0;         // نسخ محلية (onSnapshot)
@@ -14,6 +14,7 @@ let board = null, today = null, lastBoardAt = 0;         // نسخ محلية (o
 export function initGroup(opts) {
   ({ db, log, getSock, gemini, models } = opts);
   admins = String(opts.admin || "").split(/[,\s]+/).map(p => latin(p).replace(/\D/g, "").replace(/^(00)?966/, "").replace(/^0/, "")).filter(p => /^5\d{8}$/.test(p));
+  majed = latin(String(opts.majed || "")).replace(/\D/g, "").replace(/^(00)?966/, "").replace(/^0/, "");   // ماجد: نسأله بس عن رسايله اللي ما فهمناها
   db.doc("board/bawadi").onSnapshot(d => {
     board = d.exists ? d.data() : null;
     // الأداة تقرا «حالات اليوم» كل 30 ثانية: نحط فيها وقت آخر تعديل للجدول عشان تعرف تحدّث الجدول على طول
@@ -241,6 +242,14 @@ function textDay(text) {
   if (/(^|\s)(اليوم|الليله)(\s|$)/.test(n)) return null;
   return d;
 }
+// جواب التصحيح: «الخميس» (لو هو اليوم) أو «اليوم» = اليوم، غير كذا نفس textDay
+function fixDay(text) {
+  const n = norm(text).replace(/(^|\s)(مو|مب|موب|مش|ليس|لا|مهب)\s+(اليوم|الليله)(?=\s|$)/g, " "), t = nowR();
+  const w = DAYW.find(([k]) => new RegExp("(^|\\s)(يوم\\s+)?(ال)?" + k + "(\\s|$)").test(n));
+  if (w && w[1] === t.wd) return "TODAY";
+  if (!/(غدا|بكره|بكرا|باكر)/.test(n) && /(^|\s)(اليوم|الليله|الحين)(\s|$)/.test(n)) return "TODAY";
+  return textDay(text);
+}
 // «غدا الخميس فقط عيادة د رائد من ٢-٧» → دوام ذاك اليوم بس
 function dayRule(text) {
   const n = norm(text), today = /(^|\s)(اليوم|الليله)(\s|$)/.test(n);
@@ -411,7 +420,7 @@ async function apply(evs, ctx) {
       }
       // حدث ليوم ثاني (بكرة/الخميس): نحفظه ويتطبّق أول ما يجي يومه
       // الذكاء نسى التاريخ؟ «غداً فقط…» / «غلط دوامه غداً مو اليوم» → ناخذه من الكلام نفسه
-      const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : PLAN_KINDS.includes(e.kind) ? (textDay(ctx.text) || "") : "";
+      const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : PLAN_KINDS.includes(e.kind) ? (() => { const fd = ctx.fixText != null ? fixDay(ctx.fixText) : null; return fd === "TODAY" ? "" : fd || textDay(ctx.text) || ""; })() : "";
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d && ctx.fix) { delete cur.st?.[d.id]; cur.events = (cur.events || []).filter(x => !(x.doctorId === d.id && x.kind === e.kind)); }   // تصحيح: كان مطبّق اليوم بالغلط → نشيله من اليوم
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d) {
         if (evDate <= isoPlus(t.iso, 14)) {
@@ -669,6 +678,22 @@ export async function dmAdmin(text) {
   }
   return ok;
 }
+// رسالة خاصة لرقم واحد (ماجد)
+async function dmTo(p, text) {
+  const sock = getSock(); if (!sock || !p) return false;
+  try {
+    let jid = adminJids.get(p);
+    if (!jid) { const [r] = await sock.onWhatsApp("966" + p); jid = r?.exists ? r.jid : ""; if (jid) adminJids.set(p, jid); }
+    if (jid) { await sock.sendMessage(jid, { text }); return true; }
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "رسالة خاصة"); }
+  return false;
+}
+// رقم كاتب رسالة القروب (9 أرقام)
+async function groupSender(m) {
+  let pj = m.key?.participantAlt || m.key?.participant || "";
+  if (pj.endsWith("@lid")) { try { pj = (await getSock()?.signalRepository?.lidMapping?.getPNForLID?.(pj)) || ""; } catch { pj = ""; } }
+  return String(pj).split(/[:@]/)[0].replace(/\D/g, "").replace(/^966/, "");
+}
 const findDep = name => { const n = norm(name || "").replace(/^ال/, ""); if (!n) return null; return (board?.departments || []).find(p => { const pn = norm(p.name).replace(/^ال/, ""); return pn.includes(n) || n.includes(pn); }) || null; };
 const code3 = () => Array.from({ length: 3 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
 async function askAdmin({ e, sch }, ctx) {
@@ -713,13 +738,13 @@ function describeEvs(evs) {
     return `• د. ${d ? shortName(d.name) : (e.name || "؟")}: ${KIND_AR[e.kind] || e.kind}${when ? " — " + when : ""}`;
   }).join("\n");
 }
-async function askClarify(m, text, by, evs) {
+async function askClarify(m, text, by, evs, owner = "") {
   const code = "Q" + code3().slice(0, 2);
-  const item = { code, at: Date.now(), text: text.slice(0, 600), by, key: m.key ? { remoteJid: m.key.remoteJid, id: m.key.id, participant: m.key.participant || "" } : null, evs: JSON.parse(JSON.stringify(Array.from(evs || []))) };
+  const item = { code, at: Date.now(), text: text.slice(0, 600), by, key: m.key ? { remoteJid: m.key.remoteJid, id: m.key.id, participant: m.key.participant || "" } : null, evs: JSON.parse(JSON.stringify(Array.from(evs || []))), ...(owner ? { owner } : {}) };
   const ref = db.doc("bot/pending_clarify");
   await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: [...(c.items || []).filter(i => Date.now() - i.at < 12 * 3600e3), item].slice(-20) }); });
   const sum = describeEvs(evs);
-  return dmAdmin([
+  return (owner === "majed" ? t => dmTo(majed, t) : dmAdmin)([
     `🤔 ما فهمت رسالة القروب زين  #${code}`,
     `من ${by}: «${text.slice(0, 300)}»`,
     evs?.question ? `\nسؤالي: ${evs.question}` : "",
@@ -727,44 +752,49 @@ async function askClarify(m, text, by, evs) {
     `أو اسحب هذي الرسالة واكتب المقصود بكلامك (مثل: د رائد اليوم بس من 2 إلى 7، وانتظار لين 5).`,
   ].filter(Boolean).join("\n"));
 }
-async function handleClarify(m, text) {
+async function handleClarify(m, text, who = "admin") {
+  const say = who === "majed" ? t => dmTo(majed, t) : dmAdmin;
   const ref = db.doc("bot/pending_clarify");
   const items = ((await ref.get()).data()?.items || []).filter(i => Date.now() - i.at < 12 * 3600e3);
-  if (!items.length) return false;
+  const mine = who === "majed" ? items.filter(i => i.owner === "majed" && !i.report && !i.remove) : items;   // ماجد: بس أسئلة رسايله
+  if (!mine.length) return false;
   const ctxi = m.message?.extendedTextMessage?.contextInfo;
   const qt = ctxi?.quotedMessage?.conversation || ctxi?.quotedMessage?.extendedTextMessage?.text || "";
   const code = (/#([QRD][A-Z0-9]{2})\b/.exec(qt) || [])[1];
-  let it = code ? items.find(i => i.code === code) : null;
+  let it = code ? mine.find(i => i.code === code) : null;
   const n = norm(text);
   if (/^تراجع/.test(n)) return false;
-  const qs = items.filter(i => !i.report && !i.remove);
+  const qs = mine.filter(i => !i.report && !i.remove);
   if (!it && !qt && qs.length === 1 && Date.now() - qs[0].at < 30 * 60000) it = qs[0];   // سؤال واحد قريب وما سحب رسالة ثانية → رده عليه
   if (!it) return false;
   let evs, how;
   if (it.remove) {
     if (/^(نعم|ايوه|ايوا|اي|ايه|اشيله|شيله|احذفه|تمام|اوكي|ok)(\s|$)/.test(n)) {
       await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
-      if (it.remove.from && it.remove.from > nowR().iso) { await db.doc("board/bawadi_plan").set({ items: FieldValue.arrayUnion({ id: uid(), date: it.remove.from, doctorId: it.remove.id, kind: "remove_doctor", by: "المسؤول" }) }, { merge: true }); await dmAdmin(`تمام، بشيل د. ${it.remove.name} من الجدول يوم ${it.remove.from.split("-").reverse().slice(0, 2).join("/")}.`); }
-      else { const nm = await removeDoctor(it.remove.id, "البوت (موافقة المسؤول)"); await dmAdmin(nm ? `✅ شلت د. ${nm} من الجدول. (لو غلط رد «تراجع»)` : "ما لقيته في الجدول."); }
+      if (it.remove.from && it.remove.from > nowR().iso) { await db.doc("board/bawadi_plan").set({ items: FieldValue.arrayUnion({ id: uid(), date: it.remove.from, doctorId: it.remove.id, kind: "remove_doctor", by: "المسؤول" }) }, { merge: true }); await say(`تمام، بشيل د. ${it.remove.name} من الجدول يوم ${it.remove.from.split("-").reverse().slice(0, 2).join("/")}.`); }
+      else { const nm = await removeDoctor(it.remove.id, "البوت (موافقة المسؤول)"); await say(nm ? `✅ شلت د. ${nm} من الجدول. (لو غلط رد «تراجع»)` : "ما لقيته في الجدول."); }
       return true;
     }
-    if (/^(لا|خله|خليه|اتركه)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await dmAdmin(`تمام، د. ${it.remove.name} باقي في الجدول.`); return true; }
+    if (/^(لا|خله|خليه|اتركه)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say(`تمام، د. ${it.remove.name} باقي في الجدول.`); return true; }
   }
-  if (it.report && /^(صح|صحيح|تمام|اوكي|ok|👍)(\s|$)/.test(n)) { await dmAdmin("👍"); return true; }
+  if (it.report && /^(صح|صحيح|تمام|اوكي|ok|👍)(\s|$)/.test(n)) { await say("👍"); return true; }
   if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
-  else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await dmAdmin("تمام، تجاهلتها."); return true; }
+  else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say("تمام، تجاهلتها."); return true; }
   else {
-    evs = await aiParse(`تصحيح من المسؤول على رسالة القروب «${it.text}»:\n${text}`, it.text); if (evs == null) evs = ruleParse(text, it.text); how = "حسب كلامك";
-    if (!evs.length) { await dmAdmin("ما فهمت تصحيحك 🙏 اكتبها بشكل أوضح (اسم الطبيب + وش صار + الوقت)."); return true; }
+    evs = await aiParse(`تصحيح من ${who === "majed" ? "كاتب الرسالة" : "المسؤول"} على رسالة القروب «${it.text}»:\n${text}`, it.text); if (evs == null) evs = ruleParse(text, it.text); how = "حسب كلامك";
+    if (!evs.length) { await say("ما فهمت تصحيحك 🙏 اكتبها بشكل أوضح (اسم الطبيب + وش صار + الوقت)."); return true; }
   }
   await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
-  const cctx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + " (تصحيح)", rep: [], fix: true };
+  const cctx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + (who === "majed" ? " (تصحيح ماجد)" : " (تصحيح)"), rep: [], fix: true, fixText: text || "" };
   const applied = await apply(evs, cctx);
   if (applied.length && how === "حسب كلامك") learnAliases(it.evs, evs).catch(e => log.warn({ err: String(e?.message || e) }, "تعلّم الاسم"));
-  await dmAdmin(applied.length ? `✅ طبّقتها ${how}:\n${cctx.rep.length ? cctx.rep.join("\n") : describeEvs(evs)}` : "ما انطبق شي — تأكد من اسم الطبيب.");
+  await say(applied.length ? `✅ طبّقتها ${how}:\n${cctx.rep.length ? cctx.rep.join("\n") : describeEvs(evs)}` : "ما انطبق شي — تأكد من اسم الطبيب.");
   if (applied.length && it.key?.id) { try { await getSock()?.sendMessage(it.key.remoteJid, { react: { text: "✅", key: { ...it.key, participant: it.key.participant || undefined } } }); } catch {} }
   return true;
 }
+
+// ماجد رد على سؤال البوت عن رسالته في القروب
+export async function handleMajedMessage(m, text) { try { return await handleClarify(m, text, "majed"); } catch (e) { log.warn({ err: String(e?.message || e) }, "تصحيح ماجد"); return false; } }
 
 /* ---------- المسؤول يكتب كلام عادي (سؤال «ليش؟» أو تصحيح بدون ما يسحب رسالة) ---------- */
 const ASSIST = `أنت بوت قروب استقبال عيادات سابا (فرع البوادي). تكلّم المسؤول (أنس) على الخاص باللهجة السعودية وباختصار.
@@ -926,8 +956,15 @@ export async function handleGroupMessage(m) {
   let evs = await aiParse(text, quoted);
   if (evs == null) evs = ruleParse(text, quoted);
   // البوت مو متأكد → يسأل المسؤول على الخاص قبل ما يطبّق شي (🤔 على الرسالة لين يرد)
-  if ((evs.unclear || (!evs.length && evs.unknown)) && admins.length) {
-    if (await askClarify(m, text, by, evs)) { try { await getSock()?.sendMessage(jid, { react: { text: "🤔", key: m.key } }); } catch {} return; }
+  // بعد 12 بالليل «بكرة/غداً» ممكن يقصد اليوم اللي بدأ أو اللي بعده → نسأل بدل ما نخمّن
+  { const tn = nowR(), nn = norm(text);
+    if (tn.m < 300 && /(^|\s)(غدا|بكره|بكرا|باكر)(\s|$)/.test(nn) && !/بعد (بكره|غد)/.test(nn) && evs.length) {
+      const d0 = DAYN[tn.wd], d1 = DAYN[(tn.wd + 1) % 7], f = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+      evs.unclear = true; evs.question = `الرسالة بعد 12 بالليل وفيها «بكرة»: تقصد ${d0} ${f(tn.iso)} (اليوم اللي بدأ) ولا ${d1} ${f(isoPlus(tn.iso, 1))}؟ رد باسم اليوم.`;
+    } }
+  const fromMajed = majed && (await groupSender(m).catch(() => "")) === majed;
+  if ((evs.unclear || (!evs.length && evs.unknown)) && (fromMajed || admins.length)) {
+    if (await askClarify(m, text, by, evs, fromMajed ? "majed" : "")) { try { await getSock()?.sendMessage(jid, { react: { text: "🤔", key: m.key } }); } catch {} return; }
   }
   if (!evs.length) { if (evs.unknown) { try { await getSock()?.sendMessage(jid, { react: { text: "❓", key: m.key } }); } catch {} } return; }
   const ctx = { text, by, rep: [] };
