@@ -348,8 +348,10 @@ function fresh(cur, iso) {
 }
 // حالة انحطت أمس ووقتها «بكرة» (دقايق ≥ 1440) → نرجّعها لساعات اليوم، ونجدول «خلص دوامه اليوم» بعد نهايتها
 const stale = (cur, v) => v && v.at && v.at < riyadhMid(cur.date) && (v.until >= 1440 || v.from >= 1440);
+const fixable = (cur, v) => stale(cur, v) || (v?.kind === "starts" && v.from == null && v.until != null);
 function rebase(cur) {
   for (const [k, v] of Object.entries(cur.st || {})) {
+    if (v?.kind === "starts" && v.from == null && v.until != null) v.kind = "present";   // «لين 7» بدون بداية = موجود لين 7 (الموقع والأداة ما يعرضون «يبدأ» بدون وقت)
     if (!stale(cur, v)) continue;
     if (v.until >= 1440) v.until -= 1440;
     if (v.from >= 1440) v.from -= 1440;
@@ -422,11 +424,11 @@ async function resetExpired() {
   const tt = nowR(); if (plansDay !== tt.iso) { plansDay = tt.iso; await applyPlans(); }
   if (!today) return;
   const t = nowR(), now = Date.now();
-  if (today.date === t.iso && !Object.values(today.st || {}).some(v => (v.exp && v.exp <= now) || stale(today, v))) return;
+  if (today.date === t.iso && !Object.values(today.st || {}).some(v => (v.exp && v.exp <= now) || fixable(today, v))) return;
   try {
     await db.runTransaction(async tx => {
       const ref = db.doc("board/bawadi_today"), raw = (await tx.get(ref)).data(); if (!raw) return;
-      const cur = fresh(raw, t.iso); let changed = raw.date !== t.iso || Object.values(raw.st || {}).some(v => stale(raw, v));
+      const cur = fresh(raw, t.iso); let changed = raw.date !== t.iso || Object.values(raw.st || {}).some(v => fixable(raw, v));
       for (const [k, v] of Object.entries(cur.st)) if (v.exp && v.exp <= now) { delete cur.st[k]; changed = true; }
       if (changed) tx.set(ref, cur);
     });
@@ -560,6 +562,10 @@ async function apply(evs, ctx) {
         const lu = nextDay(atMin) ?? untilMin;
         cur.st[key] = { kind: "leaves", until: lu, at, by: ctx.by }; info = atMin != null ? `يطلع الساعة ${hm(atMin)}` : "";
         if (lu != null && lu > t.m && lu < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: lu, key, kind: "off", name, dep, by: ctx.by }); }   // بعد ما يطلع: البطاقة «خلص دوامه اليوم» (مو يرجع لدوامه العادي)
+      }
+      else if (e.kind === "starts_at" && atMin == null && untilMin != null) {   // «اليوم لين 7» بدون بداية → موجود لين 7
+        cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = `موجود لين ${hm(untilMin)}`;
+        if (untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }
       }
       else if (e.kind === "starts_at") { const ap = cur.scheduled.find(x => x.key === key && x.kind === "appt"); cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by, ...(ap ? { apptFrom: ap.min } : {}) };
         if (untilMin != null && untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }   // بعد نهايته: «غير متواجد»
