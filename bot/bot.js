@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.2";
+const VERSION = "2.9.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -29,6 +29,7 @@ function serviceAccount() {
 try { initializeApp({ credential: cert(serviceAccount()) }); }
 catch (e) { log.fatal({ err: e.message }, "مفتاح Firebase غير صالح — نزّل مفتاح جديد من Firebase والصقه كامل"); process.exit(1); }
 const db = getFirestore();
+db.settings({ ignoreUndefinedProperties: true });   // خانة undefined وحدة كانت تفشّل كتابة كاملة (تعديلات الجدول ما انطبقت من 29 أكتوبر)
 const TS = () => FieldValue.serverTimestamp();
 const statusRef = db.doc("bot/status");
 const controlRef = db.doc("bot/control");
@@ -995,9 +996,9 @@ async function applyPatches() {
         const byName = names => { for (const n of [].concat(names || [])) { const m = nd.filter(d => nz(d.name).includes(nz(n)) || (d.fullName && nz(d.fullName).includes(nz(n)))); if (m.length === 1) return m[0]; } return null; };
         let t = nd.find(d => d.id === u.doctorId) || byName(u.findName);
         if (!t && u.orAdd) { const dep = next.departments.find(q => nz(q.name).includes(nz(u.orAdd.depName))); if (dep) { t = { id: u.orAdd.id, name: u.set?.name || u.orAdd.name || "", code: "", ext: "", room: "", fee: "", floor: "", workdays: [], shifts: [] }; (dep.doctors ||= []).push(t); nd.push(t); } }
-        if (!t) { todo.push({ id: u.id, name: "", skip: true }); continue; }
-        if (u.ifName && !nz(t.name).includes(nz(u.ifName))) { todo.push({ id: u.id, name: "", skip: true }); continue; }   // الطبيب تغيّر من الصفحة — ما نلمسه
-        if (u.ifShifts && JSON.stringify((t.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(u.ifShifts)) { todo.push({ id: u.id, name: "", skip: true }); continue; }   // تصحيح بس لو الغلط صار فعلاً
+        if (!t) { todo.push({ id: u.id, name: "", skip: true, isDoc: true }); continue; }
+        if (u.ifName && !nz(t.name).includes(nz(u.ifName))) { todo.push({ id: u.id, name: "", skip: true, isDoc: true }); continue; }   // الطبيب تغيّر من الصفحة — ما نلمسه
+        if (u.ifShifts && JSON.stringify((t.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(u.ifShifts)) { todo.push({ id: u.id, name: "", skip: true, isDoc: true }); continue; }   // تصحيح بس لو الغلط صار فعلاً
         if (u.copyFrom || u.copyFromName) { const src = nd.find(d => d.id === u.copyFrom) || byName(u.copyFromName), empty = v => !v || (Array.isArray(v) && !v.length); if (src) for (const f of u.fields || []) if (empty(t[f]) && !empty(src[f])) t[f] = structuredClone(src[f]); }
         for (const [k, v] of Object.entries(u.set || {})) t[k] = v;
         for (const [k, v] of Object.entries(u.fill || {})) if (!t[k]) t[k] = v;
@@ -1006,7 +1007,7 @@ async function applyPatches() {
         todo.push({ id: u.id, name: t.name, isDoc: true, upd: true, quiet: !u.rename && !u.copyFrom });
       }
       if (!todo.length) return [];
-      for (const v of todo.filter(v => !v.isDoc)) {
+      for (const v of todo.filter(v => !v.isDoc && !v.skip && v.start)) {                // الإجازات بس (كانت تتخطى تعديل «skip» وتحطه إجازة فاضية → الكتابة تفشل)
         const d = docs.find(x => x.id === v.doctorId) || docs.find(x => v.code && String(x.code) === String(v.code));
         (next.vacations ||= []).push({ ...v, doctorId: d?.id || v.doctorId, name: d?.name || v.name });
       }
