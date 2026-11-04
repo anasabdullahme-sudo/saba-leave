@@ -350,11 +350,17 @@ function fresh(cur, iso) {
 }
 // حالة انحطت أمس ووقتها «بكرة» (دقايق ≥ 1440) → نرجّعها لساعات اليوم، ونجدول «خلص دوامه اليوم» بعد نهايتها
 const stale = (cur, v) => v && v.at && v.at < riyadhMid(cur.date) && (v.until >= 1440 || v.from >= 1440);
-const fixable = (cur, v) => stale(cur, v) || (v?.kind === "starts" && v.from == null && v.until != null);
+const fixable = (cur, v) => stale(cur, v) || (v?.kind === "starts" && v.from == null && v.until != null) || (v?.at && v.at < riyadhMid(cur.date) && v.until != null && ["present", "leaves"].includes(v.kind));
 function rebase(cur) {
   for (const [k, v] of Object.entries(cur.st || {})) {
-    if (v?.kind === "starts" && v.from == null && v.until != null) v.kind = "present";   // «لين 7» بدون بداية = موجود لين 7 (الموقع والأداة ما يعرضون «يبدأ» بدون وقت)
-    if (!stale(cur, v)) continue;
+    const old = v?.at && v.at < riyadhMid(cur.date);
+    // انحطت أمس لليوم («بكرة لين 7») بدون وقت بداية → تبدأ وقت دوامه العادي اليوم (مو «متواجد الحين» من نص الليل)
+    if (old && v.until != null && (["present", "leaves"].includes(v.kind) || (v.kind === "starts" && v.from == null))) {
+      const d = docs().find(x => x.id === k), s0 = d ? shiftsOn(d, rAt(riyadhMid(cur.date) + 36e5).wd)[0]?.s : null;
+      if (s0 != null) { v.kind = "starts"; v.from = k === "fahoql2" && cur.date === "2026-11-05" && v.until === 1140 ? 840 : s0; delete v.exp; }   // د رائد الخميس 5/11: من 2م (زي ما قال أنس)
+    }
+    if (v?.kind === "starts" && v.from == null && v.until != null) v.kind = "present";   // نفس اليوم «لين 7» بدون بداية = موجود الحين لين 7
+    if (!stale(cur, v)) { if (!v.exp) stampExp(cur); continue; }
     if (v.until >= 1440) v.until -= 1440;
     if (v.from >= 1440) v.from -= 1440;
     if (["starts", "present", "leaves"].includes(v.kind) && v.until != null && v.until < 1440 && !(cur.scheduled ||= []).some(x => x.key === k && x.kind === "off")) cur.scheduled.push({ id: uid(), min: v.until, key: k, kind: "off", name: "", dep: "", by: v.by || "" });
@@ -540,7 +546,12 @@ async function apply(evs, ctx) {
       const nextDay = m => (m != null && m < t.m - 30) ? m + 1440 : m;
       // مجدول من أمس (يتطبّق أول اليوم): «لين 7» = 7م — نختار الوقت الأقرب لدوامه (مو حسب الساعة الحين)
       const fit = m => fitMin(m, d, t.wd);
-      const at = Date.now(), atMin = ctx.planned ? fit(toMin(e.at_time)) : pm(toMin(e.at_time)), untilMin = ctx.planned ? fit(toMin(e.until_time)) : nextDay(pm(toMin(e.until_time)));
+      const at = Date.now(); let atMin = ctx.planned ? fit(toMin(e.at_time)) : pm(toMin(e.at_time)), untilMin = ctx.planned ? fit(toMin(e.until_time)) : nextDay(pm(toMin(e.until_time)));
+      // مجدول من أمس («بكرة موجود/يطلع لين 7»): يتطبّق 12 بالليل → ما نقول «متواجد الحين»؛ دوامه يبدأ وقت دوامه العادي وينتهي 7
+      if (ctx.planned && d && (["present", "leaves_at"].includes(e.kind) || (e.kind === "starts_at" && atMin == null))) {
+        const u = e.kind === "leaves_at" ? (atMin ?? untilMin) : untilMin, s0 = shiftsOn(d, t.wd)[0]?.s;
+        if (u != null && s0 != null) { e.kind = "starts_at"; atMin = s0; untilMin = u; }
+      }
       const name = d ? shortName(d.name) : e.name, dep = d ? d.dep : (e.dept || "");
       let info = "";
       if (e.kind === "stop" && atMin != null && atMin > t.m + 1) {      // «الساعة 9:45 وقف له» → نجدوله
