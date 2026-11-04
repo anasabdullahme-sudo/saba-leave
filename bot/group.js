@@ -342,9 +342,22 @@ const TITLES = {
 };
 // يوم جديد: نبدأ من الصفر، إلا حالة طبيب دوامه لسا ما خلص (مثل دوام 1 بالليل لين 9 الصبح)
 function fresh(cur, iso) {
-  if (cur && cur.date === iso) return structuredClone(cur);
+  if (cur && cur.date === iso) return rebase(structuredClone(cur));
   const st = Object.fromEntries(Object.entries(cur?.st || {}).filter(([, v]) => v.exp && v.exp > Date.now()));
-  return { date: iso, st, extra: [], events: [], scheduled: [], ...(cur?.boardAt ? { boardAt: cur.boardAt } : {}) };
+  return rebase({ date: iso, st, extra: [], events: [], scheduled: [], ...(cur?.boardAt ? { boardAt: cur.boardAt } : {}) });
+}
+// حالة انحطت أمس ووقتها «بكرة» (دقايق ≥ 1440) → نرجّعها لساعات اليوم، ونجدول «خلص دوامه اليوم» بعد نهايتها
+const stale = (cur, v) => v && v.at && v.at < riyadhMid(cur.date) && (v.until >= 1440 || v.from >= 1440);
+function rebase(cur) {
+  for (const [k, v] of Object.entries(cur.st || {})) {
+    if (!stale(cur, v)) continue;
+    if (v.until >= 1440) v.until -= 1440;
+    if (v.from >= 1440) v.from -= 1440;
+    if (["starts", "present", "leaves"].includes(v.kind) && v.until != null && v.until < 1440 && !(cur.scheduled ||= []).some(x => x.key === k && x.kind === "off")) cur.scheduled.push({ id: uid(), min: v.until, key: k, kind: "off", name: "", dep: "", by: v.by || "" });
+    delete v.exp;
+  }
+  stampExp(cur);
+  return cur;
 }
 
 /* ---------- كل حالة تنتهي مع نهاية دوام الطبيب (أو نهاية اليوم) وترجع طبيعي ---------- */
@@ -409,11 +422,11 @@ async function resetExpired() {
   const tt = nowR(); if (plansDay !== tt.iso) { plansDay = tt.iso; await applyPlans(); }
   if (!today) return;
   const t = nowR(), now = Date.now();
-  if (today.date === t.iso && !Object.values(today.st || {}).some(v => v.exp && v.exp <= now)) return;
+  if (today.date === t.iso && !Object.values(today.st || {}).some(v => (v.exp && v.exp <= now) || stale(today, v))) return;
   try {
     await db.runTransaction(async tx => {
       const ref = db.doc("board/bawadi_today"), raw = (await tx.get(ref)).data(); if (!raw) return;
-      const cur = fresh(raw, t.iso); let changed = raw.date !== t.iso;
+      const cur = fresh(raw, t.iso); let changed = raw.date !== t.iso || Object.values(raw.st || {}).some(v => stale(raw, v));
       for (const [k, v] of Object.entries(cur.st)) if (v.exp && v.exp <= now) { delete cur.st[k]; changed = true; }
       if (changed) tx.set(ref, cur);
     });
