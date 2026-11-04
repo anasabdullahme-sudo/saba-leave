@@ -289,6 +289,29 @@
   // ---------- الطبيب المعالج ----------
   const docTokens = s => norm(s).toLowerCase().replace(/\b(dr|doctor)\b\.?|(^|\s)(د|دكتور|دكتوره)(\.|\s|$)/g, " ").replace(/(^|\s)(ال|al|el)[- ]?/g, " ").split(/[\s\-\/.]+/).filter(t => t.length > 1);
   const doneDocEls = new WeakSet();
+  // الاسم الأول والاسم المميز هم اللي يحددون الطبيب — «محمد/علي/محمود» لحالها ما تكفي (أمين محمد علي محمود ≠ سحر محمد محمود علي)
+  // يرجّع رقم الخيار، أو null لو ما فيه تطابق أكيد (الموظف يختار بنفسه)
+  const DOC_COMMON = new Set(["محمد", "احمد", "عبدالله", "عبد", "علي", "حسن", "حسين", "محمود", "ابراهيم", "عبدالرحمن", "خالد", "عمر", "مصطفي", "سيد", "صالح",
+    "mohamed", "mohammed", "muhammad", "mohammad", "ahmed", "ahmad", "ali", "abdullah", "abdel", "abdul", "hassan", "hussein", "mahmoud", "ibrahim", "khaled", "khalid", "omar", "mostafa", "mustafa", "saleh"]);
+  function bestDoctorOption(names, opts) {
+    const lists = names.map(docTokens).filter(l => l.length);
+    const firsts = new Set(lists.map(l => l[0]));
+    const want = new Set(lists.flat());
+    for (const l of lists) for (let i = 0; i < l.length - 1; i++) want.add(l[i] + l[i + 1]);   // «محمد علي» = «محمدعلي»
+    let best = null, bestScore = 0, second = 0;
+    opts.forEach((txt, idx) => {
+      const ot = docTokens(txt); if (!ot.length) return;
+      const otAll = new Set(ot); for (let i = 0; i < ot.length - 1; i++) otAll.add(ot[i] + ot[i + 1]);
+      const hits = [...want].filter(t => otAll.has(t));
+      const f = firsts.has(ot[0]) ? (DOC_COMMON.has(ot[0]) ? 1 : 3) : 0;            // الاسم الأول نفسه
+      const rare = hits.filter(t => !DOC_COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
+      const common = hits.filter(t => DOC_COMMON.has(t) && t !== ot[0]).length;
+      if (f < 3 && !rare) return;                                                   // ما فيه اسم أول مميز ولا اسم عائلة مميز = مو هو
+      const sc = f + rare * 2 + common * 0.5;
+      if (sc > bestScore) { second = bestScore; best = idx; bestScore = sc; } else if (sc > second) second = sc;
+    });
+    return best != null && bestScore >= 2.5 && bestScore - second >= 1 ? best : null;
+  }
   function pickDoctor(req, explicit) {
     const names = [req.doctorAr, req.doctorEn, req.stampDoctor, req.doctorName].filter(Boolean);
     if (!names.length) return "";
@@ -300,22 +323,8 @@
     const sel = box.querySelector("select");
     if (sel && !sel.disabled) {
       if (sel.value && sel.selectedIndex > 0) return "ok";
-      const want = names.map(docTokens);
-      let best = null, bestScore = 0, tie = false;
-      for (const o of sel.options) {
-        const ot = docTokens(o.textContent); if (!ot.length) continue;
-        const sc = Math.max(...want.map(w => w.filter(t => ot.includes(t)).length));
-        if (sc > bestScore) { best = o; bestScore = sc; tie = false; } else if (sc === bestScore && sc > 0) tie = true;
-      }
-      if (best && bestScore >= 2 && !tie) { setValue(sel, best.value); flash(sel); return "ok"; }
-      // احتياط: اسم عائلة مميز (مو اسم شائع) موجود في خيار واحد بس → هو الطبيب (مثل «والي/والى»)
-      const COMMON = new Set(["محمد", "احمد", "عبدالله", "عبد", "علي", "حسن", "حسين", "محمود", "ابراهيم", "عبدالرحمن", "خالد", "mohamed", "mohammed", "muhammad", "ahmed", "ahmad", "ali", "abdullah"]);
-      const rare = [...new Set(want.flat())].filter(t => t.length >= 3 && !COMMON.has(t));
-      const opts = [...sel.options].filter(o => o.value && docTokens(o.textContent).length);
-      for (const t of rare) {
-        const hits = opts.filter(o => docTokens(o.textContent).includes(t));
-        if (hits.length === 1) { setValue(sel, hits[0].value); flash(sel); return "ok"; }
-      }
+      const best = bestDoctorOption(names, [...sel.options].filter(o => o.value).map(o => o.textContent));
+      if (best != null) { const o = [...sel.options].filter(x => x.value)[best]; setValue(sel, o.value); flash(sel); return "ok"; }
       return "check";
     }
     // قائمة مخصّصة (بحث): نفتحها ونكتب اسم الطبيب، والموظف يختار

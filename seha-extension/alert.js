@@ -52,10 +52,12 @@
     });
   }
   function removeEl(el) { if (!el.isConnected) return; clearTimeout(el._t); el.remove(); announce(); }
-  function show(ev) {
+  const isSticky = ev => STICKY.has(ev.kind) || ev.color === "red" && /وقف/.test(ev.title || "");
+  function show(ev, lifeLeft) {
     ensure();
-    const sticky = STICKY.has(ev.kind) || ev.color === "red" && /وقف/.test(ev.title || "");
-    const life = sticky ? STICKY_MS : SHORT_MS;
+    if ([...wrap.children].some(x => x.dataset.id === ev.id)) return;     // ظاهر أصلاً في هالتبويب
+    const sticky = isSticky(ev);
+    const life = lifeLeft || (sticky ? STICKY_MS : SHORT_MS);
     const [c1, c2] = COLORS[ev.color] || COLORS.blue;
     const time = new Date(ev.at).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" });
     const meta = [ev.info, ev.dep, ev.room ? "غرفة " + ev.room : "", ev.ext ? "تحويلة " + ev.ext : ""].filter(Boolean).join(" · ");
@@ -64,7 +66,8 @@
       <div class="n">د. ${esc(ev.name)}</div>${meta ? `<div class="m" title="${esc(meta)}">${esc(meta)}</div>` : ""}</div><div class="bar"><i></i></div>`;
     el.querySelector(".sd").style.background = c1; el.querySelector(".l").style.color = c2;           // عبر CSSOM (ما تمنعه CSP)
     el.querySelector(".bar").style.background = c1 + "33"; const bi = el.querySelector(".bar i"); bi.style.background = c1; bi.style.transitionDuration = life + "ms";
-    el.querySelector("button").onclick = () => removeEl(el);
+    el.dataset.id = ev.id || "";
+    el.querySelector("button").onclick = () => { removeEl(el); dismiss(ev.id); };   // ✕ = ينقفل في كل التبويبات
     // «وقف» ثم «فاضي» لنفس الطبيب: الجديد يلغي القديم (غير كذا التنبيهات تتكدس فوق بعض)
     if (sticky) for (const old of [...wrap.children]) if (old.dataset.sticky && old.dataset.doc && old.dataset.doc === (ev.doctorId || ev.name)) removeEl(old);
     el.dataset.doc = ev.doctorId || ev.name || "";
@@ -78,13 +81,40 @@
     announce();
   }
   const shown = new Set();
+  // التنبيه المهم (وقف/دخلوا له/رجع) يلحقك: تروح لأثير أو صحة أو أي تبويب خلال 3 دقايق ويطلع لك هناك بالوقت الباقي
+  const alive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
+  const ACTIVE = "sabaDocActive", GONE = "sabaDocDismissed";
+  function remember(ev) {
+    chrome.storage.local.get(ACTIVE, r => {
+      const now = Date.now(), cur = (r[ACTIVE] || []).filter(x => x.until > now && x.ev.id !== ev.id && !(x.ev.doctorId && x.ev.doctorId === ev.doctorId));   // «فاضي» بعد «وقف» لنفس الطبيب يلغي القديم
+      cur.push({ ev, until: (ev.shownAt || ev.at || now) + STICKY_MS });
+      chrome.storage.local.set({ [ACTIVE]: cur.slice(-8) });
+    });
+  }
+  function dismiss(id) {
+    if (!id || !alive()) return;
+    chrome.storage.local.get(GONE, r => chrome.storage.local.set({ [GONE]: [...(r[GONE] || []).filter(x => x !== id), id].slice(-50) }));
+  }
+  function catchUp() {
+    if (!alive() || document.visibilityState !== "visible") return;
+    chrome.storage.local.get([ACTIVE, GONE, "sabaDoctorMe"], r => {
+      if (r.sabaDoctorMe) return;
+      const now = Date.now(), gone = new Set(r[GONE] || []);
+      for (const x of r[ACTIVE] || []) if (x.until - now > 3000 && !gone.has(x.ev.id)) { shown.add(x.ev.id); show(x.ev, x.until - now); }
+    });
+  }
   chrome.storage.onChanged.addListener((ch, area) => {
-    const ev = area === "local" && ch.sabaDocAlert?.newValue;
+    if (area !== "local") return;
+    if (ch[GONE]?.newValue && wrap) { const g = new Set(ch[GONE].newValue); for (const el of [...wrap.children]) if (g.has(el.dataset.id)) removeEl(el); }
+    const ev = ch.sabaDocAlert?.newValue;
     if (!ev || shown.has(ev.id)) return;                                  // نفس التنبيه من أكثر من مصدر
     shown.add(ev.id);
-    if (document.visibilityState !== "visible") return;                  // التبويب اللي قدامك بس
     if (Date.now() - (ev.shownAt || ev.at) > 60000) return;
+    if (isSticky(ev)) remember(ev);                                      // نسجله عشان يلحقك لأي تبويب تفتحه
+    if (document.visibilityState !== "visible") return;                  // يطلع في التبويب اللي قدامك، والباقي يلحقونه لما تفتحهم
     chrome.storage.local.get("sabaDoctorMe", r => { if (!r.sabaDoctorMe) show(ev); });   // جهاز طبيب: ما نزعجه بتنبيهات الاستقبال
   });
+  document.addEventListener("visibilitychange", catchUp);
+  setTimeout(catchUp, 400);                                                // صفحة جديدة انفتحت (أثير بعد ما ضغط بحث مثلاً)
   addEventListener("resize", announce);
 })();
