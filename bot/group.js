@@ -369,11 +369,23 @@ function expFor(d, atMs) {
 function stampExp(cur) {
   for (const [k, v] of Object.entries(cur.st || {})) {
     if (!v || v.exp) continue;
-    if (v.until != null && ["starts", "appt", "present", "leaves"].includes(v.kind)) { const mid = riyadhMid(cur.date || nowR().iso); v.exp = mid + (v.from != null && v.until <= v.from ? v.until + 1440 : v.until) * 60000; continue; }   // لها وقت نهاية → تنتهي فيه
+    if (v.until != null && ["starts", "appt", "present", "leaves", "free"].includes(v.kind)) {   // لها وقت نهاية → بعده «خلص دوامه اليوم»، وترجع طبيعي نهاية اليوم بس
+      const mid = riyadhMid(cur.date || nowR().iso), over = v.from != null && v.until <= v.from;
+      v.exp = v.until >= 1440 ? mid + v.until * 60000 : over ? mid + (v.until + 1440) * 60000 : mid + DAY; continue;
+    }
+    if (v.kind === "absent") { v.exp = riyadhMid(cur.date || nowR().iso) + DAY; continue; }                       // غير متواجد اليوم = لين نهاية اليوم
     v.exp = expFor(docs().find(x => x.id === k), v.at || Date.now());
   }
 }
-const PLAN_KINDS = ["starts_at", "absent_today", "late", "leaves_at", "appointments_only", "stop"];
+// وقت بدون ص/م ليوم ثاني: نختار (الساعة / +12 / بعد نص الليل) الأقرب لدوام الطبيب ذاك اليوم — التعادل للأمتأخر
+function fitMin(m, d, wd) {
+  if (m == null) return m;
+  const sh = d ? shiftsOn(d, wd).map(x => [x.s, x.e > x.s ? x.e : x.e + 1440]) : [];
+  if (m >= 720 || !sh.length) return m < 480 ? m + 720 : m;                    // 13:00+ واضح، وبدون دوام معروف: 1–7 = مساءً
+  const c = [m, m + 720, m + 1440].filter(x => x < 1440 + 360), dist = x => Math.min(...sh.map(([a, b]) => x < a ? a - x : x > b ? x - b : 0));
+  return c.reduce((a, b) => dist(b) <= dist(a) ? b : a);
+}
+const PLAN_KINDS = ["starts_at", "absent_today", "late", "leaves_at", "appointments_only", "stop", "present"];
 // الأحداث المجدولة ليومها (اليوم أو اللي فات) → تتطبّق على حالات اليوم وتنشال من الخطة
 async function applyPlans() {
   const t = nowR(), ref = db.doc("board/bawadi_plan");
@@ -419,7 +431,7 @@ async function apply(evs, ctx) {
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
       // تغيير دوام (ثابت، أو ليوم ثاني) → ما نطبّق لحالنا: نرسل للمسؤول خيارات ويختار
       if (d && !ctx.confirmed && !ctx.fix && !ctx.planned && admins.length && needsConfirm(e, ctx.text, t)) {
-        if (!asks.some(a => a.d.id === d.id)) asks.push({ d, e: { ...e } });
+        e.__asked = true; if (!asks.some(a => a.d.id === d.id)) asks.push({ d, e: { ...e } });
         applied.push("asked"); (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — تغيير دوام: أرسلت لك خيارات تختار منها قبل ما أطبّق`); continue;
       }
       if (d && ["starts_at", "present", "leaves_at"].includes(e.kind) && EVERY.test(norm(ctx.text)) && everyDays(ctx.text).length) {
@@ -430,11 +442,11 @@ async function apply(evs, ctx) {
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d) {
         // «دوام يوم الجمعة …» أو يوم محدد بدون «دائم» → دوام ذاك اليوم بس (مو تغيير الجدول الثابت)
         const onlyFri = Array.isArray(e.days) && e.days.length && e.days.every(x => x === 5);
-        const oneDay = onlyFri || ((dayOf(ctx.text) || /الجمعه/.test(norm(ctx.text))) && !PERMANENT.test(norm(ctx.text)));
+        const oneDay = onlyFri || ((dayOf(ctx.text) || /الجمعه/.test(norm(ctx.text)) || TODAYW.test(norm(ctx.text))) && !PERMANENT.test(norm(ctx.text)) && !EVERY.test(norm(ctx.text)));
         if (d && oneDay) {
           for (const k of ["from_time", "to_time"]) if (e[k] && !timeInText(e[k], ctx.text)) e[k] = "";
           const sc1 = schedOf(ctx.text), a1 = toMin(e.from_time) ?? sc1.from, u1 = toMin(e.to_time) ?? sc1.to;
-          const day = onlyFri || /الجمعه/.test(norm(ctx.text)) ? isoPlus(t.iso, ((5 - t.wd + 7) % 7) || 7) : dayOf(ctx.text);
+          const day = onlyFri || /الجمعه/.test(norm(ctx.text)) ? isoPlus(t.iso, ((5 - t.wd + 7) % 7) || 7) : dayOf(ctx.text) || t.iso;
           if (a1 != null && day) { e.kind = "starts_at"; e.date = day; e.at_time = hhmm(a1); e.until_time = u1 != null ? hhmm(u1) : ""; }
           else { applied.push("known"); continue; }
         }
@@ -448,7 +460,7 @@ async function apply(evs, ctx) {
           plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by }); applied.push("planned");
           // تنبيه للموظفين الحين: «🗓 بكرة: دوامه من 2م إلى 7م»
           const dl = evDate === isoPlus(t.iso, 1) ? "بكرة" : DAYN[new Date(evDate + "T12:00:00Z").getUTCDay()] + " " + evDate.slice(8, 10) + "/" + evDate.slice(5, 7);
-          const a = toMin(e.at_time), u = toMin(e.until_time);
+          const pwd = new Date(evDate + "T12:00:00Z").getUTCDay(), a = fitMin(toMin(e.at_time), d, pwd), u = fitMin(toMin(e.until_time), d, pwd);
           const what = e.kind === "starts_at" ? (a != null ? `دوامه من ${hm(a)}${u != null ? " إلى " + hm(u) : ""}` : "دوام مختلف") : e.kind === "absent_today" ? "غير متواجد" : e.kind === "late" ? "بيتأخر" : e.kind === "appointments_only" ? "مواعيد فقط" : e.kind === "stop" ? "ما يستقبل" : e.kind === "leaves_at" ? `يطلع ${a != null ? hm(a) : "بدري"}` : "";
           cur.events.push({ id: uid(), at: Date.now(), kind: "planned", doctorId: d.id, name: shortName(d.name), dep: d.dep, room: d.room || "", ext: d.ext || "", info: `${dl}: ${what}`, title: `🗓 ${dl}`, color: "blue", by: ctx.by });
           (ctx.rep ||= []).push(`🗓 د. ${shortName(d.name)} — ${dl}: ${what}\n   الموقع: ينطبق يوم ${evDate.split("-").reverse().slice(0, 2).join("/")} · الأداة: تنبيه «🗓 ${dl}»`);
@@ -509,7 +521,9 @@ async function apply(evs, ctx) {
       // أوقات بدون ص/م: «٩:٤٥» الساعة 8 بالليل = 21:45، و«موجود إلى ١» = 1 بعد نص الليل
       const pm = m => (m != null && m < 720 && m < t.m - 30 && m + 720 > t.m - 30) ? m + 720 : m;
       const nextDay = m => (m != null && m < t.m - 30) ? m + 1440 : m;
-      const at = Date.now(), atMin = pm(toMin(e.at_time)), untilMin = nextDay(pm(toMin(e.until_time)));
+      // مجدول من أمس (يتطبّق أول اليوم): «لين 7» = 7م — نختار الوقت الأقرب لدوامه (مو حسب الساعة الحين)
+      const fit = m => fitMin(m, d, t.wd);
+      const at = Date.now(), atMin = ctx.planned ? fit(toMin(e.at_time)) : pm(toMin(e.at_time)), untilMin = ctx.planned ? fit(toMin(e.until_time)) : nextDay(pm(toMin(e.until_time)));
       const name = d ? shortName(d.name) : e.name, dep = d ? d.dep : (e.dept || "");
       let info = "";
       if (e.kind === "stop" && atMin != null && atMin > t.m + 1) {      // «الساعة 9:45 وقف له» → نجدوله
@@ -539,6 +553,7 @@ async function apply(evs, ctx) {
         info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
+        if (untilMin != null && untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }   // بعد الوقت: «خلص دوامه اليوم»
         if (!d && !cur.extra.some(x => x.key === key)) cur.extra.push({ key, name, dep, until: untilMin });
       }
       else if (e.kind === "busy") { cur.st[key] = { kind: "busy", count: e.waiting || 0, at, by: ctx.by }; info = e.waiting ? `${e.waiting} بالانتظار — بلّغوا اللي ما عندهم موعد` : ""; }
@@ -582,10 +597,11 @@ async function apply(evs, ctx) {
 }
 
 /* ---------- تغيير دوام → خيارات للمسؤول، يختار رقم، نطبّق الخيار الجاهز ونتأكد إنه انحفظ ---------- */
+const TODAYW = /(^|\s)(اليوم|الليله)(\s|$)/;
 const futureDay = (e, text, t) => (/^\d{4}-\d{2}-\d{2}$/.test(e.date || "") && e.date > t.iso ? e.date : null) || (() => { const d = textDay(text); return d && d > t.iso ? d : null; })();
-function needsConfirm(e, text, t) {
-  if (e.kind === "schedule_change") return true;
-  if (["starts_at", "leaves_at", "present"].includes(e.kind) && (EVERY.test(norm(text)) || futureDay(e, text, t))) return true;   // «كل خميس…» أو «بكرة/الخميس دوامه…»
+function needsConfirm(e, text, t) {                                            // التغيير الدائم بس — «اليوم/بكرة فقط» حالة يومية تنطبق على طول
+  if (e.kind === "schedule_change") { const n = norm(text); return EVERY.test(n) || PERMANENT.test(n) || !(dayOf(text) || TODAYW.test(n)); }   // «اليوم/بكرة/الخميس دوامه…» = يوم واحد → على طول
+  if (["starts_at", "leaves_at", "present", "free"].includes(e.kind) && EVERY.test(norm(text))) return true;   // «كل خميس…»
   return false;
 }
 const daysIn = text => { const n = norm(text), out = []; for (const [k, i] of DAYW) if (new RegExp("(^|\\s)(يوم\\s+)?(ال|و|وال)?" + k + "(\\s|$)").test(n) && !out.includes(i)) out.push(i); return out; };
@@ -899,8 +915,12 @@ async function handleClarify(m, text, who = "admin") {
   const cctx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + (who === "majed" ? " (تصحيح ماجد)" : " (تصحيح)"), rep: [], fix: true, fixText: text || "" };
   const applied = await apply(evs, cctx);
   if (applied.length && how === "حسب كلامك") learnAliases(it.evs, evs).catch(e => log.warn({ err: String(e?.message || e) }, "تعلّم الاسم"));
-  await say(applied.length ? `✅ طبّقتها ${how}:\n${cctx.rep.length ? cctx.rep.join("\n") : describeEvs(evs)}` : "ما انطبق شي — تأكد من اسم الطبيب.");
-  if (applied.length && it.key?.id) { try { await getSock()?.sendMessage(it.key.remoteJid, { react: { text: "✅", key: { ...it.key, participant: it.key.participant || undefined } } }); } catch {} }
+  const real = applied.filter(a => a !== "known");
+  const bad = real.length ? await verifyApplied(evs, cctx).catch(err => [String(err?.message || err)]) : [];
+  if (!real.length) { await say("ما انطبق شي — تأكد من اسم الطبيب ووش يتغيّر."); return true; }
+  if (bad.length) { await say(`❌ طبّقتها بس ما لقيتها محفوظة في الموقع: ${bad.join("، ")}\nأرسلها مرة ثانية أو عدّلها من صفحة الأطباء.`); return true; }
+  await say(`✅ طبّقتها ${how} وتأكدت إنها انحفظت:\n${cctx.rep.length ? cctx.rep.join("\n") : describeEvs(evs)}`);
+  if (it.key?.id) { try { await getSock()?.sendMessage(it.key.remoteJid, { react: { text: "✅", key: { ...it.key, participant: it.key.participant || undefined } } }); } catch {} }
   return true;
 }
 
@@ -1074,22 +1094,42 @@ export async function handleGroupMessage(m) {
       evs.unclear = true; evs.question = `الرسالة بعد 12 بالليل وفيها «بكرة»: تقصد ${d0} ${f(tn.iso)} (اليوم اللي بدأ) ولا ${d1} ${f(isoPlus(tn.iso, 1))}؟ رد باسم اليوم.`;
     } }
   const fromMajed = majed && (await groupSender(m).catch(() => "")) === majed;
-  if ((evs.unclear || (!evs.length && evs.unknown)) && (fromMajed || admins.length)) {
-    if (await askClarify(m, text, by, evs, fromMajed ? "majed" : "")) { try { await getSock()?.sendMessage(jid, { react: { text: "🤔", key: m.key } }); } catch {} return; }
-  }
-  if (!evs.length) { if (evs.unknown) { try { await getSock()?.sendMessage(jid, { react: { text: "❓", key: m.key } }); } catch {} } return; }
+  // القروب ما يطلع فيه إلا ✅ (بعد ما نتأكد). ما فهمنا؟ نسأل على الخاص بدون أي إيموجي في القروب
+  if ((evs.unclear || (!evs.length && evs.unknown)) && (fromMajed || admins.length)) { await askClarify(m, text, by, evs, fromMajed ? "majed" : ""); return; }
+  if (!evs.length) return;
   const ctx = { text, by, rep: [], m };
   let applied;
   try { applied = await apply(evs, ctx); }
   catch (err) {
     log.error({ err: String(err?.message || err), text: text.slice(0, 80) }, "رسالة القروب ما انطبقت");
     await dmAdmin(`❌ رسالة ${by} ما انطبقت على الجدول (صار خطأ):\n«${text.slice(0, 200)}»\n${String(err?.message || err).slice(0, 160)}\n\nطبّقها من صفحة الأطباء أو أرسلها مرة ثانية.`).catch(() => {});
-    try { await getSock()?.sendMessage(jid, { react: { text: "⚠️", key: m.key } }); } catch {}
     return;
   }
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");
-  if (applied.length && ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {});
-  // ✅ فهمها وطبّقها — ❓ فهم إنها عن طبيب بس ما عرف مين (يكتبون الاسم الثاني أو يردّون على رسالة فيها الاسم)
-  const react = applied.length && applied.every(a => a === "asked") ? "🤔" : applied.length ? "✅" : "❓";
-  try { await getSock()?.sendMessage(jid, { react: { text: react, key: m.key } }); } catch {}
+  if (!applied.length) { if (admins.length) await askClarify(m, text, by, Object.assign(evs, { question: "ما قدرت أطبّق منها شي — وش المقصود؟" })); return; }
+  if (applied.every(a => a === "known") && admins.length) { await askClarify(m, text, by, Object.assign(evs, { question: "فهمت الطبيب بس ما لقيت وش يتغيّر — وش المقصود؟" })); return; }
+  if (applied.every(a => a === "asked")) { if (ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {}); return; }   // ننتظر اختيارك، ✅ بعدها
+  // نتأكد من القاعدة إن اللي طبّقناه انحفظ فعلاً، وبعدها بس ✅
+  const bad = await verifyApplied(evs, ctx).catch(err => [String(err?.message || err)]);
+  if (bad.length) { await dmAdmin(`❌ رسالة ${by} ما انحفظت كاملة:\n«${text.slice(0, 200)}»\nاللي ما لقيته في الموقع: ${bad.join("، ")}\n\nأرسلها مرة ثانية أو عدّلها من صفحة الأطباء.`).catch(() => {}); return; }
+  if (ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {});
+  try { await getSock()?.sendMessage(jid, { react: { text: "✅", key: m.key } }); } catch {}
+}
+// بعد التطبيق: نقرا حالات اليوم والخطة (والجدول للإجازات) من القاعدة ونشيك كل طبيب
+async function verifyApplied(evs, ctx) {
+  const t = nowR(), bad = [];
+  const [td, pl] = await Promise.all([db.doc("board/bawadi_today").get(), db.doc("board/bawadi_plan").get()]);
+  const st = td.data()?.st || {}, events = td.data()?.events || [], items = pl.data()?.items || [];
+  let b = null;
+  for (const e of evs) {
+    if (e.__asked) continue;
+    const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept); if (!d) continue;
+    const nm = "د. " + shortName(d.name), fut = futureDay(e, ctx.text, t);
+    if (["vacation"].includes(e.kind)) { b ||= (await db.doc("board/bawadi").get()).data(); if (!(b?.vacations || []).some(v => v.doctorId === d.id)) bad.push(nm + " (الإجازة)"); continue; }
+    if (["returns", "info_change", "leaves_branch", "new_doctor", "moved", "schedule_change", "none"].includes(e.kind)) continue;   // لها تأكيدها الخاص
+    if (fut && PLAN_KINDS.includes(e.kind)) { if (!items.some(i => i.doctorId === d.id && i.date === fut)) bad.push(nm + " (حالة " + DAYN[new Date(fut + "T12:00:00Z").getUTCDay()] + ")"); continue; }
+    if (e.kind === "resume") { if (st[d.id]?.kind === "stop") bad.push(nm + " (رجع يستقبل)"); continue; }
+    if (!st[d.id] && !events.some(x => x.doctorId === d.id)) bad.push(nm + " (حالة اليوم)");
+  }
+  return bad;
 }
