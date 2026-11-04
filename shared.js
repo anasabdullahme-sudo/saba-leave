@@ -348,6 +348,10 @@ export async function compressImage(file, maxSide = 1800, quality = 0.85) {
     return blob || file;
   } catch { return file; }
 }
+export const TEAM_PART = 900000;                                   // حرف base64 في كل جزء (أقل من حد المستند 1 ميجا)
+export const TEAM_MAX = 25 * 1024 * 1024;                          // أكبر ملف 25 ميجا
+const splitB64 = b64 => { const o = []; for (let i = 0; i < b64.length; i += TEAM_PART) o.push(b64.slice(i, i + TEAM_PART)); return o; };
+export const b64ToBlob = (b64, mime) => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: mime || "application/octet-stream" }); };
 export const blobToBase64 = b => new Promise((res, rej) => {
   const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(b);
 });
@@ -774,6 +778,28 @@ async function liveBackend(role) {
       return ref.id;
     },
     watchWa(id, cb) { return FS.onSnapshot(FS.doc(db, "outbox", id), d => cb(d.exists() ? d.data() : null), e => cb({ sendStatus: "failed", sendError: e.code || e.message })); },
+    /* --- ملفات الفريق: من اللوحة لأنس/ماجد، ومن جوالهم للوحة. الملف يتقسّم أجزاء (كل جزء أقل من حد المستند) --- */
+    async sendTeam({ to, text, by, file }, onProgress) {
+      const ref = FS.doc(FS.collection(db, "teamFiles")), parts = file ? splitB64(file.b64) : [];
+      for (let i = 0; i < parts.length; i++) { await FS.setDoc(FS.doc(db, "teamFiles", ref.id, "parts", String(i)), { d: parts[i] }); onProgress?.((i + 1) / (parts.length + 1)); }
+      await FS.setDoc(ref, { dir: "out", to, text: text || "", by: by || "", parts: parts.length, ...(file ? { name: file.name, mime: file.mime, size: file.size } : {}), sendStatus: "queued", at: FS.serverTimestamp() });
+      onProgress?.(1);
+      return ref.id;
+    },
+    watchTeam(id, cb) { return FS.onSnapshot(FS.doc(db, "teamFiles", id), d => cb(d.exists() ? d.data() : null), e => cb({ sendStatus: "failed", sendError: e.code || e.message })); },
+    watchTeamInbox(cb) {
+      return FS.onSnapshot(FS.query(FS.collection(db, "teamFiles"), FS.where("dir", "==", "in")),
+        s => cb(s.docs.map(d => ({ id: d.id, ...d.data(), at: d.data().at?.toMillis?.() ?? d.data().at ?? 0 })).sort((a, b) => b.at - a.at)), e => console.warn("inbox", e?.code || e));
+    },
+    async getTeamFile(x, onProgress) {
+      const out = [];
+      for (let i = 0; i < (x.parts || 0); i++) { const d = await FS.getDoc(FS.doc(db, "teamFiles", x.id, "parts", String(i))); if (!d.exists()) throw new Error("جزء من الملف ناقص"); out.push(d.data().d); onProgress?.((i + 1) / x.parts); }
+      return b64ToBlob(out.join(""), x.mime);
+    },
+    async deleteTeamFile(x) {
+      for (let i = 0; i < (x.parts || 0); i++) await FS.deleteDoc(FS.doc(db, "teamFiles", x.id, "parts", String(i))).catch(() => {});
+      await FS.deleteDoc(FS.doc(db, "teamFiles", x.id));
+    },
     /* --- طلبات التعديل (الموظف ← بوت الواتساب ← المريض) --- */
     newFixId: () => FS.doc(FS.collection(db, "fixes")).id,
     async createFix(req, data, id) {
@@ -961,6 +987,12 @@ function demoBackend() {
     imageUrl: async path => path,
     async sendWa(data) { const id = "wa" + Date.now(); api._wa = { ...data, sendStatus: "queued" }; setTimeout(() => { api._wa = { ...api._wa, sendStatus: "sent" }; }, 1500); return id; },
     watchWa(id, cb) { cb(api._wa); const t = setInterval(() => cb(api._wa), 500); return () => clearInterval(t); },
+    async sendTeam(data, onProgress) { for (let i = 1; i <= 4; i++) { await new Promise(r => setTimeout(r, 150)); onProgress?.(i / 4); } const id = "tm" + Date.now(); api._tm = { ...data, file: undefined, sendStatus: "queued" }; setTimeout(() => { api._tm = { ...api._tm, sendStatus: "sent" }; }, 1500); return id; },
+    watchTeam(id, cb) { cb(api._tm); const t = setInterval(() => cb(api._tm), 500); return () => clearInterval(t); },
+    watchTeamInbox(cb) { const demo = [{ id: "in1", dir: "in", from: "anas", fromName: "أنس", name: "جدول الدوام.pdf", mime: "application/pdf", size: 182000, parts: 1, text: "جدول الأسبوع الجاي", at: Date.now() - 3600e3, exp: Date.now() + 6 * 864e5 }];
+      api._inCb = cb; cb(api._inbox ||= demo); return () => { api._inCb = null; }; },
+    async getTeamFile(x) { return new Blob(["ملف تجريبي: " + x.name], { type: "text/plain" }); },
+    async deleteTeamFile(x) { api._inbox = (api._inbox || []).filter(y => y.id !== x.id); api._inCb?.(api._inbox); },
     // طلبات التعديل (تجريبي) — لتجربة البوت: localStorage.saba_demo_bot = "1"
     newFixId: () => Array.from({ length: 20 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 62)]).join(""),
     async createFix(req, data, id) {

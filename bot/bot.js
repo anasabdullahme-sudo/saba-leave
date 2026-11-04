@@ -4,7 +4,7 @@
    - يراقب طلبات التعديل اللي ينشئها الموظفين (fixes: sendStatus = queued)
    - يرسلها للمريض واتساب، ويكتب النتيجة (sent / failed) عشان تظهر للموظف
    ========================================================================== */
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } from "baileys";
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, downloadMediaMessage } from "baileys";
 import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.8.2";
+const VERSION = "2.9.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -68,7 +68,7 @@ async function connect() {
       // رقم البوت للعامة (زر «استفسر واتساب» في صفحة المراجع)
       db.doc("public/bot").set({ wa: String(me).split(/[:@]/)[0], at: TS(), seen: Date.now() }, { merge: true }).catch(() => {});
       log.info({ me }, "واتساب متصل");
-      drain(); drainWa();
+      drain(); drainWa(); drainTeam();
     }
     if (connection === "close") {
       connected = false;
@@ -170,6 +170,86 @@ async function drainWa() {
   try { for (const id of [...waQueue]) { if (!connected) break; waQueue.delete(id); await sendWaOne(id); await sleep(1500 + Math.random() * 1500); } }
   catch (e) { log.error({ e }, "drainWa"); }
   finally { waBusy = false; if (waQueue.size && connected) setTimeout(drainWa, 1000); }
+}
+
+/* ---------- ملفات الفريق (أنس / ماجد) ----------
+   من اللوحة: الموظف يرفع ملف (أجزاء) والبوت يرسله لجوال أنس أو ماجد.
+   من الجوال: أنس أو ماجد يرسلون ملف للبوت → يطلع في اللوحة «📥 ملفات واردة» وينحذف بعد 7 أيام. */
+const DAY_MS = 864e5, TEAM_PART = 900000, TEAM_MAX = 25 * 1024 * 1024, TEAM_KEEP = 7 * DAY_MS;
+const p9 = x => String(x || "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\D/g, "").replace(/^(00)?966/, "").replace(/^0/, "");
+const TEAM = { anas: { name: "أنس", phone: p9(String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0]) }, majed: { name: "ماجد", phone: p9(process.env.MAJED_PHONE) } };
+const teamOf = phone => { const d = p9(phone); return d ? Object.keys(TEAM).find(k => TEAM[k].phone && TEAM[k].phone === d) || null : null; };
+const teamQueue = new Set(); let teamBusy = false;
+async function sendTeamOne(id) {
+  const ref = db.doc(`teamFiles/${id}`);
+  const o = await db.runTransaction(async tx => { const d = await tx.get(ref); if (!d.exists || d.get("sendStatus") !== "queued") return null; tx.update(ref, { sendStatus: "sending" }); return d.data(); });
+  if (!o) return;
+  try {
+    const t = TEAM[o.to]; if (!t?.phone) throw new Error(o.to === "majed" ? "رقم ماجد مو مضاف في Railway (MAJED_PHONE)" : "رقم أنس مو مضاف (ADMIN_PHONE)");
+    const [w] = await sock.onWhatsApp("966" + t.phone); if (!w?.exists) throw new Error("الرقم ما عليه واتساب");
+    const cap = [`📎 من لوحة سابا${o.by ? " — " + o.by : ""}`, String(o.text || "").trim().slice(0, 1500)].filter(Boolean).join("\n");
+    if (o.parts) {
+      const parts = [];
+      for (let i = 0; i < o.parts; i++) { const p = await db.doc(`teamFiles/${id}/parts/${i}`).get(); if (!p.exists) throw new Error("جزء من الملف ما وصل — أعد الإرسال"); parts.push(p.get("d")); }
+      const buf = Buffer.from(parts.join(""), "base64");
+      if (/^image\/(jpeg|png|webp)$/.test(o.mime || "")) await sock.sendMessage(w.jid, { image: buf, mimetype: o.mime, caption: cap });
+      else await sock.sendMessage(w.jid, { document: buf, mimetype: o.mime || "application/octet-stream", fileName: o.name || "ملف", caption: cap });
+    } else await sock.sendMessage(w.jid, { text: cap });
+    await ref.update({ sendStatus: "sent", sentAt: TS() });
+    log.info({ id, to: o.to, size: o.size || 0 }, "ملف من اللوحة انرسل للفريق");
+  } catch (e) {
+    log.warn({ id, err: String(e?.message || e) }, "ملف الفريق ما انرسل");
+    await ref.update({ sendStatus: "failed", sendError: String(e?.message || e).slice(0, 200) }).catch(() => {});
+  }
+  for (let i = 0; i < (o.parts || 0); i++) await db.doc(`teamFiles/${id}/parts/${i}`).delete().catch(() => {});   // الملف وصل جوالهم — ما نخليه في القاعدة
+}
+async function drainTeam() {
+  if (teamBusy || !connected || !teamQueue.size) return;
+  teamBusy = true;
+  try { for (const id of [...teamQueue]) { if (!connected) break; teamQueue.delete(id); await sendTeamOne(id); await sleep(800); } }
+  catch (e) { log.error({ e }, "drainTeam"); }
+  finally { teamBusy = false; if (teamQueue.size && connected) setTimeout(drainTeam, 1000); }
+}
+// ملف من جوال أنس/ماجد للبوت → اللوحة
+async function saveTeamFile(m, who) {
+  const msg = m.message || {}, k = ["documentMessage", "imageMessage", "videoMessage", "documentWithCaptionMessage"].find(x => msg[x]);
+  if (!k) return false;
+  const inner = k === "documentWithCaptionMessage" ? msg[k].message?.documentMessage : msg[k];
+  const mm = k === "documentWithCaptionMessage" ? { ...m, message: msg[k].message } : m;
+  const size = Number(inner?.fileLength || 0);
+  const jid = m.key.remoteJid;
+  if (size > TEAM_MAX) { await sock.sendMessage(jid, { text: `⚠ الملف أكبر من 25 ميجا (${Math.round(size / 1048576)} ميجا) — ما قدرت أحطه في اللوحة.` }, { quoted: m }).catch(() => {}); return true; }
+  try {
+    const buf = await downloadMediaMessage(mm, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage });
+    if (buf.length > TEAM_MAX) throw new Error("أكبر من 25 ميجا");
+    const mime = inner?.mimetype?.split(";")[0] || "application/octet-stream";
+    const ext = { "image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4", "application/pdf": "pdf" }[mime] || "";
+    const name = String(inner?.fileName || `${k === "imageMessage" ? "صورة" : k === "videoMessage" ? "فيديو" : "ملف"}-${new Date().toISOString().slice(0, 10)}${ext ? "." + ext : ""}`).slice(0, 120);
+    const b64 = buf.toString("base64"), ref = db.collection("teamFiles").doc(), n = Math.ceil(b64.length / TEAM_PART);
+    for (let i = 0; i < n; i++) await ref.collection("parts").doc(String(i)).set({ d: b64.slice(i * TEAM_PART, (i + 1) * TEAM_PART) });
+    const text = String(inner?.caption || "").trim().slice(0, 1500);
+    await ref.set({ dir: "in", from: who, fromName: TEAM[who].name, name, mime, size: buf.length, parts: n, text, at: TS(), exp: Date.now() + TEAM_KEEP });
+    await sock.sendMessage(jid, { text: `✅ وصل «${name}» وحطيته في لوحة الموظفين (📥 ملفات واردة). ينحذف بعد 7 أيام.` }, { quoted: m }).catch(() => {});
+    log.info({ who, size: buf.length, parts: n }, "ملف وارد للوحة");
+  } catch (e) {
+    log.warn({ err: String(e?.message || e) }, "ملف وارد");
+    await sock.sendMessage(jid, { text: "⚠ ما قدرت أحفظ الملف — أرسله مرة ثانية." }, { quoted: m }).catch(() => {});
+  }
+  return true;
+}
+// تنظيف: الواردة بعد 7 أيام، والمرسلة بعد يوم، والأجزاء اليتيمة (رفع ما كمل)
+async function cleanTeamFiles() {
+  try {
+    const refs = await db.collection("teamFiles").listDocuments();
+    for (const r of refs) {
+      const d = await r.get(), x = d.data();
+      const old = !d.exists ? true : x.dir === "in" ? (x.exp || 0) < Date.now() : ["sent", "failed"].includes(x.sendStatus) && Date.now() - (x.at?.toMillis?.() || 0) > DAY_MS;
+      if (old) {
+        if (!d.exists) { const ps = await r.collection("parts").get(); if (ps.docs.some(p => Date.now() - (p.createTime?.toMillis?.() || 0) < 3600e3)) continue; }   // رفع شغّال الحين
+        await db.recursiveDelete(r);
+      }
+    }
+  } catch (e) { log.warn({ err: String(e?.message || e) }, "تنظيف ملفات الفريق"); }
 }
 
 /* ==========================================================================
@@ -440,6 +520,16 @@ function bufferIncoming(m) {
   const jid = m.key?.remoteJid || "";
   const msg = m.message || {};
   const plainDm = jid && !jid.endsWith("@g.us") && !m.key?.fromMe && !jid.includes("broadcast") && !jid.endsWith("@newsletter");
+  // ملف من أنس/ماجد (مو رد على استفسار مراجع) → يروح للوحة على طول، بدون تجميع مع رسائل ثانية
+  const isFile = msg.documentMessage || msg.imageMessage || msg.videoMessage || msg.documentWithCaptionMessage;
+  const ctxQ = (msg.documentMessage || msg.imageMessage || msg.videoMessage)?.contextInfo?.stanzaId;
+  const capT = String((msg.documentMessage || msg.imageMessage || msg.videoMessage || msg.documentWithCaptionMessage?.message?.documentMessage)?.caption || "").trim();
+  if (plainDm && isFile && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT) && !m._teamChecked) {   // «P7KQ …» = رد المسؤول لمراجع (مو ملف للوحة)
+    m._teamChecked = true;
+    senderPhoneOf(m).then(ph => { const who = teamOf(ph); return who ? saveTeamFile(m, who) : bufferIncoming(m); })
+      .catch(e => { log.warn({ err: String(e?.message || e) }, "ملف وارد"); bufferIncoming(m); });
+    return;
+  }
   const quoted = msg.extendedTextMessage?.contextInfo?.stanzaId;
   if (!plainDm || quoted || msg.protocolMessage || msg.reactionMessage || msg.editedMessage) return onIncoming(m).catch(e => log.warn({ err: String(e?.message || e) }, "رسالة واردة"));
   let b = bursts.get(jid);
@@ -463,6 +553,12 @@ function mergeBurst(list) {
   return { ...last, message: { conversation: text }, burst: list.length };
 }
 
+async function senderPhoneOf(m) {
+  const jid = m.key?.remoteJid || "";
+  let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
+  if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
+  return normPhone(String(pnJid).split(/[:@]/)[0]);
+}
 async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
   if (!m.key?.fromMe && jid.endsWith("@g.us")) return handleGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
@@ -477,9 +573,7 @@ async function onIncoming(m) {
   // حماية من الحلقات (بوت ثاني يرد علينا): بالكثير 5 دفعات ردود خلال دقيقتين — الرسايل المتتالية أصلاً تتجمّع فوق
   const hits = (loopGuard.get(jid) || []).filter(t => now - t < 120000); hits.push(now); loopGuard.set(jid, hits);
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
-  let pnJid = jid.endsWith("@s.whatsapp.net") ? jid : (m.key.remoteJidAlt || "");
-  if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
-  const senderPhone = normPhone(String(pnJid).split(/[:@]/)[0]);
+  const senderPhone = await senderPhoneOf(m);
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
   if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
   const t = latin(text).toUpperCase();
@@ -970,6 +1064,12 @@ async function main() {
   db.collection("outbox").where("sendStatus", "==", "queued").onSnapshot(
     s => { s.docs.forEach(d => waQueue.add(d.id)); drainWa(); },
     e => log.error({ e }, "outbox listener"));
+  const stuckTeam = await db.collection("teamFiles").where("sendStatus", "==", "sending").get().catch(() => ({ docs: [] }));
+  for (const d of stuckTeam.docs) await d.ref.update({ sendStatus: "failed", sendError: "انقطع البوت أثناء الإرسال — أعد الإرسال" }).catch(() => {});
+  db.collection("teamFiles").where("sendStatus", "==", "queued").onSnapshot(
+    s => { s.docs.forEach(d => teamQueue.add(d.id)); drainTeam(); },
+    e => log.error({ e }, "teamFiles listener"));
+  cleanTeamFiles(); setInterval(cleanTeamFiles, 6 * 3600e3);
 
   // أوامر المسؤول من اللوحة (فك الربط)
   const started = Date.now();

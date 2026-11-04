@@ -142,6 +142,11 @@ main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
 .docph label{display:flex;align-items:center;gap:8px;font-size:14px}
 .docph label span{flex:1}
 .docph input{width:150px;direction:ltr;text-align:left;border:1.5px solid var(--line);border-radius:10px;padding:7px 9px;font:inherit}
+.bot-pill.team{color:var(--navy);font-weight:700;white-space:nowrap;padding:0 10px}.bot-pill.team b{background:#E24C4B;color:#fff;border-radius:99px;font-size:11px;min-width:18px;height:18px;display:inline-grid;place-items:center;padding:0 5px}
+.inrow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:12px;margin-top:8px}
+.inrow .nm{font-weight:700;word-break:break-all}.inrow .mt{font-size:12.5px;color:var(--muted)}.inrow .tx{grid-column:1/-1;font-size:13px;background:var(--ice);border-radius:8px;padding:6px 8px}
+.inrow .bt{display:flex;gap:6px}.inrow.new{border-color:#00A6E2;background:#F3FAFE}
+.tm-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}.tm-bar i{display:block;height:100%;width:0;background:#00A6E2;transition:width .2s}
 .bot-pill{height:34px;display:inline-flex;align-items:center;gap:7px;padding:0 12px;border-radius:99px;border:1px solid var(--line);background:var(--white);color:var(--muted);font-size:13px;font-weight:600}
 .bot-pill i{width:8px;height:8px;border-radius:50%;background:#B8C4CF}
 .bot-pill.on i{background:var(--ok)} .bot-pill.on{color:#0B6E4F}
@@ -293,6 +298,9 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <a class="admin-btn" href="./doctors.html" style="display:inline-flex;align-items:center;text-decoration:none" title="جداول أطباء البوادي">جداول الأطباء</a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who" title="اسم هالجهاز"></span>
+      <button class="bot-pill team" data-team="anas" title="أرسل رسالة أو ملف لأنس على الواتساب">💬 أنس</button>
+      <button class="bot-pill team" data-team="majed" title="أرسل رسالة أو ملف لماجد على الواتساب">💬 ماجد</button>
+      <button class="bot-pill team" id="inBtn" title="ملفات أرسلها أنس أو ماجد للبوت">📥 الوارد<b id="inN" hidden></b></button>
       <button class="bot-pill" id="botPill" title="بوت الواتساب لطلبات التعديل"><i></i><span>واتساب</span></button>
       <button class="admin-btn" id="btnClean" hidden>تنظيف الصور</button>
       <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
@@ -418,6 +426,25 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
     <div class="btn-row"><button class="btn btn-primary" id="waSend">إرسال</button><button class="btn btn-ghost" id="waClose">إغلاق</button></div>
   </div>
 </div>
+<div class="modal" id="teamModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="tmTtl" style="width:min(480px,100%)">
+    <h3 id="tmTtl">💬 رسالة لأنس</h3>
+    <p style="margin:0;color:var(--muted);font-size:13.5px">توصله على الواتساب من رقم البوت. تقدر ترفق صورة أو PDF أو وورد أو أي ملف (لين 25 ميجا).</p>
+    <textarea id="tmText" maxlength="1400" placeholder="اكتب الرسالة…" style="min-height:100px"></textarea>
+    <div class="wa-file"><label class="btn btn-ghost" for="tmFile" style="cursor:pointer">📎 إرفاق ملف</label><input type="file" id="tmFile" hidden><span id="tmFileName"></span><button class="lnk" id="tmFileX" hidden>✕ شيل الملف</button></div>
+    <div class="tm-bar" id="tmBar" hidden><i></i></div>
+    <div class="fx-state" id="tmState" hidden></div>
+    <div class="btn-row"><button class="btn btn-primary" id="tmSend">إرسال</button><button class="btn btn-ghost" id="tmClose">إغلاق</button></div>
+  </div>
+</div>
+<div class="modal" id="inModal" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="inTtl" style="width:min(560px,100%)">
+    <h3 id="inTtl">📥 ملفات واردة</h3>
+    <p style="margin:0;color:var(--muted);font-size:13.5px">أرسلها أنس أو ماجد لرقم البوت. تنحذف لحالها بعد 7 أيام.</p>
+    <div id="inList" style="max-height:60vh;overflow:auto"></div>
+    <div class="btn-row"><button class="btn btn-ghost" id="inClose">إغلاق</button></div>
+  </div>
+</div>
 <div class="modal" id="botModal" hidden>
   <div class="box" role="dialog" aria-modal="true" aria-labelledby="botTtl">
     <h3 id="botTtl">بوت الواتساب</h3>
@@ -438,7 +465,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104b";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261104c";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -474,12 +501,13 @@ api.onAuth(user => {
     $("#vApp").hidden = true; $("#vLogin").hidden = false;
     $("#loginErr").textContent = user?.denied ? "هذا الحساب غير مفعّل كموظف. تواصل مع المسؤول." : "";
     if (user?.denied) api.logout();
-    S.unsub?.(); S.unsub = null; return;
+    S.unsub?.(); S.unsub = null; S.inUnsub?.(); S.inUnsub = null; return;
   }
   $("#vLogin").hidden = true; $("#vApp").hidden = false;
   setTimeout(ensureDevice, 300);
   $("#btnClean").hidden = !(user.role === "admin" && api.cleanupImages);
   setTimeout(start, 0);   // بعد ما يكتمل تحميل الصفحة (بعض الدوال معرّفة تحت)
+  setTimeout(() => startInbox(), 0);
 });
 $("#loginForm").addEventListener("submit", async e => {
   e.preventDefault(); $("#loginErr").textContent = "";
@@ -846,7 +874,7 @@ $("#waFile").onchange = async () => {
     let blob = f, mime = f.type, name = f.name || "ملف";
     if (/^image\//.test(mime)) { blob = await compressImage(f, 2000, 0.82); mime = "image/jpeg"; name = name.replace(/\.[^.]+$/, "") + ".jpg"; }
     else if (mime !== "application/pdf") { $("#waFile").value = ""; return toast("الملف لازم يكون صورة أو PDF"); }
-    if (blob.size > 700 * 1024) { $("#waFile").value = ""; return toast(`الملف كبير (${Math.round(blob.size / 1024)} كيلو) — الحد 700 كيلو. صغّر الـ PDF أو أرسل صورة`, 5000); }
+    if (blob.size > 700 * 1024) { $("#waFile").value = ""; return toast(`الملف كبير (${Math.round(blob.size / 1024)} كيلو) — الحد 700 كيلو. صغّر الـ PDF أو أرسل صورة`); }
     waFile = { name: name.slice(0, 110), mime, b64: await b64Of(blob) };
     $("#waFileName").textContent = `📎 ${name} (${Math.max(1, Math.round(blob.size / 1024))} كيلو)`; $("#waFileX").hidden = false;
   } catch (e) { console.error(e); $("#waFile").value = ""; toast("ما قدرت أقرا الملف"); }
@@ -856,7 +884,7 @@ $("#waSend").onclick = async () => {
   const x = waReq; if (!x) return;
   const text = $("#waText").value.trim();
   if (!text && !waFile) return toast("اكتب رسالة أو أرفق ملف");
-  if (!botOnline()) toast("⚠ البوت مو متصل الحين — الرسالة بتنرسل أول ما يرجع", 4000);
+  if (!botOnline()) toast("⚠ البوت مو متصل الحين — الرسالة بتنرسل أول ما يرجع");
   const st = $("#waState"), btn = $("#waSend");
   btn.disabled = true; btn.textContent = "يرسل…"; st.hidden = false; st.textContent = "⏳ في الطريق للبوت…";
   try {
@@ -873,6 +901,92 @@ $("#waSend").onclick = async () => {
     btn.disabled = false; btn.textContent = "أعد الإرسال";
   }
 };
+
+/* ---------- رسالة/ملف لأنس أو ماجد + الملفات الواردة منهم ---------- */
+const TEAM_NAME = { anas: "أنس", majed: "ماجد" };
+let tmTo = null, tmFile = null, tmUnsub = null, tmTimer = 0;
+const kb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " ميجا" : Math.max(1, Math.round(n / 1024)) + " كيلو";
+function openTeam(to) {
+  tmTo = to; tmFile = null; tmUnsub?.(); tmUnsub = null; clearTimeout(tmTimer);
+  $("#tmTtl").textContent = `💬 رسالة لـ${TEAM_NAME[to]}`;
+  $("#tmText").value = ""; $("#tmFile").value = ""; $("#tmFileName").textContent = ""; $("#tmFileX").hidden = true;
+  $("#tmState").hidden = true; $("#tmBar").hidden = true; $("#tmSend").disabled = false; $("#tmSend").textContent = "إرسال";
+  $("#teamModal").hidden = false; setTimeout(() => $("#tmText").focus(), 50);
+}
+function closeTeam() { $("#teamModal").hidden = true; tmUnsub?.(); tmUnsub = null; clearTimeout(tmTimer); tmTo = null; tmFile = null; }
+document.querySelectorAll("[data-team]").forEach(b => b.onclick = () => openTeam(b.dataset.team));
+$("#tmClose").onclick = closeTeam;
+$("#teamModal").addEventListener("click", e => { if (e.target.id === "teamModal") closeTeam(); });
+$("#tmFile").onchange = async () => {
+  const f = $("#tmFile").files[0]; tmFile = null; $("#tmFileName").textContent = ""; $("#tmFileX").hidden = true; if (!f) return;
+  try {
+    let blob = f, mime = f.type || "application/octet-stream", name = f.name || "ملف";
+    if (/^image\/(jpeg|png|webp|heic|heif)$/.test(mime) && f.size > 3 * 1048576) { blob = await compressImage(f, 2600, 0.88); mime = "image/jpeg"; name = name.replace(/\.[^.]+$/, "") + ".jpg"; }   // صورة ضخمة → نصغّرها شوي
+    if (blob.size > TEAM_MAX) { $("#tmFile").value = ""; return toast(`الملف ${kb(blob.size)} — الحد 25 ميجا`); }
+    tmFile = { name: name.slice(0, 110), mime: mime.slice(0, 110), size: blob.size, b64: await b64Of(blob) };
+    $("#tmFileName").textContent = `📎 ${name} (${kb(blob.size)})`; $("#tmFileX").hidden = false;
+  } catch (e) { console.error(e); $("#tmFile").value = ""; toast("ما قدرت أقرا الملف"); }
+};
+$("#tmFileX").onclick = () => { tmFile = null; $("#tmFile").value = ""; $("#tmFileName").textContent = ""; $("#tmFileX").hidden = true; };
+$("#tmSend").onclick = async () => {
+  const to = tmTo; if (!to) return;
+  const text = $("#tmText").value.trim();
+  if (!text && !tmFile) return toast("اكتب رسالة أو أرفق ملف");
+  if (!api.sendTeam) return toast("حدّث الصفحة (F5) وجرّب مرة ثانية");
+  if (!botOnline()) toast("⚠ البوت مو متصل الحين — بتنرسل أول ما يرجع");
+  const st = $("#tmState"), btn = $("#tmSend"), bar = $("#tmBar");
+  btn.disabled = true; btn.textContent = "يرفع…"; st.hidden = false; st.textContent = tmFile ? "⏳ نرفع الملف…" : "⏳ في الطريق للبوت…";
+  bar.hidden = !tmFile; bar.firstElementChild.style.width = "0%";
+  try {
+    const id = await api.sendTeam({ to, text, by: myName(), file: tmFile }, p => { bar.firstElementChild.style.width = Math.round(p * 100) + "%"; });
+    st.textContent = "⏳ وصل للبوت، يرسله الحين…";
+    tmUnsub = api.watchTeam(id, d => {
+      const s2 = d?.sendStatus;
+      if (s2 === "sent") { st.textContent = `✅ انرسلت لـ${TEAM_NAME[to]} على الواتساب`; btn.textContent = "انرسلت ✓"; tmUnsub?.(); tmUnsub = null; clearTimeout(tmTimer); setTimeout(() => { if (!$("#teamModal").hidden && tmTo === to) closeTeam(); }, 2500); }
+      if (s2 === "failed") { st.textContent = "✗ ما انرسلت: " + (d.sendError || "خطأ"); btn.disabled = false; btn.textContent = "أعد الإرسال"; tmUnsub?.(); tmUnsub = null; clearTimeout(tmTimer); }
+    });
+    tmTimer = setTimeout(() => { tmUnsub?.(); tmUnsub = null; st.textContent = "⏳ للحين ما انرسلت — البوت بيرسلها أول ما يتصل (تقدر تسكّر النافذة)"; btn.disabled = false; btn.textContent = "إرسال"; }, 120000);
+  } catch (e) {
+    console.error(e); st.textContent = "✗ ما انرفعت: " + (e?.code === "permission-denied" ? "ما عندك صلاحية — حدّث الصفحة" : e?.code || e?.message || "خطأ");
+    btn.disabled = false; btn.textContent = "أعد الإرسال";
+  }
+};
+// الملفات الواردة (من جوال أنس/ماجد)
+let inFiles = [];
+const IN_SEEN = "saba_staff_inSeen";
+const inSeen = () => { try { return new Set(JSON.parse(localStorage.getItem(IN_SEEN) || "[]")); } catch { return new Set(); } };
+function renderInBadge() { const seen = inSeen(), n = inFiles.filter(x => !seen.has(x.id)).length; $("#inN").hidden = !n; $("#inN").textContent = n; }
+function renderInList() {
+  const seen = inSeen();
+  $("#inList").innerHTML = inFiles.length ? inFiles.map(x => `<div class="inrow ${seen.has(x.id) ? "" : "new"}">
+      <div><div class="nm">📎 ${esc(x.name || "ملف")}</div><div class="mt">من ${esc(x.fromName || TEAM_NAME[x.from] || "")} · ${esc(timeAgo(x.at))} · ${esc(kb(x.size || 0))} · ينحذف بعد ${Math.max(0, Math.ceil(((x.exp || 0) - Date.now()) / 864e5))} يوم</div></div>
+      <div class="bt"><button class="btn btn-primary" data-dl="${esc(x.id)}" style="height:36px;padding:0 14px">تحميل</button><button class="btn btn-ghost" data-del="${esc(x.id)}" style="height:36px;padding:0 12px">حذف</button></div>
+      ${x.text ? `<div class="tx">${esc(x.text)}</div>` : ""}</div>`).join("") : '<p style="color:var(--muted);text-align:center;margin:18px 0">ما فيه ملفات واردة. أرسل ملف من جوالك لرقم البوت ويطلع هنا.</p>';
+}
+function startInbox() {                                         // بعد تسجيل الدخول (القواعد تسمح للموظف بس)
+  S.inUnsub?.();
+  S.inUnsub = api.watchTeamInbox?.(list => { inFiles = list.filter(x => !x.exp || x.exp > Date.now()); renderInBadge(); if (!$("#inModal").hidden) renderInList(); }) || null;
+}
+$("#inBtn").onclick = () => { renderInList(); $("#inModal").hidden = false; };
+$("#inClose").onclick = () => { $("#inModal").hidden = true; };
+$("#inModal").addEventListener("click", async e => {
+  if (e.target.id === "inModal") { $("#inModal").hidden = true; return; }
+  const dl = e.target.closest("[data-dl]"), del = e.target.closest("[data-del]");
+  const x = inFiles.find(y => y.id === (dl || del)?.dataset[dl ? "dl" : "del"]); if (!x) return;
+  if (dl) {
+    dl.disabled = true; dl.textContent = "يحمّل…";
+    try {
+      const blob = await api.getTeamFile(x, p => { dl.textContent = `يحمّل ${Math.round(p * 100)}%`; });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = x.name || "ملف"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      const s2 = inSeen(); s2.add(x.id); try { localStorage.setItem(IN_SEEN, JSON.stringify([...s2].slice(-200))); } catch {}
+      renderInBadge(); renderInList();
+    } catch (err) { console.error(err); toast("ما قدرت أحمّل الملف: " + (err?.message || "خطأ")); dl.disabled = false; dl.textContent = "تحميل"; }
+  }
+  if (del) {
+    if (del.dataset.sure !== "1") { del.dataset.sure = "1"; del.textContent = "متأكد؟"; setTimeout(() => { if (del.isConnected) { del.dataset.sure = ""; del.textContent = "حذف"; } }, 4000); return; }
+    del.disabled = true; try { await api.deleteTeamFile(x); toast("انحذف الملف"); } catch (err) { console.error(err); toast("ما قدرت أحذفه"); del.disabled = false; }
+  }
+});
 
 /* ---------- التعليق ---------- */
 let holdReason = null;

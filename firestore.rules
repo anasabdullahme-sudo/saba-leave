@@ -91,6 +91,30 @@ service cloud.firestore {
     }
 
     // رسالة واتساب للمراجع من اللوحة (نص + ملف صغير): الموظف ينشئها، البوت يرسلها ويحدّث حالتها
+    // ملفات الفريق: الموظف يرسل ملف لأنس/ماجد (dir=out، البوت يرسله)، والبوت يحط ملفاتهم الواردة (dir=in، تنحذف بعد 7 أيام)
+    match /teamFiles/{id} {
+      allow get, list: if isStaff();
+      allow update: if false;
+      allow delete: if isStaff() && resource.data.dir == 'in';
+      allow create: if isStaff() && autoId(id)
+        && request.resource.data.keys().hasOnly(['dir', 'to', 'text', 'by', 'parts', 'name', 'mime', 'size', 'sendStatus', 'at'])
+        && request.resource.data.dir == 'out' && request.resource.data.to in ['anas', 'majed']
+        && request.resource.data.sendStatus == 'queued'
+        && request.resource.data.parts is int && request.resource.data.parts >= 0 && request.resource.data.parts <= 40
+        && request.resource.data.text is string && request.resource.data.text.size() <= 1500
+        && request.resource.data.by is string && request.resource.data.by.size() <= 60
+        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 120))
+        && (!('mime' in request.resource.data) || (request.resource.data.mime is string && request.resource.data.mime.size() <= 120))
+        && (!('size' in request.resource.data) || (request.resource.data.size is int && request.resource.data.size <= 26214400));
+      match /parts/{p} {
+        allow get: if isStaff();
+        allow list, update: if false;
+        allow delete: if isStaff();
+        allow create: if isStaff() && p.matches('^[0-9]{1,2}$')
+          && request.resource.data.keys().hasOnly(['d']) && request.resource.data.d is string && request.resource.data.d.size() <= 900000;
+      }
+    }
+
     match /outbox/{id} {
       allow get: if isStaff();
       allow list, update, delete: if false;
