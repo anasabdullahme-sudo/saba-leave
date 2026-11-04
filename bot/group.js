@@ -311,11 +311,13 @@ function ruleParse(text, quoted) {
     const n = norm(line); if (!n || /^سابا ?1$/.test(n)) continue;
     const d = fuzzyPick(line) || null, kind = kindOf(n);
     if (d) last = d;
-    if (!kind) continue;
+    const RG = /(?:^|\s)(?:من\s*)?(\d{1,2})(?::(\d{2}))?\s*(?:ص|م)?\s*(?:[-–]|\s(?:الى|الي|إلى|لين|الين|لحد|حتى|ل)\s*)\s*(\d{1,2})(?::(\d{2}))?/, fr = /(^|\s)من\s*\d/.test(latin(n)) ? RG.exec(latin(n)) : null;
+    if (!kind && d && fr) { evs.push({ doctor_id: d.id, name: shortName(d.name), kind: "starts_at", at_time: `${String(+fr[1]).padStart(2, "0")}:${fr[2] || "00"}`, until_time: `${String(+fr[3]).padStart(2, "0")}:${fr[4] || "00"}` }); continue; }   // «د رائد كل خميس من 2 الى 7»
+    if (!kind) { if (d) unknown = true; continue; }                                 // طبيب بدون شي مفهوم → نسأل المسؤول (مو نسكت)
     const who = d || last;
     if (!who) { unknown = true; continue; }
     const tm = timeIn(n), e = { doctor_id: who.id, name: shortName(who.name), kind };
-    const rg = /(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/.exec(latin(line));          // «من ٤-١٠» = دوام اليوم من 4 إلى 10
+    const rg = /(\d{1,2})(?::(\d{2}))?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?/.exec(latin(line)) || fr;          // «من ٤-١٠» / «من 2 لين 7» = دوام اليوم من 4 إلى 10
     if (rg && (kind === "present" || kind === "starts_at")) { e.kind = "starts_at"; e.at_time = `${String(+rg[1]).padStart(2, "0")}:${rg[2] || "00"}`; e.until_time = `${String(+rg[3]).padStart(2, "0")}:${rg[4] || "00"}`; evs.push(e); continue; }
     if (kind === "late_wait") {                                                                   // «بيتأخر يجي 3:30 ويستقبل انتظار الى ٥ والباقي مواعيد»
       const ts = [...latin(n).matchAll(/(\d{1,2})(?::(\d{2}))?/g)].map(m => `${String(+m[1]).padStart(2, "0")}:${m[2] || "00"}`);
@@ -324,7 +326,7 @@ function ruleParse(text, quoted) {
       continue;
     }
     if (kind === "present" && tm && /(^|\s)(الين|لين|الى|إلى|لحد|حتى)\s/.test(n)) { e.kind = "leaves_at"; e.at_time = tm; evs.push(e); continue; }   // «مداوم الين ٦:٣٠» = يطلع ٦:٣٠
-    if (kind === "late") e.delay_minutes = /ساعه/.test(n) ? 60 : 20;
+    if (kind === "late") e.delay_minutes = /نص ساعه|نصف ساعه/.test(n) ? 30 : /ربع/.test(n) ? 15 : /ساعتين/.test(n) ? 120 : /ساعه/.test(n) ? 60 : 20;
     if (kind === "busy") e.waiting = +((/(\d+)\s*انتظار/.exec(n) || [])[1] || 0);
     if (["stop", "leaves_at", "starts_at"].includes(kind) && tm) e.at_time = tm;
     if (kind === "present" && tm) e.until_time = tm;
@@ -629,10 +631,12 @@ const T = sh => (sh || []).map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") ||
 const dm = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 function buildOptions(d, e, text, t) {
   const sc = schedOf(text), ok = k => e[k] && timeInText(e[k], text) ? toMin(e[k]) : null;
-  const from = ok("from_time") ?? ok("at_time") ?? sc.from, to = ok("to_time") ?? ok("until_time") ?? sc.to;
-  if (from == null || to == null) return null;
-  const shifts = [{ s: from, e: to }], wd = (d.workdays || []).slice().sort((a, b) => a - b), n = norm(text);
   const named = everyDays(text).length ? everyDays(text) : (Array.isArray(e.days) && e.days.length ? e.days : daysIn(text)).filter(x => x !== 5);
+  const fitT = m => m == null || /(^|\s|\d)(ص|صباحا|الصبح)(\s|$)/.test(norm(text)) ? m : fitMin(m, d, named[0] ?? t.wd) % 1440;   // «من 2 الى 7» = 2م–7م حسب دوامه
+  let from = fitT(ok("from_time") ?? ok("at_time") ?? sc.from), to = fitT(ok("to_time") ?? ok("until_time") ?? sc.to);
+  if (from == null || to == null) return null;
+  if (to <= from && to < 720 && from < 720) to += 720;
+  const shifts = [{ s: from, e: to }], wd = (d.workdays || []).slice().sort((a, b) => a - b), n = norm(text);
   const fut = futureDay(e, text, t) || (named.length === 1 && !EVERY.test(n) ? nextOcc(named[0], t) : null);
   const opts = [];
   if (named.length && named.every(x => wd.includes(x)) && named.length < wd.length)
@@ -867,7 +871,7 @@ const KIND_AR = { returns: "يباشر بعد الإجازة", info_change: "ت�
 function describeEvs(evs) {
   return (evs || []).map(e => {
     const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
-    const a = toMin(e.at_time), u = toMin(e.until_time);
+    const wd0 = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? new Date(e.date + "T12:00:00Z").getUTCDay() : nowR().wd, f0 = x => x == null ? null : fitMin(x, d, wd0) % 1440, a = f0(toMin(e.at_time)), u = f0(toMin(e.until_time));
     const when = [e.date ? "يوم " + e.date.split("-").reverse().slice(0, 2).join("/") : "", a != null ? (e.kind === "starts_at" ? "من " : "الساعة ") + hm(a) : "", u != null ? "إلى " + hm(u) : "", e.start_date ? "من " + e.start_date : "", e.end_date ? "إلى " + e.end_date : ""].filter(Boolean).join(" ");
     return `• د. ${d ? shortName(d.name) : (e.name || "؟")}: ${KIND_AR[e.kind] || e.kind}${when ? " — " + when : ""}`;
   }).join("\n");
@@ -924,7 +928,9 @@ async function handleClarify(m, text, who = "admin") {
     if (/^(لا|خله|خليه|اتركه)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say(`تمام، د. ${it.remove.name} باقي في الجدول.`); return true; }
   }
   if (it.report && /^(صح|صحيح|تمام|اوكي|ok|👍)(\s|$)/.test(n)) { await say("👍"); return true; }
-  if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
+  const dayAns = /^(يوم\s+)?(ال)?(سبت|احد|اثنين|ثلاثاء|ثلاثا|اربعاء|اربعا|خميس|جمعه)$|^(اليوم|بكره|بكرا|غدا)$/.test(n.trim());   // جواب «أي يوم؟» بكلمة وحدة
+  if (dayAns && it.evs?.length) { const tt = nowR(), day = /^(اليوم)$/.test(n.trim()) ? tt.iso : (dayOf(text) || tt.iso); evs = it.evs.map(e => ({ ...e, date: day })); how = "ليوم " + DAYN[new Date(day + "T12:00:00Z").getUTCDay()] + " " + day.split("-").reverse().slice(0, 2).join("/"); }
+  else if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
   else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say("تمام، تجاهلتها."); return true; }
   else {
     evs = await aiParse(`تصحيح من ${who === "majed" ? "كاتب الرسالة" : "المسؤول"} على رسالة القروب «${it.text}»:\n${text}`, it.text); if (evs == null) evs = ruleParse(text, it.text); how = "حسب كلامك";
@@ -1127,7 +1133,7 @@ export async function handleGroupMessage(m) {
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");
   if (!applied.length) { if (admins.length) await askClarify(m, text, by, Object.assign(evs, { question: "ما قدرت أطبّق منها شي — وش المقصود؟" })); return; }
   if (applied.every(a => a === "known") && admins.length) { await askClarify(m, text, by, Object.assign(evs, { question: "فهمت الطبيب بس ما لقيت وش يتغيّر — وش المقصود؟" })); return; }
-  if (applied.every(a => a === "asked")) { if (ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {}); return; }   // ننتظر اختيارك، ✅ بعدها
+  if (applied.every(a => a === "asked")) return;                                  // رسالة الخيارات كافية — ✅ بعد ما تختار   // ننتظر اختيارك، ✅ بعدها
   // نتأكد من القاعدة إن اللي طبّقناه انحفظ فعلاً، وبعدها بس ✅
   const bad = await verifyApplied(evs, ctx).catch(err => [String(err?.message || err)]);
   if (bad.length) { await dmAdmin(`❌ رسالة ${by} ما انحفظت كاملة:\n«${text.slice(0, 200)}»\nاللي ما لقيته في الموقع: ${bad.join("، ")}\n\nأرسلها مرة ثانية أو عدّلها من صفحة الأطباء.`).catch(() => {}); return; }
@@ -1143,7 +1149,7 @@ async function verifyApplied(evs, ctx) {
   for (const e of evs) {
     if (e.__asked) continue;
     const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept); if (!d) continue;
-    const nm = "د. " + shortName(d.name), fut = futureDay(e, ctx.text, t);
+    const nm = "د. " + shortName(d.name), fut = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? (e.date > t.iso ? e.date : null) : futureDay(e, ctx.text, t);
     if (["vacation"].includes(e.kind)) { b ||= (await db.doc("board/bawadi").get()).data(); if (!(b?.vacations || []).some(v => v.doctorId === d.id)) bad.push(nm + " (الإجازة)"); continue; }
     if (["returns", "info_change", "leaves_branch", "new_doctor", "moved", "schedule_change", "none"].includes(e.kind)) continue;   // لها تأكيدها الخاص
     if (fut && PLAN_KINDS.includes(e.kind)) { if (!items.some(i => i.doctorId === d.id && i.date === fut)) bad.push(nm + " (حالة " + DAYN[new Date(fut + "T12:00:00Z").getUTCDay()] + ")"); continue; }
