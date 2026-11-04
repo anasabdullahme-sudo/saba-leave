@@ -410,13 +410,18 @@ async function resetExpired() {
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
-  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [];
+  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [], asks = [];
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi_today");
     const cur = fresh((await tx.get(ref)).data(), t.iso);
     for (const e of evs) {
       let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
+      // تغيير دوام (ثابت، أو ليوم ثاني) → ما نطبّق لحالنا: نرسل للمسؤول خيارات ويختار
+      if (d && !ctx.confirmed && !ctx.fix && !ctx.planned && admins.length && needsConfirm(e, ctx.text, t)) {
+        if (!asks.some(a => a.d.id === d.id)) asks.push({ d, e: { ...e } });
+        applied.push("asked"); (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — تغيير دوام: أرسلت لك خيارات تختار منها قبل ما أطبّق`); continue;
+      }
       if (d && ["starts_at", "present", "leaves_at"].includes(e.kind) && EVERY.test(norm(ctx.text)) && everyDays(ctx.text).length) {
         const sc0 = schedOf(ctx.text);
         e.kind = "schedule_change"; e.days = everyDays(ctx.text); e.date = "";
@@ -571,8 +576,70 @@ async function apply(evs, ctx) {
   if (backs.length) await endVacations(backs, ctx);
   if (heres.length) await endVacationsToday(heres, ctx);
   for (const x of leavers) await askRemove(x.d, x.e, ctx);
+  for (const a of asks) await askOptions(a, ctx).catch(err => log.warn({ err: String(err?.message || err) }, "خيارات الدوام"));
   for (const x of newDocs) await askAdmin(x, ctx);
   return applied;
+}
+
+/* ---------- تغيير دوام → خيارات للمسؤول، يختار رقم، نطبّق الخيار الجاهز ونتأكد إنه انحفظ ---------- */
+const futureDay = (e, text, t) => (/^\d{4}-\d{2}-\d{2}$/.test(e.date || "") && e.date > t.iso ? e.date : null) || (() => { const d = textDay(text); return d && d > t.iso ? d : null; })();
+function needsConfirm(e, text, t) {
+  if (e.kind === "schedule_change") return true;
+  if (["starts_at", "leaves_at", "present"].includes(e.kind) && (EVERY.test(norm(text)) || futureDay(e, text, t))) return true;   // «كل خميس…» أو «بكرة/الخميس دوامه…»
+  return false;
+}
+const daysIn = text => { const n = norm(text), out = []; for (const [k, i] of DAYW) if (new RegExp("(^|\\s)(يوم\\s+)?(ال|و|وال)?" + k + "(\\s|$)").test(n) && !out.includes(i)) out.push(i); return out; };
+const nextOcc = (wd, t) => isoPlus(t.iso, ((wd - t.wd + 7) % 7) || 7);
+const T = sh => (sh || []).map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") || "—";
+const dm = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+function buildOptions(d, e, text, t) {
+  const sc = schedOf(text), ok = k => e[k] && timeInText(e[k], text) ? toMin(e[k]) : null;
+  const from = ok("from_time") ?? ok("at_time") ?? sc.from, to = ok("to_time") ?? ok("until_time") ?? sc.to;
+  if (from == null || to == null) return null;
+  const shifts = [{ s: from, e: to }], wd = (d.workdays || []).slice().sort((a, b) => a - b), n = norm(text);
+  const named = everyDays(text).length ? everyDays(text) : (Array.isArray(e.days) && e.days.length ? e.days : daysIn(text)).filter(x => x !== 5);
+  const fut = futureDay(e, text, t) || (named.length === 1 && !EVERY.test(n) ? nextOcc(named[0], t) : null);
+  const opts = [];
+  if (named.length && named.every(x => wd.includes(x)) && named.length < wd.length)
+    opts.push({ label: `كل ${named.map(i => DAYN[i].replace(/^ال/, "")).join(" و")} ${T(shifts)}، وباقي الأيام زي ما هي (${T(d.shifts)})`, act: { type: "alt", days: named, shifts } });
+  if (fut) opts.push({ label: `${DAYN[new Date(fut + "T12:00:00Z").getUTCDay()]} ${dm(fut)} بس ${T(shifts)}، والجدول الثابت ما يتغير`, act: { type: "plan", date: fut, at: hhmm(from), until: hhmm(to) } });
+  if (/(^|\s)(اليوم|الليله)(\s|$)/.test(n)) opts.push({ label: `اليوم بس ${T(shifts)}`, act: { type: "today", at: hhmm(from), until: hhmm(to) } });
+  opts.push({ label: `كل أيامه (${wd.map(i => DAYN[i]).join("، ")}) صارت ${T(shifts)}`, act: { type: "set", shifts } });
+  if (named.length >= 2 && JSON.stringify(named.slice().sort()) !== JSON.stringify(wd)) opts.push({ label: `أيام دوامه صارت ${named.map(i => DAYN[i]).join("، ")} بس · ${T(shifts)}`, act: { type: "setdays", days: named, shifts } });
+  if (PERMANENT.test(n) && !EVERY.test(n)) { const i = opts.findIndex(o => o.act.type === "set"); if (i > 0) opts.unshift(...opts.splice(i, 1)); }   // «دائم/من الحين» → الكل أول
+  opts.push({ label: "ولا شي — تجاهلها", act: { type: "none" } });
+  return opts;
+}
+async function askOptions({ d, e }, ctx) {
+  const t = nowR(), opts = buildOptions(d, e, ctx.text, t);
+  if (!opts) { if (ctx.m) await askClarify(ctx.m, ctx.text, ctx.by, Object.assign([e], { question: `ما فهمت وقت الدوام الجديد لد. ${shortName(d.name)} — اكتبه لي` })); return; }
+  const code = "S" + code3().slice(0, 2);
+  const item = { code, at: Date.now(), text: ctx.text.slice(0, 600), by: ctx.by, doctorId: d.id, name: shortName(d.name), opts, key: ctx.m?.key ? { remoteJid: ctx.m.key.remoteJid, id: ctx.m.key.id, participant: ctx.m.key.participant || "" } : null };
+  const ref = db.doc("bot/pending_clarify");
+  await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: [...(c.items || []).filter(i => Date.now() - i.at < 24 * 3600e3), item].slice(-20) }); });
+  const nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"];
+  await dmAdmin([`🤔 ${ctx.by} كتب في القروب:  #${code}`, `«${ctx.text.slice(0, 300)}»`, "", `د. ${shortName(d.name)} — وش المقصود؟`, ...opts.map((o, i) => `${nums[i] || i + 1 + "."} ${o.label}`), "", "رد برقم الخيار، أو اكتب الصح بكلامك."].join("\n"));
+}
+async function applyOption(it, o) {
+  const d = docs().find(x => x.id === it.doctorId); if (!d) return { ok: false, why: "الدكتور ما عاد موجود في الجدول" };
+  const a = o.act, by = it.by + " (اختيار المسؤول)";
+  if (a.type === "none") return { ok: true, none: true };
+  if (a.type === "alt" || a.type === "set" || a.type === "setdays") {
+    const sch = a.type === "alt" ? { days: a.days, shifts: a.shifts, altOnly: true } : a.type === "set" ? { days: [], shifts: a.shifts } : { days: a.days, shifts: a.shifts };
+    await updateSchedules([{ d, sch }], { by });
+  } else {
+    await apply([{ kind: "starts_at", doctor_id: d.id, name: shortName(d.name), at_time: a.at, until_time: a.until, ...(a.type === "plan" ? { date: a.date } : {}) }], { text: "", by, rep: [], confirmed: true });
+  }
+  // نتأكد من القاعدة نفسها إنه انحفظ (ما نصدّق نفسنا)
+  await new Promise(r => setTimeout(r, 1200));
+  const J = x => JSON.stringify((x || []).map(y => [y.s, y.e]));
+  if (a.type === "plan") { const items = (await db.doc("board/bawadi_plan").get()).data()?.items || []; return { ok: items.some(i => i.doctorId === d.id && i.date === a.date && i.at_time === a.at) }; }
+  if (a.type === "today") { const st = (await db.doc("board/bawadi_today").get()).data()?.st?.[d.id]; return { ok: !!st && st.from === toMin(a.at) }; }
+  const b = (await db.doc("board/bawadi").get()).data(), x = (b?.departments || []).flatMap(p => p.doctors || []).find(y => y.id === d.id);
+  if (!x) return { ok: false, why: "ما لقيت الدكتور" };
+  if (a.type === "alt") return { ok: !!x.alt && a.days.every(i => x.alt.days.includes(i)) && J(x.alt.shifts) === J(a.shifts), why: x.alt && J(x.alt.shifts) !== J(a.shifts) ? `عنده ${x.alt.days.map(i => DAYN[i]).join(" و")} بدوام ثاني (${T(x.alt.shifts)})` : "" };
+  if (a.type === "set") return { ok: J(x.shifts) === J(a.shifts) };
+  return { ok: J(x.shifts) === J(a.shifts) && JSON.stringify((x.workdays || []).slice().sort()) === JSON.stringify(a.days.slice().sort()) };
 }
 
 /* ---------- تعديل دوام طبيب موجود (من القروب) ---------- */
@@ -792,7 +859,7 @@ async function handleClarify(m, text, who = "admin") {
   if (!mine.length) return false;
   const ctxi = m.message?.extendedTextMessage?.contextInfo;
   const qt = ctxi?.quotedMessage?.conversation || ctxi?.quotedMessage?.extendedTextMessage?.text || "";
-  const code = (/#([QRD][A-Z0-9]{2})\b/.exec(qt) || [])[1];
+  const code = (/#([QRDS][A-Z0-9]{2})\b/.exec(qt) || [])[1];
   let it = code ? mine.find(i => i.code === code) : null;
   const n = norm(text);
   if (/^تراجع/.test(n)) return false;
@@ -800,6 +867,18 @@ async function handleClarify(m, text, who = "admin") {
   if (!it && !qt && qs.length === 1 && Date.now() - qs[0].at < 30 * 60000) it = qs[0];   // سؤال واحد قريب وما سحب رسالة ثانية → رده عليه
   if (!it) return false;
   let evs, how;
+  if (it.opts && who !== "majed") {                                              // خيارات تغيير الدوام: رقم = نطبّق الخيار الجاهز
+    const num = parseInt(latin(text).replace(/[^\d]/g, "").slice(0, 1) || "0", 10), o = it.opts[num - 1];
+    if (o && /^\s*[0-9٠-٩]\s*[.)\-]?\s*$/.test(text.replace(/[️⃣]/g, ""))) {
+      await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
+      const r = await applyOption(it, o).catch(err => ({ ok: false, why: String(err?.message || err).slice(0, 120) }));
+      if (r.none) { await say("تمام، تجاهلتها."); return true; }
+      if (!r.ok) { const r2 = await applyOption(it, o).catch(() => r); if (r2.ok) Object.assign(r, r2); }   // محاولة ثانية
+      await say(r.ok ? `✅ انحفظ في الجدول وتأكدت منه: د. ${it.name} — ${o.label}` : `❌ ما انحفظ: د. ${it.name} — ${o.label}${r.why ? "\n" + r.why : ""}\nعدّله من صفحة الأطباء.`);
+      if (r.ok && it.key?.id) { try { await getSock()?.sendMessage(it.key.remoteJid, { react: { text: "✅", key: { ...it.key, participant: it.key.participant || undefined } } }); } catch {} }
+      return true;
+    }
+  }
   if (it.remove) {
     if (/^(نعم|ايوه|ايوا|اي|ايه|اشيله|شيله|احذفه|تمام|اوكي|ok)(\s|$)/.test(n)) {
       await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
@@ -999,7 +1078,7 @@ export async function handleGroupMessage(m) {
     if (await askClarify(m, text, by, evs, fromMajed ? "majed" : "")) { try { await getSock()?.sendMessage(jid, { react: { text: "🤔", key: m.key } }); } catch {} return; }
   }
   if (!evs.length) { if (evs.unknown) { try { await getSock()?.sendMessage(jid, { react: { text: "❓", key: m.key } }); } catch {} } return; }
-  const ctx = { text, by, rep: [] };
+  const ctx = { text, by, rep: [], m };
   let applied;
   try { applied = await apply(evs, ctx); }
   catch (err) {
@@ -1011,6 +1090,6 @@ export async function handleGroupMessage(m) {
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");
   if (applied.length && ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {});
   // ✅ فهمها وطبّقها — ❓ فهم إنها عن طبيب بس ما عرف مين (يكتبون الاسم الثاني أو يردّون على رسالة فيها الاسم)
-  const react = applied.length ? "✅" : "❓";
+  const react = applied.length && applied.every(a => a === "asked") ? "🤔" : applied.length ? "✅" : "❓";
   try { await getSock()?.sendMessage(jid, { react: { text: react, key: m.key } }); } catch {}
 }

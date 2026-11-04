@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.4";
+const VERSION = "2.9.5";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -999,6 +999,11 @@ async function applyPatches() {
         if (!t) { todo.push({ id: u.id, name: "", skip: true, isDoc: true }); continue; }
         if (u.ifName && !nz(t.name).includes(nz(u.ifName))) { todo.push({ id: u.id, name: "", skip: true, isDoc: true }); continue; }   // الطبيب تغيّر من الصفحة — ما نلمسه
         if (u.ifShifts && JSON.stringify((t.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(u.ifShifts)) { todo.push({ id: u.id, name: "", skip: true, isDoc: true }); continue; }   // تصحيح بس لو الغلط صار فعلاً
+        if (u.remove) {                                                          // شيل طبيب من الجدول (طلب المسؤول)
+          for (const dep of next.departments) dep.doctors = (dep.doctors || []).filter(x => x !== t);
+          next.departments = next.departments.filter(dep => (dep.doctors || []).length || dep.notes);
+          todo.push({ id: u.id, name: "شيل " + t.name, isDoc: true, upd: true }); continue;
+        }
         if (u.copyFrom || u.copyFromName) { const src = nd.find(d => d.id === u.copyFrom) || byName(u.copyFromName), empty = v => !v || (Array.isArray(v) && !v.length); if (src) for (const f of u.fields || []) if (empty(t[f]) && !empty(src[f])) t[f] = structuredClone(src[f]); }
         for (const [k, v] of Object.entries(u.set || {})) t[k] = v;
         for (const [k, v] of Object.entries(u.fill || {})) if (!t[k]) t[k] = v;
