@@ -616,6 +616,24 @@ async function liveBackend(role) {
     return (models[key] = AI.getGenerativeModel(ai, { model: name, generationConfig: gc() }));
   }
 
+  // نفس الإعداد بس خانات أقل ومرتّبة (الهوية والاسم والتاريخ أول) — للقراءة أول بأول
+  const LEAN_KEYS = ["id_number", "patient_name_ar", "patient_name_en", "dob", "start_printed_en", "start_printed_ar", "leave_days", "leave_start", "leave_end", "age_printed", "mobile",
+    "patient_file_no", "nationality", "gender", "doctor_name", "stamp_doctor_name", "document_kind", "quality", "doc_title", "date_altered", "date_alter_note", "reason", "visit_date",
+    "companion_name", "companion_id", "companion_dob", "relationship", "accompanied_by"];
+  let leanCfg = null;
+  async function getLeanModel(name, think = false) {
+    const key = "lean|" + name + (think ? "|t" : "");
+    if (models[key]) return models[key];
+    await getModel();
+    if (!leanCfg) {
+      const S = AIref.Schema, lp = {};
+      LEAN_KEYS.forEach(k => lp[k] = S.string());
+      lp.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] }); lp.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
+      leanCfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: lp, propertyOrdering: LEAN_KEYS }), temperature: 0 };
+    }
+    return (models[key] = AIref.getGenerativeModel(aiInst, { model: name, generationConfig: think ? leanCfg : { ...leanCfg, thinkingConfig: { thinkingLevel: "MINIMAL" } } }));
+  }
+
   const api = {
     demo: false,
     /* --- المريض --- */
@@ -665,31 +683,39 @@ async function liveBackend(role) {
       await Promise.all(MODELS.map(n => one(n, "lean")));                   // الجولة 2: خانات أقل + أول بأول
       if (aiStd) await one(AI_MODEL, "lean-std");                           // الجولة 3: نفس الخفيف بتوكن App Check عادي
     },
-    async extract(blob, type) {
-      // صورة أصغر للقراءة فقط (أسرع رفع وأسرع معالجة) — الصورة المحفوظة تبقى بجودتها
+    async extract(blob, type, onProgress) {
+      // قراءة خفيفة (خانات أقل بالترتيب المهم أول) وتوصل أول بأول. موديلين lite مع بعض من أول ثانية وناخذ أسرعهم؛ الباقي احتياط لو فشلوا
       const t0 = performance.now();
       const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 1280, 0.8);
       const b64 = await blobToBase64(small);
-      const t1 = performance.now();
-      const parts = [aiPrompt(type), { inlineData: { data: b64, mimeType: small.type || "image/jpeg" } }];
-      const queue = [AI_MODEL, ...AI_FALLBACK_MODELS];
-      const call = (name, think) => getModel(name, think).then(m => m.generateContent(parts)).then(r => JSON.parse(r.response.text()));
-      const run = name => (noThink.has(name) ? call(name, true) : call(name, false).catch(e => {
-        if (!/thinking|invalid.?argument|\b400\b/i.test(String(e?.message || e))) throw e;   // الموديل ما يقبل إيقاف التفكير → نعيد بدونه
-        noThink.add(name); return call(name, true);
-      })).then(v => { if (v && typeof v === "object") v._scan = `تصغير ${((t1 - t0) / 1000).toFixed(1)}ث · قراءة ${((performance.now() - t1) / 1000).toFixed(1)}ث · ${name}${noThink.has(name) ? " (بتفكير)" : ""}`; return v; });
+      const t1 = performance.now(), sec = t => ((t - t1) / 1000).toFixed(1);
+      const parts = [aiPrompt(type, true), { inlineData: { data: b64, mimeType: small.type || "image/jpeg" } }];
+      const FIRST = [AI_MODEL, "gemini-3.1-flash-lite"], BACKUP = AI_FALLBACK_MODELS.filter(m => !FIRST.includes(m));
+      const times = {};
+      const stream = async (name, think) => {
+        const m = await getLeanModel(name, think);
+        const r = await m.generateContentStream(parts);
+        let txt = "";
+        for await (const c of r.stream) {
+          txt += c.text?.() || "";
+          if (onProgress) { const seen = {}; for (const x of txt.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) seen[x[1]] = x[2]; onProgress(seen, name); }
+        }
+        return JSON.parse(txt);
+      };
+      const run = name => (noThink.has(name) ? stream(name, true) : stream(name, false).catch(e => {
+        if (!/thinking|invalid.?argument|\b400\b/i.test(String(e?.message || e))) throw e;
+        noThink.add(name); return stream(name, true);
+      })).then(v => { times[name] = sec(performance.now()); return v; }, e => { times[name] = "✗"; throw e; });
+      const label = (win) => `تصغير ${((t1 - t0) / 1000).toFixed(1)}ث · قراءة ${times[win]}ث · ${win}${noThink.has(win) ? " (بتفكير)" : ""}` +
+        Object.entries(times).filter(([k]) => k !== win).map(([k, v]) => ` · ${k.replace("gemini-", "")} ${v}${v === "✗" ? "" : "ث"}`).join("");
       return await new Promise((resolve, reject) => {
-        let running = 0, done = false, lastErr, timer;
-        const next = () => {
-          if (done) return;
-          const name = queue.shift();
-          if (!name) { if (!running) { done = true; reject(lastErr || new Error("ai_failed")); } return; }
-          running++;
-          clearTimeout(timer); timer = setTimeout(next, AI_HEDGE_MS); // لو تأخر، شغّل اللي بعده بالتوازي
-          run(name).then(v => { if (!done) { done = true; clearTimeout(timer); resolve(v); } })
-            .catch(e => { lastErr = e; console.warn("AI", name, e); running--; next(); }); // فشل؟ جرّب اللي بعده فوراً
-        };
-        next();
+        let done = false, left = 0, lastErr;
+        const start = list => list.forEach(name => {
+          left++;
+          run(name).then(v => { if (done) return; done = true; if (v && typeof v === "object") { v.patient_name ||= v.patient_name_ar || v.patient_name_en || ""; v._scan = label(name); v._scanFn = () => label(name); } resolve(v); })
+            .catch(e => { lastErr = e; console.warn("AI", name, e); if (--left === 0 && !done) { if (BACKUP.length && list === FIRST) start(BACKUP); else { done = true; reject(lastErr || new Error("ai_failed")); } } });
+        });
+        start(FIRST);
       });
     },
     async uploadImage(blob, onProgress) {
@@ -970,8 +996,9 @@ function demoBackend() {
     demo: true,
     ensureAnon: async () => "demo",
     warmup: async () => {},
-    async extract(blob, type) {
-      await new Promise(r => setTimeout(r, 2200));
+    async extract(blob, type, onProgress) {
+      await new Promise(r => setTimeout(r, 1100)); onProgress?.({ id_number: "1098765432", patient_name_ar: "محمد" });
+      await new Promise(r => setTimeout(r, 1100));
       const d = DOCTORS[Math.floor(Math.random() * DOCTORS.length)];
       return { patient_name: "محمد عبدالله الغامدي", patient_name_ar: "محمد عبدالله الغامدي", patient_name_en: "MOHAMMED ABDULLAH ALGHAMDI",
         patient_file_no: "7400123", nationality: "Saudi Arabia", gender: "Male", mobile: "966551234567", reason: "Acute gastroenteritis",

@@ -103,6 +103,12 @@ main{max-width:1120px;margin:0 auto;padding:12px 20px 64px}
 @keyframes sweep{to{top:100%}}
 @media (prefers-reduced-motion:reduce){.scan::before{animation:none;top:30%}}
 .shot .retake{position:absolute;bottom:10px;left:10px;background:rgba(255,255,255,.92);color:var(--navy);font-size:14px;font-weight:600;padding:8px 14px;border-radius:99px;display:flex;gap:6px;align-items:center}
+.scan-card{margin:12px 18px 0;padding:12px 14px;border-radius:14px;background:#EAF6FC;border:1.5px solid #9FD8F2;display:grid;gap:7px}
+.scan-card .sc-t{font-weight:700;color:#003765;font-size:15.5px}
+.scan-card .sc-r{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:#2B5677}
+.scan-card .sc-r b{font-variant-numeric:tabular-nums;background:#fff;border-radius:99px;padding:1px 10px;color:#0082D4}
+.scan-card .sc-bar{height:6px;border-radius:99px;background:#fff;overflow:hidden}.scan-card .sc-bar i{display:block;height:100%;width:5%;background:#00A6E2;transition:width .4s}
+.loading .f{position:relative}.loading .f::after{content:"يتعبّى تلقائياً…";position:absolute;inset-inline-start:14px;bottom:13px;font-size:13px;color:#7FA3BD;pointer-events:none}
 .status{display:flex;align-items:center;gap:10px;padding:14px 18px 0;font-size:15px;color:var(--muted);min-height:38px}
 .status .dot{width:10px;height:10px;border-radius:50%;background:var(--sky);box-shadow:0 0 0 0 rgba(0,166,226,.6);animation:pulse 1.4s infinite}
 .status.ok .dot{background:var(--ok);animation:none}
@@ -287,6 +293,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
         </div>
         <div class="upbar"><i id="upbar"></i></div>
         <div class="status" id="status"><span class="dot"></span><span id="statusTxt">نقرأ بياناتك من الصورة…</span></div>
+        <div class="scan-card" id="scanCard" hidden><div class="sc-t">⏳ لا تكتب شي — نعبّي بياناتك من الصورة تلقائياً</div><div class="sc-r"><span id="scanStep">نقرأ الصورة…</span><b id="scanSec">0</b></div><div class="sc-bar"><i id="scanBar"></i></div></div>
         <div class="note" id="note"></div>
         <form id="form" class="loading" novalidate autocomplete="off"></form>
       </div>
@@ -323,7 +330,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104d";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104e";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -544,21 +551,39 @@ async function onPhoto(file) {
   setStatus(useAI ? "نقرأ بياناتك من الصورة…" : "عبّ بياناتك كما هي في التقرير", useAI ? "" : "ok");
   if (!document.querySelector("#sReview.on")) go("sReview");
 
-  // الرفع والقراءة يشتغلون مع بعض
-  $("#upbar").style.width = "0";
-  state.uploadP = api.uploadImage(blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")
-    .then(p => (state.imagePath = p))
-    .catch(err => { console.error(err); state.imagePath = null; throw err; });
-  state.uploadP.catch(() => {});
-
+  // القراءة أول (تاخذ النت كله)، ورفع الصورة يبدأ بعدها — المراجع يراجع بياناته والصورة تترفع
+  $("#upbar").style.width = "0"; state.uploadP = null; state.upT0 = 0; state.upSec = "";
   const myBlob = blob;
-  if (!useAI) { $("#form [name]")?.focus({ preventScroll: true }); return; }
+  const startUpload = () => {
+    if (state.uploadP || state.blob !== myBlob) return;
+    state.upT0 = performance.now();
+    state.uploadP = api.uploadImage(blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")
+      .then(p => { state.upSec = ((performance.now() - state.upT0) / 1000).toFixed(1); return (state.imagePath = p); })
+      .catch(err => { console.error(err); state.imagePath = null; throw err; });
+    state.uploadP.catch(() => {});
+  };
+  state.startUpload = startUpload;
+  if (!useAI) { startUpload(); $("#form [name]")?.focus({ preventScroll: true }); return; }
+  const upLater = setTimeout(startUpload, 9000);                     // القراءة طوّلت؟ نبدأ الرفع ما ننتظر
+  const card = $("#scanCard"), tScan = performance.now();
+  card.hidden = false; $("#scanStep").textContent = "نقرأ الصورة…"; $("#scanSec").textContent = "0"; $("#scanBar").style.width = "5%";
+  const tick = setInterval(() => {
+    const t = (performance.now() - tScan) / 1000;
+    $("#scanSec").textContent = Math.floor(t) + " ث";
+    if (t > 8 && !state._gotId) $("#scanStep").textContent = "باقي شوي… الصورة فيها تفاصيل كثيرة";
+    $("#scanBar").style.width = Math.min(92, 8 + t * 14) + "%";
+  }, 250);
+  const STEP = { id_number: "✓ رقم الهوية", patient_name_ar: "✓ الاسم", dob: "✓ تاريخ الميلاد", start_printed_en: "✓ تاريخ الإجازة", mobile: "✓ الجوال", doctor_name: "✓ الطبيب" };
+  const onProgress = seen => { const got = Object.keys(STEP).filter(k => seen[k]); state._gotId = !!seen.id_number; if (got.length) $("#scanStep").textContent = "قرينا: " + got.map(k => STEP[k].slice(2)).join("، ") + "…"; };
+  const endScan = () => { clearInterval(tick); clearTimeout(upLater); if (state.blob === myBlob) { card.hidden = true; state._gotId = false; } startUpload(); };
   try {
-    const tScan = performance.now();
-    const r = await Promise.race([api.extract(blob, state.type), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
+    const r = await Promise.race([api.extract(blob, state.type, onProgress), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
+    endScan();
     if (state.blob !== myBlob) return;
     state.ai = r || {};
-    state.scanInfo = `${((performance.now() - tScan) / 1000).toFixed(1)}ث${r?._scan ? " (" + r._scan + ")" : ""}`.slice(0, 120);   // مدة المسح — تطلع للموظف
+    const tt = ((performance.now() - tScan) / 1000).toFixed(1);
+    state.scanInfo = `${tt}ث${r?._scan ? " (" + r._scan + ")" : ""}`.slice(0, 120);   // مدة المسح — تطلع للموظف
+    if (r?._scanFn) setTimeout(() => { if (state.ai === r) state.scanInfo = `${tt}ث (${r._scanFn()})`.slice(0, 120); }, 8000);   // بعد شوي: نضيف وقت الموديل الثاني
     // المريض اختار نوع غلط؟ نحوّله تلقائياً لنوع التقرير (مثلاً اختار إجازة والورقة مشهد مراجعة)
     const typeFor = { sick_leave: "sick", companion_leave: "companion", attendance: "attendance" };
     const docType = typeFor[r?.document_kind];
@@ -589,6 +614,7 @@ async function onPhoto(file) {
     setStatus("قرأنا البيانات. راجعها قبل الإرسال", "ok");
   } catch (e) {
     console.warn("AI", e);
+    endScan();
     if (state.blob !== myBlob) return;
     setStatus("ما قدرنا نقرأ الصورة تلقائياً — عبّ البيانات يدوياً", "warn");
     const why = String(e?.code || "") + " " + String(e?.message || e || "").slice(0, 220);
@@ -751,6 +777,7 @@ $("#form").addEventListener("submit", async e => {
     const key = await dupKey({ type: state.type, idNumber: latinDigits(fd.idNumber), dob: fd.dob, leaveStart: fd.leaveStart || "", leaveEnd: fd.leaveEnd || "", visitDate: fd.visitDate || "", companionId: latinDigits(fd.companionId || "") });
     if (await api.isDuplicate?.(key)) return showDuplicate();
     if (!state.imagePath) {
+      state.startUpload?.();
       btn.textContent = "نكمّل رفع الصورة…";
       try { await state.uploadP; } catch { await (state.uploadP = withRetry(() => api.uploadImage(state.blob, p => $("#upbar").style.width = Math.round(p * 100) + "%")).then(p => (state.imagePath = p))); }
     }
@@ -775,7 +802,7 @@ $("#form").addEventListener("submit", async e => {
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
       ...(withFlag && flag ? { dateFlag: flag } : {}),
-      ...(withFlag && state.scanInfo ? { scanInfo: state.scanInfo } : {}),
+      ...(withFlag && state.scanInfo ? { scanInfo: (state.scanInfo + (state.upSec ? ` · رفع الصورة ${state.upSec}ث` : "")).slice(0, 120) } : {}),
     }, key);
     // لو قواعد قاعدة البيانات لسا ما تحدّثت (ما تعرف dateFlag) → نرسل بدونه بدل ما يفشل الطلب
     await withRetry(() => create(true).catch(e => { if ((flag || state.scanInfo) && e?.code === "permission-denied") return create(false); throw e; }));
