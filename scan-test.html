@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>تجربة سرعة المسح</title>
+<style>
+  :root{--navy:#003765;--sky:#00A6E2;--ice:#EAF6FC;--line:#DCEBF4;--muted:#5B7690;--ok:#0A7A55;--bad:#B4232A}
+  *{box-sizing:border-box}
+  body{margin:0;background:#F3FAFE;color:var(--navy);font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif}
+  main{max-width:1000px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:6px 0 4px}
+  p{color:var(--muted);margin:0 0 12px;line-height:1.7;font-size:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  select,button,label.f{font:inherit;border-radius:10px;border:1.5px solid var(--line);padding:9px 14px;background:#fff;color:var(--navy)}
+  button.go{background:var(--sky);border-color:var(--sky);color:#fff;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.5}
+  label.f{cursor:pointer}
+  #pv{max-height:160px;border-radius:10px;border:1px solid var(--line);display:none}
+  .tw{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:760px}
+  th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:right;white-space:nowrap}
+  th{background:var(--ice);font-weight:700}
+  td.n{font-variant-numeric:tabular-nums;direction:ltr;text-align:left}
+  .win{background:#E8F7F1}
+  .ok{color:var(--ok);font-weight:700}.bad{color:var(--bad)}
+  .sum{font-size:15px;line-height:1.9}
+  small{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>تجربة سرعة المسح</h1>
+  <p>اختر صورة تقرير، والصفحة تشغّل كل موديلات القراءة على نفس الصورة: أول بالطريقة الحالية، وبعدها بالطريقة الخفيفة (خانات أقل والبيانات توصل أول بأول). ما ينحفظ أي طلب.</p>
+  <div class="card">
+    <div class="row">
+      <label class="f" for="file">📷 اختر الصورة</label><input type="file" id="file" accept="image/*,application/pdf" hidden>
+      <select id="type"><option value="sick">إجازة مرضية</option><option value="companion">مرافق</option><option value="attendance">مشهد حضور</option></select>
+      <label style="font-size:13.5px"><input type="checkbox" id="std"> جرّب توكن عادي بعد</label>
+      <button class="go" id="run" disabled>ابدأ التجربة</button>
+      <img id="pv" alt="">
+    </div>
+    <p id="st" style="margin:10px 0 0"></p>
+  </div>
+  <div class="card tw">
+    <table>
+      <thead><tr><th>الموديل</th><th>الطريقة</th><th>أول بيانات</th><th>الهوية طلعت</th><th>الكل</th><th>الهوية</th><th>الاسم</th><th>البداية</th><th>الكلمات (دخل/خرج/تفكير)</th><th>ملاحظة</th></tr></thead>
+      <tbody id="tb"></tbody>
+    </table>
+  </div>
+  <div class="card sum" id="sum" hidden></div>
+  <small>تجربة داخلية — الصفحة ما لها رابط في الموقع.</small>
+</main>
+<script type="module">
+import { backend, resolveAiDates } from "./shared.js?v=20261104d";
+const $ = s => document.querySelector(s);
+const api = await backend("patient");
+let blob = null;
+$("#file").onchange = () => {
+  blob = $("#file").files[0] || null; $("#run").disabled = !blob;
+  if (blob && blob.type.startsWith("image/")) { $("#pv").src = URL.createObjectURL(blob); $("#pv").style.display = "block"; }
+};
+const VAR = { full: "الحالية", lean: "خفيفة + أول بأول", "lean-std": "خفيفة + توكن عادي" };
+const rows = [];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function render() {
+  const done = rows.filter(r => r.total != null && !r.err);
+  const best = done.length ? Math.min(...done.map(r => r.idAt ?? r.total)) : null;
+  $("#tb").innerHTML = rows.map(r => {
+    const o = r.out ? resolveAiDates({ ...r.out }, $("#type").value) : null;
+    const win = best != null && (r.idAt ?? r.total) === best && !r.err;
+    return `<tr class="${win ? "win" : ""}"><td>${esc(r.model)}</td><td>${VAR[r.variant]}${r.think ? " (بتفكير)" : ""}</td>
+      <td class="n">${r.first != null ? r.first + "ث" : r.variant === "full" ? "—" : "…"}</td><td class="n">${r.idAt != null ? r.idAt + "ث" : r.variant === "full" ? "—" : "…"}</td>
+      <td class="n ${r.total != null ? "ok" : ""}">${r.total != null ? r.total + "ث" : "⏳"}</td>
+      <td class="n">${esc(o?.id_number || "")}</td><td>${esc(o?.patient_name_ar || o?.patient_name || "")}</td><td class="n">${esc(o?.leave_start || o?.visit_date || "")}</td>
+      <td class="n">${esc(r.tok || "")}</td><td class="bad">${esc(r.err || o?.date_check || "")}</td></tr>`;
+  }).join("");
+}
+$("#run").onclick = async () => {
+  if (!blob) return;
+  rows.length = 0; render(); $("#run").disabled = true; $("#sum").hidden = true;
+  $("#st").textContent = "⏳ الجولة الأولى: الطريقة الحالية…";
+  const t = setInterval(() => { if (rows.length > 4) $("#st").textContent = "⏳ الجولة الثانية: الطريقة الخفيفة…"; }, 500);
+  try {
+    await api.benchScan(blob, $("#type").value, r => { if (!rows.includes(r)) rows.push(r); render(); }, { stdToken: $("#std").checked });
+    const ok = rows.filter(r => r.total != null && !r.err);
+    const by = v => ok.filter(r => r.variant === v);
+    const fastest = (list, k = "total") => list.length ? list.reduce((a, b) => ((a[k] ?? a.total) <= (b[k] ?? b.total) ? a : b)) : null;
+    const f = fastest(by("full")), l = fastest(by("lean"), "idAt");
+    $("#sum").innerHTML = `<b>النتيجة</b><br>
+      أسرع بالطريقة الحالية: ${f ? `<b>${esc(f.model)}</b> — ${f.total} ثانية` : "—"}<br>
+      أسرع بالطريقة الخفيفة: ${l ? `<b>${esc(l.model)}</b> — الهوية بعد ${l.idAt ?? "؟"} ثانية، والكل ${l.total} ثانية` : "—"}<br>
+      <small>صوّر هذي الصفحة وأرسلها.</small>`;
+    $("#sum").hidden = false; $("#st").textContent = "✅ خلصت التجربة";
+  } catch (e) { console.error(e); $("#st").textContent = "✗ " + (e?.message || e); }
+  clearInterval(t); $("#run").disabled = false;
+};
+</script>
+</body>
+</html>

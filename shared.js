@@ -20,7 +20,7 @@ export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على ا
 export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة
 export const AI_MODEL = "gemini-3.5-flash-lite";   // الأسرع (Ultra fast)
 // احتياط: لو الأول تأخر أكثر من AI_HEDGE_MS أو كان مزحوم، يبدأ الثاني بالتوازي وناخذ أول نتيجة
-export const AI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+export const AI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash"];   // كلها موجودة في قائمة Firebase (3.8 ما كان موجود)
 export const AI_HEDGE_MS = 6000;  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/";   // الصفحة الرئيسية (مو صفحة الدخول — فتحها وأنت داخل كان يطلّع الموظف)
@@ -416,7 +416,7 @@ export function resolveAiDates(ai, type, now = Date.now()) {
   return ai;
 }
 
-function aiPrompt(type) {
+function aiPrompt(type, lean = false) {
   const list = DOCTORS.map(d => `- id="${d.id}" | ${d.ar} | ${d.en}${d.alt?.length ? " | " + d.alt.join(" / ") : ""}`).join("\n");
   return `You read phone photos of Saba Clinics (سابا) printed reports. Photos may be tilted, curled, folded, shadowed, partly cropped, or upside down.
 The patient chose request type: ${type} (${typeName(type)}).
@@ -447,8 +447,8 @@ OUTPUT RULES:
 - mobile: digits only as printed.
 - doctor_name: printed Physician Name (English as printed; include the Arabic too, e.g. "Sara Fouad Elgarhi / ساره فؤاد الجارحي").
 - stamp_doctor_name: the name on the stamp, or "" if no stamp/unreadable.
-- doctor_id: match the printed physician to the list below (any spelling, ignore titles like Dr./د./استشاري). stamp_doctor_id: same for the stamp. Use "" when no clear match — a shared first name alone is NOT a match.
-${list}
+${lean ? "" : `- doctor_id: match the printed physician to the list below (any spelling, ignore titles like Dr./د./استشاري). stamp_doctor_id: same for the stamp. Use "" when no clear match — a shared first name alone is NOT a match.
+${list}`}
 - doc_title: the main title printed at the top of the document, exactly as written (Arabic and/or English), e.g. "Sick Leave Report / تقرير بإجازة مرضية" or "Drug Prescription / وصفة طبية".
 - document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise — IMPORTANT: a drug prescription (Drug Prescription / وصفة طبية / وصفة علاجية, a list of medicines with dosage), lab or radiology results, an invoice/receipt, an appointment card, a referral, or any medical report that does NOT grant leave days is "other", even if it shows the patient and doctor details.
 - For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
@@ -623,6 +623,48 @@ async function liveBackend(role) {
     aiEnabled: AI_ENABLED, // بدون مفتاح reCAPTCHA يشتغل لين يصير App Check إلزامي (2 نوفمبر 2026)
     async warmup() { try { await api.ensureAnon(); if (api.aiEnabled) await getModel(); } catch (e) { console.warn(e); } },
     extractTimeout: 45000,
+    /* --- صفحة تجربة سرعة المسح (scan-test.html): كل الموديلات على نفس الصورة، بالطريقة الحالية والطريقة الخفيفة (أول بأول) --- */
+    async benchScan(blob, type, onRow, opts = {}) {
+      await getModel();
+      const S = AIref.Schema;
+      const LEAN = ["id_number", "patient_name_ar", "patient_name_en", "dob", "start_printed_en", "start_printed_ar", "leave_days", "leave_start", "leave_end", "age_printed", "mobile",
+        "patient_file_no", "nationality", "gender", "doctor_name", "stamp_doctor_name", "document_kind", "quality", "doc_title", "date_altered", "reason", "visit_date",
+        "companion_name", "companion_id", "companion_dob", "relationship", "accompanied_by"];
+      const lp = {}; LEAN.forEach(k => lp[k] = S.string());
+      lp.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] }); lp.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
+      const leanCfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: lp, propertyOrdering: LEAN }), temperature: 0 };
+      const aiStd = opts.stdToken ? AIref.getAI(app, { backend: new AIref.GoogleAIBackend(), useLimitedUseAppCheckTokens: false }) : null;
+      const t0c = performance.now();
+      const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 1280, 0.8);
+      const img = { inlineData: { data: await blobToBase64(small), mimeType: small.type || "image/jpeg" } };
+      const prep = performance.now() - t0c;
+      const one = async (name, variant, think = false) => {
+        const row = { model: name, variant, prep, think }; onRow(row);
+        const lean = variant !== "full", inst = variant === "lean-std" ? aiStd : aiInst;
+        const cfg = lean ? leanCfg : aiCfg, gc = think ? cfg : { ...cfg, thinkingConfig: { thinkingLevel: "MINIMAL" } };
+        const m = AIref.getGenerativeModel(inst, { model: name, generationConfig: gc });
+        const parts = [aiPrompt(type, lean), img], t0 = performance.now(), sec = () => +((performance.now() - t0) / 1000).toFixed(1);
+        try {
+          let txt = "", meta = null;
+          if (!lean) { const r = await m.generateContent(parts); txt = r.response.text(); meta = r.response.usageMetadata; }
+          else {
+            const r = await m.generateContentStream(parts);
+            for await (const c of r.stream) { const t = c.text?.() || ""; if (t && row.first == null) row.first = sec(); txt += t; if (row.idAt == null && /"id_number"\s*:\s*"[^"]{6,}"/.test(txt)) row.idAt = sec(); onRow(row); }
+            meta = (await r.response).usageMetadata;
+          }
+          row.total = sec(); row.out = JSON.parse(txt);
+          row.tok = meta ? `${meta.promptTokenCount || 0}/${meta.candidatesTokenCount || 0}/${meta.thoughtsTokenCount || 0}` : "";
+        } catch (e) {
+          if (!think && /thinking|invalid.?argument|\b400\b/i.test(String(e?.message || e))) return one(name, variant, true);
+          row.total = sec(); row.err = String(e?.message || e).slice(0, 160);
+        }
+        onRow(row); return row;
+      };
+      const MODELS = opts.models || [AI_MODEL, ...AI_FALLBACK_MODELS];
+      await Promise.all(MODELS.map(n => one(n, "full")));                   // الجولة 1: الطريقة الحالية
+      await Promise.all(MODELS.map(n => one(n, "lean")));                   // الجولة 2: خانات أقل + أول بأول
+      if (aiStd) await one(AI_MODEL, "lean-std");                           // الجولة 3: نفس الخفيف بتوكن App Check عادي
+    },
     async extract(blob, type) {
       // صورة أصغر للقراءة فقط (أسرع رفع وأسرع معالجة) — الصورة المحفوظة تبقى بجودتها
       const t0 = performance.now();
@@ -989,6 +1031,10 @@ function demoBackend() {
     watchWa(id, cb) { cb(api._wa); const t = setInterval(() => cb(api._wa), 500); return () => clearInterval(t); },
     async sendTeam(data, onProgress) { for (let i = 1; i <= 4; i++) { await new Promise(r => setTimeout(r, 150)); onProgress?.(i / 4); } const id = "tm" + Date.now(); api._tm = { ...data, file: undefined, sendStatus: "queued" }; setTimeout(() => { api._tm = { ...api._tm, sendStatus: "sent" }; }, 1500); return id; },
     watchTeam(id, cb) { cb(api._tm); const t = setInterval(() => cb(api._tm), 500); return () => clearInterval(t); },
+    async benchScan(blob, type, onRow) {                                   // تجربة (بدون ذكاء حقيقي)
+      const out = { id_number: "1012363006", patient_name_ar: "تجربة", start_printed_en: "04-11-2026", start_printed_ar: "04-11-2026", leave_start: "2026-04-11", leave_days: "1" };
+      for (const v of ["full", "lean"]) await Promise.all(["a", "b"].map(async (m, i) => { const r = { model: "demo-" + m, variant: v }; onRow(r); await new Promise(x => setTimeout(x, 300 + i * 200)); if (v === "lean") { r.first = 0.2; r.idAt = 0.3; } r.total = 0.5 + i * 0.2; r.out = { ...out }; r.tok = "900/300/0"; onRow(r); }));
+    },
     watchTeamInbox(cb) { const demo = [{ id: "in1", dir: "in", from: "anas", fromName: "أنس", name: "جدول الدوام.pdf", mime: "application/pdf", size: 182000, parts: 1, text: "جدول الأسبوع الجاي", at: Date.now() - 3600e3, exp: Date.now() + 6 * 864e5 }];
       api._inCb = cb; cb(api._inbox ||= demo); return () => { api._inCb = null; }; },
     async getTeamFile(x) { return new Blob(["ملف تجريبي: " + x.name], { type: "text/plain" }); },
