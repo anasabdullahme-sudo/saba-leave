@@ -716,6 +716,38 @@
     "أمين كيماوي",
     "Amin Kemawi"
    ]
+  },
+  {
+   "id": "p0211g2",
+   "doctorId": "bxm6z5u",
+   "ifName": "سارة",
+   "set": {
+    "shifts": [
+     {
+      "s": 720,
+      "e": 1200
+     }
+    ]
+   }
+  },
+  {
+   "id": "p0411e1",
+   "doctorId": "ieyr9ye",
+   "ifName": "إلهام",
+   "set": {
+    "alt": {
+     "days": [
+      2,
+      4
+     ],
+     "shifts": [
+      {
+       "s": 540,
+       "e": 1020
+      }
+     ]
+    }
+   }
   }
  ],
  "today": [

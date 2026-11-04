@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.3";
+const VERSION = "2.9.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1020,7 +1020,10 @@ async function applyPatches() {
     if (added.length) log.info({ n: added.length }, "انضافت إجازات للجدول");
     const newNames = added.filter(a => a.isDoc && !a.upd && a.name).map(a => nmKey(a.name));            // طبيب انضاف بالتعديل → نشيل سؤال «أضيفه؟» المعلّق عنه
     if (newNames.length) { const pr = db.doc("bot/pending_doctors"), pc = (await pr.get()).data(); if (pc?.items?.some(i => newNames.includes(nmKey(i.name)))) await pr.set({ items: pc.items.filter(i => !newNames.includes(nmKey(i.name))) }); }
-  } catch (e) { log.error({ err: String(e?.message || e) }, "فشل إضافة الإجازات"); }
+  } catch (e) {
+    log.error({ err: String(e?.message || e) }, "فشل إضافة الإجازات");
+    if (Date.now() - (globalThis.__patchErrAt || 0) > 6 * 3600e3) { globalThis.__patchErrAt = Date.now(); dmAdmin(`❌ تعديلات الجدول من الملف ما انطبقت (خطأ):\n${String(e?.message || e).slice(0, 200)}`).catch(() => {}); }   // ما نسكت عن الفشل
+  }
 }
 
 /* ---------- نسخة احتياطية أسبوعية (بدون الصور) على قرص Railway ----------

@@ -111,6 +111,7 @@ const PROMPT = `أنت تقرأ رسالة من قروب واتساب لموظف
 - لا تخترع أوقات أبداً: from_time/to_time/at_time/until_time لازم تكون مكتوبة في الرسالة نفسها. لو قال «بنفس الدوام» بدون أوقات، خلّها فاضية.
   schedule_change = تغيير دوام ثابت لأكثر من يوم (أو «دوامه فقط الأربعاء والخميس من 5 إلى 9»)
   لـ new_doctor و schedule_change: days = أيام الدوام أرقام (الأحد=0، الإثنين=1، الثلاثاء=2، الأربعاء=3، الخميس=4، السبت=6) لو ذكرت، from_time/to_time = بداية ونهاية الدوام، room/ext/fee لو ذكرت. يوم المباشرة (يباشر السبت) مو من أيام الدوام — لا تحطه في days
+- «كل خميس» / «كل يوم أحد» / «كل الثلاثاء والخميس» = دوام ثابت يتكرر كل أسبوع لهذيك الأيام: kind = schedule_change و days = هذيك الأيام بس، و date = "" (مو بكرة ولا حدث ليوم واحد).
 - date: لو الحدث ليوم غير اليوم (بكرة/غداً، «الخميس» الجاي، تاريخ) حط تاريخ ذاك اليوم YYYY-MM-DD، وإلا "". مثال «غدا الخميس فقط عيادة د. رائد من ٢-٧» = starts_at مع date = تاريخ بكرة و at_time 14:00 و until_time 19:00 (دوام ذاك اليوم بس، مو تغيير دائم).
 - الأوقات بصيغة 24 ساعة HH:MM. في العيادة الأرقام 1-11 بدون ص/م غالباً مساءً إلا لو واضح الصباح (مثل 8 صباحاً، 9 الصبح). "١٠" بالليل = 22:00.
 - رسالة وحدة ممكن فيها أكثر من حدث لنفس الطبيب، مثل «متواجد اليوم من 2 إلى 7 ويستقبل انتظار لين 5» = starts_at (14:00→19:00) + appointments_only (at_time 17:00).
@@ -189,7 +190,17 @@ function vacationRule(text) {
 }
 // «دوامه الاربعاء والخميس من 5 م - 9 م» → { days:[3,4], from:1020, to:1260 }
 const DAYW = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["ثلاثا", 2], ["اربعاء", 3], ["اربعا", 3], ["خميس", 4], ["جمعه", 5], ["سبت", 6]];
-const PERMANENT = /دائم|دايم|ثابت|بشكل دائم|من الحين وطالع|من اليوم وطالع|كل (يوم|اسبوع)|كل ال(سبت|احد|اثنين|ثلاثاء|اربعاء|خميس)|(^|\s)(من|ابتداء من|اعتبارا من|بدايه من) (يوم )?(ال)?(سبت|احد|اثنين|ثلاثاء|اربعاء|خميس)|يباشر|سيباشر|مباشره|المعتاد/;
+// «كل خميس» / «كل يوم أحد» / «كل الثلاثاء» = دوام ثابت لهذاك اليوم كل أسبوع (مو بكرة بس)
+const EVERY = /(^|\s)كل\s+(يوم\s+)?(ال)?(سبت|احد|اثنين|ثلاثاء|ثلاثا|اربعاء|اربعا|خميس)/;
+const everyDays = text => {                                                    // «كل الثلاثاء والخميس» → [2, 4]
+  const n = norm(text), out = [];
+  for (const m of n.matchAll(/(^|\s)كل\s+/g)) {
+    const seg = n.slice(m.index + m[0].length).split(/\s+(من|الساعه|دوام|دوامه|دوامها|يداوم|تداوم|\d)/)[0].slice(0, 40);
+    for (const w of seg.split(/\s+|،|,/).map(x => x.replace(/^و/, "").replace(/^(يوم)$/, "").replace(/^ال/, ""))) { const d = DAYW.find(([k]) => k === w); if (d && d[1] !== 5 && !out.includes(d[1])) out.push(d[1]); }
+  }
+  return out;
+};
+const PERMANENT = /دائم|دايم|ثابت|بشكل دائم|من الحين وطالع|من اليوم وطالع|كل (يوم|اسبوع)|كل (يوم )?(ال)?(سبت|احد|اثنين|ثلاثاء|اربعاء|خميس)|(^|\s)(من|ابتداء من|اعتبارا من|بدايه من) (يوم )?(ال)?(سبت|احد|اثنين|ثلاثاء|اربعاء|خميس)|يباشر|سيباشر|مباشره|المعتاد/;
 function schedOf(text) {
   const tx = latin(text), n = norm(tx);
   const days = [...new Set(DAYW.filter(([w]) => n.includes(w)).map(([, i]) => i))].sort();
@@ -406,6 +417,11 @@ async function apply(evs, ctx) {
     for (const e of evs) {
       let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
+      if (d && ["starts_at", "present", "leaves_at"].includes(e.kind) && EVERY.test(norm(ctx.text)) && everyDays(ctx.text).length) {
+        const sc0 = schedOf(ctx.text);
+        e.kind = "schedule_change"; e.days = everyDays(ctx.text); e.date = "";
+        e.from_time = e.at_time || (sc0.from != null ? hhmm(sc0.from) : ""); e.to_time = e.until_time || (sc0.to != null ? hhmm(sc0.to) : "");
+      }
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d) {
         // «دوام يوم الجمعة …» أو يوم محدد بدون «دائم» → دوام ذاك اليوم بس (مو تغيير الجدول الثابت)
         const onlyFri = Array.isArray(e.days) && e.days.length && e.days.every(x => x === 5);
@@ -462,6 +478,11 @@ async function apply(evs, ctx) {
         if (d && sFrom && sFrom > t.iso && sFrom <= isoPlus(t.iso, 30) && (days.length || sch.shifts)) {
           plans.push({ id: uid(), date: sFrom, doctorId: d.id, kind: "set_schedule", sch, by: ctx.by }); applied.push("planned");
           (ctx.rep ||= []).push(`🗓 د. ${shortName(d.name)} — دوام ثابت من ${sFrom.split("-").reverse().slice(0, 2).join("/")}: ${schedTxt(sch)}\n   الموقع: يتعدّل يومها (لين ذاك اليوم يبقى الدوام الحالي)`); continue;
+        }
+        if (d && sch.shifts && days.length && EVERY.test(norm(ctx.text)) && days.every(x => (d.workdays || []).includes(x)) && days.length < (d.workdays || []).length) {
+          sch.altOnly = true;                                                       // «كل خميس من 9 لـ 5» → الخميس بس، الباقي ما يتغير
+          upd.push({ d, sch }); applied.push("schedule_change");
+          (ctx.rep ||= []).push(`✏️ د. ${shortName(d.name)} — كل ${days.map(i => DAYN[i]).join(" و")}: ${sch.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ")} (باقي الأيام زي ما هي)\n   الموقع: انعدّل في الجدول`); continue;
         }
         if (d && (days.length || sch.shifts || sch.room || sch.fee)) { upd.push({ d, sch }); applied.push("schedule_change"); (ctx.rep ||= []).push(`✏️ د. ${shortName(d.name)} — تغيير دوام ثابت: ${schedTxt(sch)}\n   الموقع: انعدّل في الجدول`); continue; }
         if (!d && admins.length) { newDocs.push({ e, sch }); applied.push("new_doctor"); (ctx.rep ||= []).push(`🆕 د. ${e.name} — طبيب مو موجود: أرسلت لك تسأل تضيفه أو لا`); continue; }
@@ -563,17 +584,28 @@ async function updateSchedules(list, ctx) {
     const next = structuredClone(cur);
     for (const { d, sch } of list) {
       const t = next.departments.flatMap(p => p.doctors || []).find(x => x.id === d.id); if (!t) continue;
+      if (sch.altOnly) {                                                          // دوام مختلف ليوم/أيام معيّنة، باقي الأيام زي ما هي
+        const J = x => JSON.stringify((x || []).map(y => [y.s, y.e]));
+        if (J(t.shifts) === J(sch.shifts)) {                                      // نفس دوامه العادي → اليوم يرجع عادي
+          if (t.alt) { t.alt.days = t.alt.days.filter(x => !sch.days.includes(x)); if (!t.alt.days.length) delete t.alt; }
+        } else if (t.alt && J(t.alt.shifts) !== J(sch.shifts)) {
+          if (t.alt.days.every(x => sch.days.includes(x))) t.alt = { days: [...sch.days].sort((x, y) => x - y), shifts: sch.shifts };
+          else { done.push({ name: shortName(t.name), sch, fail: `عنده ${t.alt.days.map(i => DAYN[i]).join(" و")} بدوام ثاني — عدّله من صفحة الأطباء` }); continue; }
+        } else t.alt = { days: [...new Set([...(t.alt?.days || []), ...sch.days])].sort((x, y) => x - y), shifts: sch.shifts };
+        done.push({ name: shortName(t.name), sch }); continue;
+      }
       if (sch.days?.length) t.workdays = sch.days;
       if (sch.shifts) { t.shifts = sch.shifts; delete t.alt; }
       for (const f of ["room", "ext", "fee"]) if (sch[f]) t[f] = sch[f];
       done.push({ name: shortName(t.name), sch });
     }
-    if (!done.length) return;
-    next.log = [{ at: Date.now(), by: `البوت (${ctx.by})`, what: `دوام ${done.map(x => "د. " + x.name).join("، ")} من القروب` }, ...(cur.log || [])].slice(0, 60);
+    if (!done.some(x => !x.fail)) return;
+    next.log = [{ at: Date.now(), by: `البوت (${ctx.by})`, what: `دوام ${done.filter(x => !x.fail).map(x => "د. " + x.name).join("، ")} من القروب` }, ...(cur.log || [])].slice(0, 60);
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "تعديل دوام من القروب" }); tx.set(ref, next);
   });
-  if (!reportsOn) for (const x of done) await dmAdmin(`✏️ عدّلت د. ${x.name} في الجدول\n${schedTxt(x.sch)}${x.sch.fee ? " · كشفية " + x.sch.fee : ""}\n(من رسالة ${ctx.by})\n\nلو فيه غلط رد «تراجع».`);
+  for (const x of done.filter(x => x.fail)) await dmAdmin(`⚠️ ما عدّلت دوام د. ${x.name}: ${x.fail}\n(رسالة ${ctx.by})`);
+  if (!reportsOn) for (const x of done.filter(x => !x.fail)) await dmAdmin(`✏️ عدّلت د. ${x.name} في الجدول\n${schedTxt(x.sch)}${x.sch.fee ? " · كشفية " + x.sch.fee : ""}\n(من رسالة ${ctx.by})\n\nلو فيه غلط رد «تراجع».`);
 }
 
 // يرجع من إجازة: نقفل الإجازة المفتوحة/الحالية يوم قبل المباشرة
@@ -968,7 +1000,14 @@ export async function handleGroupMessage(m) {
   }
   if (!evs.length) { if (evs.unknown) { try { await getSock()?.sendMessage(jid, { react: { text: "❓", key: m.key } }); } catch {} } return; }
   const ctx = { text, by, rep: [] };
-  const applied = await apply(evs, ctx);
+  let applied;
+  try { applied = await apply(evs, ctx); }
+  catch (err) {
+    log.error({ err: String(err?.message || err), text: text.slice(0, 80) }, "رسالة القروب ما انطبقت");
+    await dmAdmin(`❌ رسالة ${by} ما انطبقت على الجدول (صار خطأ):\n«${text.slice(0, 200)}»\n${String(err?.message || err).slice(0, 160)}\n\nطبّقها من صفحة الأطباء أو أرسلها مرة ثانية.`).catch(() => {});
+    try { await getSock()?.sendMessage(jid, { react: { text: "⚠️", key: m.key } }); } catch {}
+    return;
+  }
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");
   if (applied.length && ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {});
   // ✅ فهمها وطبّقها — ❓ فهم إنها عن طبيب بس ما عرف مين (يكتبون الاسم الثاني أو يردّون على رسالة فيها الاسم)
