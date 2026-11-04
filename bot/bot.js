@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.0";
+const VERSION = "2.9.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -235,6 +235,32 @@ async function saveTeamFile(m, who) {
     log.warn({ err: String(e?.message || e) }, "ملف وارد");
     await sock.sendMessage(jid, { text: "⚠ ما قدرت أحفظ الملف — أرسله مرة ثانية." }, { quoted: m }).catch(() => {});
   }
+  return true;
+}
+// أنس أرسل ملف (مو رد على مراجع) → نسأله: أحطه في الموقع؟ (ملفات ورا بعض = سؤال واحد)
+const adminFiles = new Map();                                            // jid → { list, qid, at, timer }
+const fileLabel = m => { const g = m.message || {}, x = g.documentMessage || g.documentWithCaptionMessage?.message?.documentMessage; return x?.fileName || (g.imageMessage ? "صورة" : g.videoMessage ? "فيديو" : "ملف"); };
+function askAdminFile(m) {
+  const jid = m.key.remoteJid; let p = adminFiles.get(jid);
+  if (!p || Date.now() - p.at > 30 * 60e3) { p = { list: [], qid: "", at: 0, timer: null }; adminFiles.set(jid, p); }
+  p.list.push(m); p.at = Date.now(); clearTimeout(p.timer);
+  p.timer = setTimeout(async () => {
+    const n = p.list.length;
+    const q = await sock.sendMessage(jid, { text: `📎 وصلني ${n === 1 ? "«" + fileLabel(p.list[0]) + "»" : n === 2 ? "ملفين" : n + " ملفات"}.\nتبغاني ${n === 1 ? "أحطه" : "أحطها"} في الموقع (📥 الوارد)؟ رد «نعم» أو «لا».` }, { quoted: p.list[n - 1] }).catch(() => null);
+    p.qid = q?.key?.id || "";
+  }, 2500);
+}
+async function answerAdminFile(m, text) {
+  const jid = m.key.remoteJid, p = adminFiles.get(jid);
+  if (!p || !p.list.length || Date.now() - p.at > 30 * 60e3) return false;
+  const q = m.message?.extendedTextMessage?.contextInfo?.stanzaId || "";
+  if (q && q !== p.qid) return false;                                      // ساحب رسالة ثانية → مو جواب على سؤال الملف
+  const n = latin(text).replace(/[ً-ْـ]/g, "").replace(/[أإآ]/g, "ا").trim().toLowerCase();
+  const yes = /^(نعم|ايوه|ايوا|اي|ايه|ارفع|ارفعه|ارفعها|حطه|حطها|حطهم|تمام|اوكي|ok|yes|👍|✅)/.test(n), no = /^(لا|لاء|no|خله|خلها|لاتحط|لا تحط|❌)/.test(n);
+  if (!yes && !no) return false;
+  adminFiles.delete(jid); clearTimeout(p.timer);
+  if (no) { await sock.sendMessage(jid, { text: "تمام، ما رفعته." }).catch(() => {}); return true; }
+  for (const f of p.list) await saveTeamFile(f, "anas");
   return true;
 }
 // تنظيف: الواردة بعد 7 أيام، والمرسلة بعد يوم، والأجزاء اليتيمة (رفع ما كمل)
@@ -524,10 +550,15 @@ function bufferIncoming(m) {
   const isFile = msg.documentMessage || msg.imageMessage || msg.videoMessage || msg.documentWithCaptionMessage;
   const ctxQ = (msg.documentMessage || msg.imageMessage || msg.videoMessage)?.contextInfo?.stanzaId;
   const capT = String((msg.documentMessage || msg.imageMessage || msg.videoMessage || msg.documentWithCaptionMessage?.message?.documentMessage)?.caption || "").trim();
-  if (plainDm && isFile && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT) && !m._teamChecked) {   // «P7KQ …» = رد المسؤول لمراجع (مو ملف للوحة)
+  if (plainDm && isFile && !m._teamChecked) {
     m._teamChecked = true;
-    senderPhoneOf(m).then(ph => { const who = teamOf(ph); return who ? saveTeamFile(m, who) : bufferIncoming(m); })
-      .catch(e => { log.warn({ err: String(e?.message || e) }, "ملف وارد"); bufferIncoming(m); });
+    senderPhoneOf(m).then(ph => {
+      const who = teamOf(ph);
+      if (who === "majed") return saveTeamFile(m, who);                                  // ماجد: أي ملف يروح للموقع
+      // أنس: رد (سحب) على رسالة أو «P7KQ …» = رد على استفسار مراجع → للمراجع، غير كذا نسأله يرفعه للموقع؟
+      if (who === "anas" && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT)) return askAdminFile(m);
+      return bufferIncoming(m);
+    }).catch(e => { log.warn({ err: String(e?.message || e) }, "ملف وارد"); bufferIncoming(m); });
     return;
   }
   const quoted = msg.extendedTextMessage?.contextInfo?.stanzaId;
@@ -574,8 +605,22 @@ async function onIncoming(m) {
   const hits = (loopGuard.get(jid) || []).filter(t => now - t < 120000); hits.push(now); loopGuard.set(jid, hits);
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   const senderPhone = await senderPhoneOf(m);
+  const team = teamOf(senderPhone), admin = team === "anas" || isAdminPhone(senderPhone);
+  // ماجد: ما ينعامل كمراجع أبداً — ملف = للموقع، كلام = نطلب الملف
+  if (team === "majed") {
+    if (media) await saveTeamFile(m, "majed");
+    else if (now - (lastReply.get(jid + "#majed") || 0) > 60e3) { lastReply.set(jid + "#majed", now); await sock.sendMessage(jid, { text: "الرجاء إرسال الملف لإرفاقه بالموقع 📎" }).catch(() => {}); }
+    return;
+  }
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
+  if (admin && text && await answerAdminFile(m, text).catch(e => { log.warn({ err: String(e?.message || e) }, "ملف المسؤول"); return false; })) return;   // «نعم/لا» على «أحط الملف في الموقع؟»
   if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
+  // المسؤول: ما ينعامل كمراجع أبداً (ما نسأله عن رقم طلب أو هوية)
+  if (admin) {
+    if (media) { askAdminFile(m); return; }
+    if (now - (lastReply.get(jid + "#admin") || 0) > 10 * 60e3) { lastReply.set(jid + "#admin", now); await sock.sendMessage(jid, { text: "أنا معك 👋 تقدر:\n• ترسل ملف وأحطه في الموقع\n• ترد (تسحب) على استفسار مراجع وأوصله له\n• تصحّح أي شي سويته في القروب بالرد على رسالتي" }).catch(() => {}); }
+    return;
+  }
   const t = latin(text).toUpperCase();
   const it = readIntent(text, media);
   if (msg.stickerMessage && !text) { it.ok = true; it.social = true; }
