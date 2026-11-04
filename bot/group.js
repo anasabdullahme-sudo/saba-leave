@@ -233,6 +233,14 @@ function dayOf(text) {
   if (w) { const diff = (w[1] - t.wd + 7) % 7; return diff ? isoPlus(t.iso, diff) : null; }
   return null;
 }
+// يوم الحدث من الكلام: «مو اليوم / مب اليوم» تنشال، ولو فيه «اليوم» و«بكرة» مع بعض ما نخمّن
+function textDay(text) {
+  const n = norm(text).replace(/(^|\s)(مو|مب|موب|مش|ليس|لا|مهب)\s+(اليوم|الليله)(?=\s|$)/g, " ");
+  const d = dayOf(n);
+  if (!d) return null;
+  if (/(^|\s)(اليوم|الليله)(\s|$)/.test(n)) return null;
+  return d;
+}
 // «غدا الخميس فقط عيادة د رائد من ٢-٧» → دوام ذاك اليوم بس
 function dayRule(text) {
   const n = norm(text), today = /(^|\s)(اليوم|الليله)(\s|$)/.test(n);
@@ -402,7 +410,9 @@ async function apply(evs, ctx) {
         }
       }
       // حدث ليوم ثاني (بكرة/الخميس): نحفظه ويتطبّق أول ما يجي يومه
-      const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : "";
+      // الذكاء نسى التاريخ؟ «غداً فقط…» / «غلط دوامه غداً مو اليوم» → ناخذه من الكلام نفسه
+      const evDate = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : PLAN_KINDS.includes(e.kind) ? (textDay(ctx.text) || "") : "";
+      if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d && ctx.fix) { delete cur.st?.[d.id]; cur.events = (cur.events || []).filter(x => !(x.doctorId === d.id && x.kind === e.kind)); }   // تصحيح: كان مطبّق اليوم بالغلط → نشيله من اليوم
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d) {
         if (evDate <= isoPlus(t.iso, 14)) {
           plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by }); applied.push("planned");
@@ -748,7 +758,7 @@ async function handleClarify(m, text) {
     if (!evs.length) { await dmAdmin("ما فهمت تصحيحك 🙏 اكتبها بشكل أوضح (اسم الطبيب + وش صار + الوقت)."); return true; }
   }
   await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
-  const cctx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + " (تصحيح)", rep: [] };
+  const cctx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + " (تصحيح)", rep: [], fix: true };
   const applied = await apply(evs, cctx);
   if (applied.length && how === "حسب كلامك") learnAliases(it.evs, evs).catch(e => log.warn({ err: String(e?.message || e) }, "تعلّم الاسم"));
   await dmAdmin(applied.length ? `✅ طبّقتها ${how}:\n${cctx.rep.length ? cctx.rep.join("\n") : describeEvs(evs)}` : "ما انطبق شي — تأكد من اسم الطبيب.");
