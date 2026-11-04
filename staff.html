@@ -438,7 +438,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104b";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1038,7 +1038,8 @@ async function openDrawer(id, holdNow) {
 function fillDrawerMeta(x) {
   $("#dName").textContent = x.patientName;
   const d = reqDoctor(x);
-  $("#dMeta").textContent = `${typeName(x.type)} — وصل ${timeAgo(x.createdAt)}${d ? "" : " — الطبيب غير مدرج (تحقق من الفرع)"}`;
+  $("#dMeta").textContent = `${typeName(x.type)} — وصل ${timeAgo(x.createdAt)}${d ? "" : " — الطبيب غير مدرج (تحقق من الفرع)"}${x.scanInfo ? " — المسح " + x.scanInfo.split(" ")[0] : ""}`;
+  $("#dMeta").title = x.scanInfo ? "مدة المسح: " + x.scanInfo : "";                  // مرّر الماوس = كم أخذ المسح عند المريض
 }
 function closeDrawer() {
   if (S.openId && !S.sentSeha?.has(S.openId)) releaseReq(S.openId);    // فتحته بس شفته؟ نفكّ الحجز

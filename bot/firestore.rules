@@ -132,7 +132,7 @@ service cloud.firestore {
              'leaveStart','leaveEnd','leaveDays','visitDate',
              'companionName','companionId','companionDob','relationship',
              'doctorName','doctorId','branch','imagePath','aiFilled','aiQuality',
-             'fileNo','nationality','gender','reason','stampDoctor','docKind','dateFlag',
+             'fileNo','nationality','gender','reason','stampDoctor','docKind','dateFlag','scanInfo',
              'uid','status','createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
@@ -153,7 +153,7 @@ service cloud.firestore {
         && optStr(request.resource.data, 'fileNo', 30) && optStr(request.resource.data, 'nationality', 60)
         && optStr(request.resource.data, 'gender', 20) && optStr(request.resource.data, 'reason', 300)
         && optStr(request.resource.data, 'stampDoctor', 120) && optStr(request.resource.data, 'docKind', 30)
-        && optStr(request.resource.data, 'dateFlag', 200)
+        && optStr(request.resource.data, 'dateFlag', 200) && optStr(request.resource.data, 'scanInfo', 120)
         && (!('aiFilled' in request.resource.data) || request.resource.data.aiFilled is bool)
         // الصورة لازم تكون صورة نفس المريض (ما يقدر يربط طلبه بصورة شخص ثاني)
         && (request.resource.data.imagePath.matches('^uploads/' + request.auth.uid + '/[0-9]+\\.(jpg|pdf)$')

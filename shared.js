@@ -591,9 +591,13 @@ async function liveBackend(role) {
 
   const models = {};
   let AIref = null, aiInst = null, aiCfg = null;
-  async function getModel(name = AI_MODEL) {
-    if (models[name]) return models[name];
-    if (aiInst) return (models[name] = AIref.getGenerativeModel(aiInst, { model: name, generationConfig: aiCfg }));
+  // بدون «تفكير»: قراءة ورقة ما تحتاج تفكير، والتفكير يطوّل الرد. لو موديل ما يقبله نرجع للعادي تلقائياً
+  const noThink = new Set();
+  async function getModel(name = AI_MODEL, think = false) {
+    const key = name + (think ? "|t" : "");
+    if (models[key]) return models[key];
+    const gc = () => think ? aiCfg : { ...aiCfg, thinkingConfig: { thinkingLevel: "MINIMAL" } };
+    if (aiInst) return (models[key] = AIref.getGenerativeModel(aiInst, { model: name, generationConfig: gc() }));
     const AI = await import(u("ai"));
     const S = AI.Schema;
     const props = {};
@@ -605,7 +609,7 @@ async function liveBackend(role) {
     const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
     const cfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: props }), temperature: 0 };
     AIref = AI; aiInst = ai; aiCfg = cfg;
-    return (models[name] = AI.getGenerativeModel(ai, { model: name, generationConfig: cfg }));
+    return (models[key] = AI.getGenerativeModel(ai, { model: name, generationConfig: gc() }));
   }
 
   const api = {
@@ -617,11 +621,17 @@ async function liveBackend(role) {
     extractTimeout: 45000,
     async extract(blob, type) {
       // صورة أصغر للقراءة فقط (أسرع رفع وأسرع معالجة) — الصورة المحفوظة تبقى بجودتها
+      const t0 = performance.now();
       const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 1280, 0.8);
       const b64 = await blobToBase64(small);
+      const t1 = performance.now();
       const parts = [aiPrompt(type), { inlineData: { data: b64, mimeType: small.type || "image/jpeg" } }];
       const queue = [AI_MODEL, ...AI_FALLBACK_MODELS];
-      const run = name => getModel(name).then(m => m.generateContent(parts)).then(r => JSON.parse(r.response.text()));
+      const call = (name, think) => getModel(name, think).then(m => m.generateContent(parts)).then(r => JSON.parse(r.response.text()));
+      const run = name => (noThink.has(name) ? call(name, true) : call(name, false).catch(e => {
+        if (!/thinking|invalid.?argument|\b400\b/i.test(String(e?.message || e))) throw e;   // الموديل ما يقبل إيقاف التفكير → نعيد بدونه
+        noThink.add(name); return call(name, true);
+      })).then(v => { if (v && typeof v === "object") v._scan = `تصغير ${((t1 - t0) / 1000).toFixed(1)}ث · قراءة ${((performance.now() - t1) / 1000).toFixed(1)}ث · ${name}${noThink.has(name) ? " (بتفكير)" : ""}`; return v; });
       return await new Promise((resolve, reject) => {
         let running = 0, done = false, lastErr, timer;
         const next = () => {

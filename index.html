@@ -323,7 +323,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104a";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261104b";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -535,7 +535,7 @@ async function onPhoto(file) {
   const blob = isPdf ? file : await compressImage(file);
   // صيغة ما يفتحها المتصفح (مثل HEIC أو ملف مو صورة) → نوقف هنا بدل ما يفشل الإرسال آخر شي
   if (!isPdf && (blob === file || blob.type !== "image/jpeg")) return toast("ما قدرنا نفتح هالصورة. صوّر التقرير بالكاميرا مباشرة، أو اختر صورة JPG", 4500);
-  state.blob = blob; state.imagePath = null; state.ai = {}; state.notLeave = false; $("#note").style.cssText = "";
+  state.blob = blob; state.imagePath = null; state.ai = {}; state.scanInfo = ""; state.notLeave = false; $("#note").style.cssText = "";
   state.preview = isPdf ? "" : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(""); fr.readAsDataURL(blob); });
   $("#shotImg").src = state.preview || "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0b2b47"/><text x="200" y="110" fill="#7FD0F0" font-size="22" text-anchor="middle" font-family="sans-serif">PDF</text></svg>');
   await apiReady;
@@ -554,9 +554,11 @@ async function onPhoto(file) {
   const myBlob = blob;
   if (!useAI) { $("#form [name]")?.focus({ preventScroll: true }); return; }
   try {
+    const tScan = performance.now();
     const r = await Promise.race([api.extract(blob, state.type), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
     if (state.blob !== myBlob) return;
     state.ai = r || {};
+    state.scanInfo = `${((performance.now() - tScan) / 1000).toFixed(1)}ث${r?._scan ? " (" + r._scan + ")" : ""}`.slice(0, 120);   // مدة المسح — تطلع للموظف
     // المريض اختار نوع غلط؟ نحوّله تلقائياً لنوع التقرير (مثلاً اختار إجازة والورقة مشهد مراجعة)
     const typeFor = { sick_leave: "sick", companion_leave: "companion", attendance: "attendance" };
     const docType = typeFor[r?.document_kind];
@@ -773,9 +775,10 @@ $("#form").addEventListener("submit", async e => {
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
       ...(withFlag && flag ? { dateFlag: flag } : {}),
+      ...(withFlag && state.scanInfo ? { scanInfo: state.scanInfo } : {}),
     }, key);
     // لو قواعد قاعدة البيانات لسا ما تحدّثت (ما تعرف dateFlag) → نرسل بدونه بدل ما يفشل الطلب
-    await withRetry(() => create(true).catch(e => { if (flag && e?.code === "permission-denied") return create(false); throw e; }));
+    await withRetry(() => create(true).catch(e => { if ((flag || state.scanInfo) && e?.code === "permission-denied") return create(false); throw e; }));
     clearTimeout(slow);
     $("#refTxt").textContent = ref;
     rememberMe(latinDigits(fd.idNumber), normPhone(fd.phone));
