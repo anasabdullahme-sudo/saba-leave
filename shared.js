@@ -567,7 +567,7 @@ ${AI_KEYS.join(", ")}, document_kind, quality.`;
       await col.doc(id).update({ status: "done", doneAt: Date.now(), doneBy: by });
     },
     claim: (id, by) => col.doc(id).update({ openedBy: by, openedAt: Date.now() }),
-    undoDone: id => col.doc(id).update({ status: "pending", doneAt: null, doneBy: null }),
+    undoDone: async id => { const d = await col.doc(id).get?.(); await col.doc(id).update({ status: "pending", doneAt: null, doneBy: null, reopenN: ((d?.data?.() || {}).reopenN || 0) + 1 }); },
     markHeld: (id, reason, note, by) => col.doc(id).update({ status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }),
     unhold: id => col.doc(id).update({ status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }),
     update: (id, patch) => col.doc(id).update(patch),
@@ -586,7 +586,11 @@ async function liveBackend(role) {
     provider: RECAPTCHA_PROVIDER === "enterprise" ? new AC.ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY) : new AC.ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
     isTokenAutoRefreshEnabled: true });
   const auth = AU.getAuth(app);
-  const db = role === "staff"
+  // (1.9.2) لوحة الإجازات لها اتصال خاص فيها (بدون مشاركة مع باقي الصفحات): لما تكون الصفحة الرئيسية أو الأطباء مفتوحة قبلها
+  // كانت هي اللي ماسكة الاتصال، ولو كروم نيّمها بالخلفية اللوحة توقف تتحدث بدون ما تدري — طلبات جديدة ما تطلع، والمرفوع يرجع للأداة
+  const db = role === "board"
+    ? FS.initializeFirestore(app, { localCache: FS.memoryLocalCache() })
+    : role === "staff"
     ? FS.initializeFirestore(app, { localCache: FS.persistentLocalCache({ tabManager: FS.persistentMultipleTabManager() }) })
     : FS.getFirestore(app);
   const st = useStorage ? ST.getStorage(app) : null;
@@ -814,7 +818,7 @@ async function liveBackend(role) {
       tx.update(ref, { ...extra, status: "done", doneAt: FS.serverTimestamp(), doneBy: by, openedBy: "", openedAt: null });   // رقم PSL مع «تم الرفع» بكتابة وحدة (كان كتابتين → الطلب يرجع ثانيتين)
     }),
     // حالة طلب واحد من قاعدة البيانات نفسها (قراءة وحدة)
-    async getStatus(id, server) { const d = await (server ? FS.getDocFromServer : FS.getDoc)(FS.doc(col, id)); if (!d.exists()) return null; const x = d.data(); return { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt?.toMillis?.() || 0, ref: x.ref || "", patientName: x.patientName || "" }; },
+    async getStatus(id, server) { const d = await (server ? FS.getDocFromServer : FS.getDoc)(FS.doc(col, id)); if (!d.exists()) return null; const x = d.data(); return { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt?.toMillis?.() || 0, ref: x.ref || "", patientName: x.patientName || "", reopenN: x.reopenN || 0 }; },
     claim: (id, by) => FS.updateDoc(FS.doc(col, id), { openedBy: by, openedAt: FS.serverTimestamp() }),
     // قفل المراجع: جهاز واحد بس. معاملة (transaction) → لو جهازين ضغطوا بنفس اللحظة واحد بس ياخذه.
     // now() = وقت السيرفر التقريبي (من اللوحة) — عشان ساعة جهاز غلط ما تفك قفل غيره بدري
@@ -835,7 +839,8 @@ async function liveBackend(role) {
     undoDone: id => FS.runTransaction(db, async tx => {
       const ref = FS.doc(col, id), cur = await tx.get(ref);
       if (cur.data()?.status !== "done") return;
-      tx.update(ref, { status: "pending", doneAt: null, doneBy: null });
+      // reopenN: عدّاد «رجع للانتظار» — الأداة تعرف إن الطلب رجع فعلاً (مو قائمة قديمة) وتعرضه من جديد
+      tx.update(ref, { status: "pending", doneAt: null, doneBy: null, reopenN: FS.increment(1) });
     }),
     // تعليق/إرجاع داخل معاملة: لو موظف ثاني رفعه بنفس اللحظة ما نرجّعه للانتظار (يمنع الرفع مرتين)
     markHeld: (id, reason, note, by) => FS.runTransaction(db, async tx => {
@@ -1069,7 +1074,7 @@ function demoBackend() {
     async claim(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.openedBy = by; x.openedAt = Date.now(); } save(l); },
     async lock(id, tag, lockMs) { const l = load(); const x = l.find(r => r.id === id); if (!x) throw Object.assign(new Error("gone"), { code: "gone" }); if (x.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy, doneAt: x.doneAt }); if (x.openedBy && x.openedBy !== tag && x.openedAt && Date.now() - x.openedAt < lockMs) throw Object.assign(new Error("locked"), { code: "locked", by: x.openedBy, at: x.openedAt }); x.openedBy = tag; x.openedAt = Date.now(); save(l); },
     async unlock(id, tag) { const l = load(); const x = l.find(r => r.id === id); if (x && x.openedBy === tag) { x.openedBy = ""; x.openedAt = null; save(l); } },
-    async undoDone(id) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.status = "pending"; x.doneAt = null; x.doneBy = null; } save(l); },
+    async undoDone(id) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.status = "pending"; x.doneAt = null; x.doneBy = null; x.reopenN = (x.reopenN || 0) + 1; } save(l); },
     async markHeld(id, reason, note, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) Object.assign(x, { status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }); save(l); },
     async unhold(id) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); save(l); },
     async update(id, patch) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, patch); save(l); },

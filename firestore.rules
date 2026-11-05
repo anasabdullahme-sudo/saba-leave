@@ -193,7 +193,7 @@ service cloud.firestore {
              'leaveStart','leaveEnd','leaveDays','visitDate',
              'companionName','companionId','relationship','doctorName','doctorId',
              'fileNo','nationality','gender','reason','stampDoctor','type','typeManual',
-             'fixToken','fixAt','imagePath','patientNote','dateFlag','dateChecked'])
+             'fixToken','fixAt','imagePath','patientNote','dateFlag','dateChecked','reopenN'])
         && request.resource.data.type in ['sick','companion','attendance']
         && request.resource.data.status in ['pending','held','done']
         // المرفوع ما يتعلّق: من "تم الرفع" يا يبقى مرفوع (تعديل) يا يرجع "انتظار" (تراجع)

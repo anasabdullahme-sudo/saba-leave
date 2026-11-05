@@ -488,7 +488,7 @@ const S = {
 if (!BRANCHES.some(b => b.id === S.branch)) S.branch = BRANCHES[0].id;
 
 $("#sehaTop").href = SEHA_URL; $("#sehaDrawer").href = SEHA_URL; $("#sehaTop").target = "saba_seha";
-const api = await backend("staff");
+const api = await backend("board");                // اتصال خاص باللوحة (ما يتعطّل لو صفحة ثانية نامت)
 if (api.demo || api.trial) { $("#demoPill").hidden = false; $("#demoPill").textContent = api.trial ? "نسخة تجربة" : "وضع تجريبي"; }
 if (api.trial) $("#btnOut").hidden = true;
 async function copyText(t) {
@@ -931,6 +931,7 @@ async function markDone(id, opt = {}) {
   if (S.openId === id) closeDrawer();
   try {
     await api.markDone(id, by, opt.extra || {});
+    doneMark(id, x.reopenN);                                                       // الأداة ما تعرضه مرة ثانية حتى لو وصلتها قائمة قديمة
     postQueue();                                                                   // الأداة تاخذ القائمة الجديدة على طول
     toast(`تم نقل ${x.patientName} إلى "تم الرفع"`, "تراجع", async () => {
       await api.undoDone(id);
@@ -1657,7 +1658,7 @@ function sehaPayload(x) {
   const doc = reqDoctor(x), br = (!x.branchManual && doc?.branch) || x.branch;
   return {
     // حساب صحة يتبع فرع الطبيب الفعلي (حتى لو الطلب لسى ما انتقل) — إلا إذا الموظف حدد الفرع يدوياً
-    v: 1, id: x.id, ref: x.ref, type: x.type, branch: br, account: SEHA_ACCOUNTS[br] || null,
+    v: 1, id: x.id, ref: x.ref, type: x.type, branch: br, account: SEHA_ACCOUNTS[br] || null, reopenN: x.reopenN || 0,
     fileNo: pick("fileNo"), doctorAr: doc?.ar || "", doctorEn: doc?.en || "",
     patientName: pick("patientName"), patientNameEn: pick("patientNameEn"), idNumber: pick("idNumber"), dob: pick("dob"), phone: pick("phone"),
     leaveStart: pick("leaveStart"), leaveEnd: pick("leaveEnd"), leaveDays: pick("leaveDays"), visitDate: pick("visitDate"),
@@ -1769,6 +1770,8 @@ function alreadyDone({ id, ref, by, doneAt, name, at }) {
   chime(); toast(`⚠ ${nm ? "«" + nm + "» " : "هذا الطلب "}تم رفعه مسبقاً${by ? " — رفعه " + by : ""}${t ? " الساعة " + t : ""}. لا ترفعه مرة ثانية في صحة.`);
 }
 const ackSeha = m => window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
+// (1.9.2) «سجل المرفوع» في الإضافة: أي طلب انرفع من هالجهاز ما يرجع يطلع في الأداة — إلا لو رجع للانتظار فعلاً (reopenN زاد)
+const doneMark = (id, n) => window.postMessage({ type: "SABA_DONE_MARK", id, n: n || 0 }, location.origin);
 async function handleSehaDone(m) {
   // نفس الضغطة توصل لكل تبويبات اللوحة المفتوحة → تبويب واحد بس يتكفّل فيها.
   // لو التبويب اللي أخذها انقفل/تحدّث قبل ما يحفظ، تبويب ثاني يكمّلها بعد ثواني (كانت تضيع)
@@ -1807,7 +1810,7 @@ async function handleSehaDone(m) {
     }
     try {
       await api.markDone(m.id, myName(), m.psl ? { sehaRef: m.psl } : {});
-      finish(); doneMsgQueue = null;
+      finish(); doneMsgQueue = null; doneMark(m.id, st.reopenN);
       (S.doneLocal ||= new Map()).set(m.id, Date.now());
       S.pending = S.pending.filter(r => r.id !== m.id); S.held = S.held.filter(r => r.id !== m.id);
       renderCounts(); renderPending(); renderHeld(); postQueue(); loadDone(true);

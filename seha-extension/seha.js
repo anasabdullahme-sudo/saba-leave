@@ -538,7 +538,12 @@
   // «تم الرفع» اللي للحين ما تأكد من اللوحة (sabaDone_<وقت>) → الطلب يظل مخفي لين تأكد (مو 20 ثانية وبس)
   let unacked = new Set();
   const loadUnacked = () => chrome.storage.local.get(null, all => { const n = new Set(Object.entries(all).filter(([k, v]) => k.startsWith("sabaDone_") && v?.id).map(([, v]) => v.id)); const ch = n.size !== unacked.size || [...n].some(x => !unacked.has(x)); unacked = n; if (ch && TOP) { updateCount(); if (!req && !minimized) render(); } });
-  const isHidden = id => { if (unacked.has(id)) return true; const t = hidden[id]; return !!t && queueAt < t + 20000; };
+  // (1.9.2) سجل المرفوع: طلب انرفع من هالجهاز ما يرجع يطلع أبداً (حتى لو وصلت قائمة قديمة من تبويب نايم) —
+  // إلا لو رجع للانتظار فعلاً: عدّاد reopenN في الطلب يزيد لما أحد يسوي «تراجع»
+  let doneLog = {};
+  const logDone = (id, n) => { const now = Date.now(); doneLog = Object.fromEntries(Object.entries({ ...doneLog, [id]: { at: now, n: Math.max(n || 0, doneLog[id]?.n || 0) } }).filter(([, v]) => now - (v?.at || 0) < 3 * 864e5)); return doneLog; };
+  const loggedDone = id => { const d = doneLog[id]; if (!d) return false; const q = queue.find(x => x.id === id); return !q || (q.reopenN || 0) <= (d.n || 0); };
+  const isHidden = id => { if (unacked.has(id) || loggedDone(id)) return true; const t = hidden[id]; return !!t && queueAt < t + 20000; };
   const pendingQ = () => queueStale() ? [] : queue.filter(q => !isHidden(q.id) && q.id !== req?.id);   // قائمة قديمة → ما نعرض منها شي (ممكن فيها طلبات انرفعت من جهاز ثاني)
   const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
   // القائمة لازم تكون جديدة: اللوحة ترسلها كل 15 ثانية، فلو مر 45 ثانية بدونها (اللوحة نايمة/مقفلة) ما نعرضها.
@@ -576,7 +581,7 @@
       if (!r) { chrome.storage.local.set({ sabaUnlock: { id: q.id, at: Date.now() } }); toastLocal("⚠ صفحة الموظفين ما ردّت — افتحها (أو حدّثها) وحاول مرة ثانية"); render(); return; }   // لو قفلته اللوحة متأخر → تفكه
       if (r.status === "done") {
         dupInfo = { id: q.id, ref: q.ref || "", by: r.by || "", doneAt: r.doneAt || 0, name: q.patientName || "", at: Date.now() };
-        hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden, sabaDup: dupInfo }); setMin(false); render(); return;
+        hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden, sabaDup: dupInfo, sabaDoneLog: logDone(q.id, q.reopenN) }); setMin(false); render(); return;
       }
       if (r.status === "gone") { toastLocal("هذا الطلب انحذف أو انتقل"); hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden }); render(); return; }
       if (r.status === "locked") { toastLocal(`🔒 ${r.by || "جهاز ثاني"} أخذ هالمراجع قبلك بلحظة — اختر غيره`); askQueue(); render(); return; }
@@ -744,7 +749,7 @@
       const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
       // كل «تم الرفع» في خانة لحاله (sabaDone_<وقت>) لين اللوحة تأكد إنها حفظته — كذا ضغطتين ورا بعض ما تمسح وحدة الثانية
       const at = Date.now(), d = { id: req.id, ref: req.ref, psl, at };
-      chrome.storage.local.set({ ["sabaDone_" + at]: d, sabaDone: d, sabaHidden: hideId(req.id) }, () => {
+      chrome.storage.local.set({ ["sabaDone_" + at]: d, sabaDone: d, sabaHidden: hideId(req.id), sabaDoneLog: logDone(req.id, req.reopenN) }, () => {
         chrome.storage.local.remove("sabaReq");
         toastLocal("تم ✓ — بيتحدث الطلب في لوحة سابا");
       });
@@ -868,7 +873,8 @@
 
   // ---------- تشغيل ----------
   chrome.storage.local.get("sabaReqImg", d => { reqImg = d.sabaReqImg || null; if (reqImg && req?.id === reqImg.id) render(); });
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup"], d => {
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup", "sabaDoneLog"], d => {
+    doneLog = d.sabaDoneLog || {};
     dupInfo = d.sabaDup && Date.now() - d.sabaDup.at < 30 * 60000 ? d.sabaDup : null;
     loadUnacked();
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
@@ -895,7 +901,7 @@
     if (ch.sabaDup && TOP) {
       dupInfo = ch.sabaDup.newValue || null;
       if (dupInfo) {
-        hidden = hideId(dupInfo.id); chrome.storage.local.set({ sabaHidden: hidden });   // نشيله من قائمة الطلبات
+        hidden = hideId(dupInfo.id); chrome.storage.local.set({ sabaHidden: hidden, sabaDoneLog: logDone(dupInfo.id, queue.find(q => q.id === dupInfo.id)?.reopenN) });   // نشيله من قائمة الطلبات (وما يرجع)
         setMin(false); toastLocal("⚠ هذا الطلب تم رفعه مسبقاً");
       }
       render();
@@ -911,6 +917,7 @@
       else if (!minimized) render(); else updateCount();
     }
     if (ch.sabaHidden) hidden = ch.sabaHidden.newValue || {};
+    if (ch.sabaDoneLog) { doneLog = ch.sabaDoneLog.newValue || {}; if (TOP) { updateCount(); if (!req && !minimized) render(); } }
     if (Object.keys(ch).some(k => k.startsWith("sabaDone_"))) loadUnacked();
     if (ch.sabaReqImg && TOP) { reqImg = ch.sabaReqImg.newValue || null; if (req && (!reqImg || reqImg.id === req.id)) render(); }
     if (ch.sabaReq) {

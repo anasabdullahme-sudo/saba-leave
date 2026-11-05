@@ -56,6 +56,16 @@
   // الطلب المفتوح في صحة بهالجهاز → اللوحة تحجزه («مفتوح عند فلان» عند الباقين)
   // (1.9.2) نرسل معه آخر حركة في صحة — اللوحة ترجّع القفل بس لو فيه حركة آخر 5 دقايق
   const active = () => alive() && chrome.storage.local.get(["sabaReq", "sabaAct"], ({ sabaReq: r, sabaAct: a }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id, act: Math.max(a?.id === r.id ? a.at || 0 : 0, r.sentAt || 0) }); });
+  // (1.9.2) اللوحة رفعت طلب (من الأداة أو من اللوحة) → نسجّله: الأداة ما تعرضه مرة ثانية إلا لو رجع للانتظار فعلاً
+  listen(e => {
+    if (e.source !== window || e.data?.type !== "SABA_DONE_MARK" || !e.data.id || !isBoard()) return;
+    const { id, n } = e.data;
+    chrome.storage.local.get("sabaDoneLog", ({ sabaDoneLog: L = {} }) => {
+      const now = Date.now(), next = Object.fromEntries(Object.entries(L).filter(([, v]) => now - (v?.at || 0) < 3 * 864e5));
+      if (next[id] && next[id].n >= (n || 0)) return;
+      next[id] = { at: now, n: n || 0 }; chrome.storage.local.set({ sabaDoneLog: next });
+    });
+  });
   // الأداة طلبت طلب واللوحة تأخرت بالرد (الأداة استسلمت) → نفك القفل اللي ممكن انحجز
   chrome.storage.onChanged.addListener((ch, area) => { const u = area === "local" && ch.sabaUnlock?.newValue; if (u?.id && isBoard() && alive()) post({ type: "SABA_RELEASE", id: u.id }); });
   // الموظف يكتب/يضغط في صحة → اللوحة تجدد القفل (الأداة ترسلها كل 20 ثانية بالكثير)
@@ -63,7 +73,9 @@
   // اللوحة: القفل راح (انتهى وقتك / أخذه جهاز ثاني) أو رجع لك → الأداة في صحة تبيّنه
   listen(e => { if (e.source !== window || e.data?.type !== "SABA_LOCK" || !e.data.id || !isBoard()) return; const { id, ok, reason, by } = e.data; chrome.storage.local.set({ sabaLock: { id, ok: !!ok, reason: reason || "", by: by || "", at: Date.now() } }); });
   // تبويب اللوحة ما ينام ولا ينمسح من الذاكرة (هو اللي يوصل الأداة بقاعدة البيانات)
-  const keepAwake = () => { if (isBoard() && alive()) try { chrome.runtime.sendMessage({ type: "SABA_BOARD_HERE" }); } catch {} };
+  // كل صفحات سابا (اللوحة والرئيسية والأطباء) تتشارك اتصال قاعدة البيانات بالمتصفح — لو وحدة منها نامت ممكن تأخّر الباقين
+  const ourPage = location.hostname === "anasabdullahme-sudo.github.io" && location.pathname.startsWith("/saba-leave/");
+  const keepAwake = () => { if ((isBoard() || ourPage) && alive()) try { chrome.runtime.sendMessage({ type: "SABA_BOARD_HERE" }); } catch {} };
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local" || !ch.sabaReq || !isBoard()) return;
     const o = ch.sabaReq.oldValue, n = ch.sabaReq.newValue;
