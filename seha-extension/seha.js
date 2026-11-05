@@ -287,8 +287,10 @@
   }
 
   // ---------- الطبيب المعالج ----------
-  const docTokens = s => norm(s).toLowerCase().replace(/\b(dr|doctor)\b\.?|(^|\s)(د|دكتور|دكتوره)(\.|\s|$)/g, " ").replace(/(^|\s)(ال|al|el)[- ]?/g, " ").split(/[\s\-\/.]+/).filter(t => t.length > 1);
-  const doneDocEls = new WeakSet();
+  // (1.9.2) «أبو الفضل» = «ابوالفضل» = «ابو فضل»، و«عبد الرحمن» = «عبدالرحمن»: نوحّد الأسماء المركّبة قبل المقارنة
+  const docTokens = s => norm(s).toLowerCase().replace(/\b(dr|doctor)\b\.?|(^|\s)(د|دكتور|دكتوره)(\.|\s|$)/g, " ").replace(/(^|\s)(ال|al|el)[- ]?/g, " ")
+    .replace(/(^|\s)(ابو|عبد|ابن|بن|بو)\s+/g, "$1$2").split(/[\s\-\/.]+/).map(t => t.replace(/^(ابو|عبد|ابن|بن|بو)ال(?=..)/, "$1")).filter(t => t.length > 1);
+  const doneDocEls = new WeakMap();                                                 // قائمة البحث: نعبّيها مرة وحدة لكل طلب
   // الاسم الأول والاسم المميز هم اللي يحددون الطبيب — «محمد/علي/محمود» لحالها ما تكفي (أمين محمد علي محمود ≠ سحر محمد محمود علي)
   // يرجّع رقم الخيار، أو null لو ما فيه تطابق أكيد (الموظف يختار بنفسه)
   const DOC_COMMON = new Set(["محمد", "احمد", "عبدالله", "عبد", "علي", "حسن", "حسين", "محمود", "ابراهيم", "عبدالرحمن", "خالد", "عمر", "مصطفي", "سيد", "صالح",
@@ -312,30 +314,64 @@
     });
     return best != null && bestScore >= 2.5 && bestScore - second >= 1 ? best : null;
   }
+  // (1.9.2) «تعلّم»: لو الأداة ما عرفت الطبيب واختاره الموظف بيده، نحفظ اختياره ونستخدمه المرة الجاية —
+  // في chrome.storage.sync: يوصل لكل أجهزة الاستقبال (نفس حساب جوجل) بدون قاعدة البيانات
+  let docLearn = {};
+  const docKey = req => norm(req.doctorAr || req.doctorName || "").replace(/\s+/g, " ");
+  try { chrome.storage.sync.get("sabaDocMap", d => { docLearn = d?.sabaDocMap || {}; }); chrome.storage.onChanged.addListener((ch, area) => { if (area === "sync" && ch.sabaDocMap) docLearn = ch.sabaDocMap.newValue || {}; }); } catch {}
+  function learnDoctor(req, optText) {
+    const k = docKey(req), v = norm(optText || "").trim(); if (!k || !v || v.length < 4 || docLearn[k] === v) return;
+    docLearn = { ...docLearn, [k]: v };
+    const keys = Object.keys(docLearn); if (keys.length > 300) delete docLearn[keys[0]];
+    try { chrome.storage.sync.set({ sabaDocMap: docLearn }); } catch {}
+  }
+  const learnedIdx = (req, opts) => { const v = docLearn[docKey(req)]; if (!v) return null; const i = opts.findIndex(t => norm(t).trim() === v); return i >= 0 ? i : null; };
+  const docMiss = (req, opts) => { try { chrome.storage.local.set({ sabaDocMiss: { at: Date.now(), names: [req.doctorAr, req.doctorEn, req.stampDoctor, req.doctorName].filter(Boolean), opts: opts.slice(0, 40) } }); } catch {} };
+  function doctorBox() {
+    const lab = labelCandidates().find(x => /^(اسم\s+)?(الطبيب|الممارس)(\s+الصحي)?(\s+المعالج)?(\s|$)/.test(x.t) && !/ترخيص|رقم/.test(x.t));
+    if (!lab) return null;
+    let box = lab.el;
+    for (let i = 0; i < 4 && box; i++) { box = box.parentElement; if (box?.querySelector("select, [role=combobox], .ng-select, .select2, .mat-select, input")) break; }
+    return box || null;
+  }
+  // الموظف اختار الطبيب بيده → نتعلّم (بس ضغطاته الحقيقية، مو تعبئتنا)
+  addEventListener("change", e => { if (!e.isTrusted || !req || !(e.target instanceof HTMLSelectElement)) return; const box = doctorBox(); if (box?.contains(e.target) && e.target.selectedIndex > 0) learnDoctor(req, e.target.options[e.target.selectedIndex].textContent); }, true);
+  addEventListener("click", e => { if (!e.isTrusted || !req) return; const o = e.target.closest?.(".ng-option, .select2-results__option, [role=option], .mat-option, mat-option"); if (o && doneDocEls.get(doctorBox() || {}) === req.id) learnDoctor(req, o.textContent); }, true);
+  const visibleOpts = () => deepAll(".ng-option, .select2-results__option, [role=option], .mat-option, mat-option").filter(o => visible(o) && !o.closest("#saba-seha-host") && !/aria-disabled="true"/.test(o.outerHTML.slice(0, 200)));
   function pickDoctor(req, explicit) {
     const names = [req.doctorAr, req.doctorEn, req.stampDoctor, req.doctorName].filter(Boolean);
     if (!names.length) return "";
-    const lab = labelCandidates().find(x => /^اسم الطبيب المعالج/.test(x.t));
-    if (!lab) return "";
-    let box = lab.el;
-    for (let i = 0; i < 4 && box; i++) { box = box.parentElement; if (box?.querySelector("select, [role=combobox], .ng-select, .select2, input")) break; }
-    if (!box) return "";
+    const box = doctorBox(); if (!box) return "";
     const sel = box.querySelector("select");
     if (sel && !sel.disabled) {
       if (sel.value && sel.selectedIndex > 0) return "ok";
-      const best = bestDoctorOption(names, [...sel.options].filter(o => o.value).map(o => o.textContent));
-      if (best != null) { const o = [...sel.options].filter(x => x.value)[best]; setValue(sel, o.value); flash(sel); return "ok"; }
-      return "check";
+      const opts = [...sel.options].filter(o => o.value), texts = opts.map(o => o.textContent);
+      if (!opts.length) return "check";                                             // القائمة لسى ما تحمّلت — نعيد مع التحديث الجاي
+      const best = learnedIdx(req, texts) ?? bestDoctorOption(names, texts);
+      if (best != null) { setValue(sel, opts[best].value); flash(sel); return "ok"; }
+      docMiss(req, texts); return "check";
     }
-    // قائمة مخصّصة (بحث): نفتحها ونكتب اسم الطبيب، والموظف يختار
-    if (!explicit || doneDocEls.has(box)) return "check";
-    doneDocEls.add(box);
-    const opener = box.querySelector(".ng-select-container, .select2-selection, [role=combobox], .dropdown-toggle") || box.querySelector("input");
+    // (1.9.2) قائمة بحث (مو select): نفتحها ونكتب اسم الطبيب، ولو طلع خيار أكيد نختاره لحالنا — مرة وحدة لكل طلب
+    if (doneDocEls.get(box) === req.id) return "check";
+    doneDocEls.set(box, req.id);
+    const opener = box.querySelector(".ng-select-container, .select2-selection, [role=combobox], .mat-select-trigger, .dropdown-toggle") || box.querySelector("input");
     opener?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); opener?.click();
     setTimeout(() => {
       const inp = box.querySelector("input[type=text], input:not([type])") || document.querySelector(".select2-search__field, .ng-dropdown-panel input");
-      const first = docTokens(req.doctorAr || names[0]).slice(0, 2).join(" ");
+      const learned = docLearn[docKey(req)];
+      const first = learned ? learned.split(" ").slice(0, 3).join(" ") : docTokens(req.doctorAr || names[0]).slice(0, 2).join(" ");
       if (inp && first) setValue(inp, first);
+      let n = 0;
+      const tick = () => {                                                          // نستنى الخيارات تطلع (لين 4 ثواني)
+        const os = visibleOpts(), texts = os.map(o => o.textContent);
+        if (os.length) {
+          const best = learnedIdx(req, texts) ?? bestDoctorOption(names, texts);
+          if (best != null) { os[best].dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); os[best].click(); lastReport = { ...lastReport, doctorAr: "ok" }; updateDots?.(); return; }
+          if (n > 4) { docMiss(req, texts); return; }
+        }
+        if (++n < 16) setTimeout(tick, 250);
+      };
+      setTimeout(tick, 300);
     }, 250);
     return "check";
   }
@@ -733,7 +769,9 @@
     $("#diag").onclick = async () => {
       const fr = await askFrames("sabaDiagCmd", "sabaDiag_");
       const frames = [...document.querySelectorAll("iframe, frame")].map(f => { const r = f.getBoundingClientRect(); return `iframe src=${String(f.src).slice(0, 140)} id=${f.id} @${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`; });
-      const txt = "SABA-DIAG v" + chrome.runtime.getManifest().version + "\n--frames--\n" + (frames.join("\n") || "none") + "\n" + diagText() + fr.map(x => "\n==== FRAME ====\n" + x.txt).join("");
+      const { sabaDocMiss: dm } = await chrome.storage.local.get("sabaDocMiss");     // آخر مرة ما عرفت الطبيب: الاسم اللي عندنا + خيارات صحة
+      const docTxt = dm ? `\n--doctor-miss ${new Date(dm.at).toLocaleTimeString("en-GB")}--\nwant: ${dm.names.join(" | ")}\nopts: ${dm.opts.map(o => String(o).trim().slice(0, 60)).join(" | ")}\nlearned: ${docLearn[docKey(req)] || "-"}` : "";
+      const txt = "SABA-DIAG v" + chrome.runtime.getManifest().version + "\n--frames--\n" + (frames.join("\n") || "none") + "\n" + diagText() + docTxt + fr.map(x => "\n==== FRAME ====\n" + x.txt).join("");
       try { await navigator.clipboard.writeText(txt); } catch { const t = document.createElement("textarea"); t.value = txt; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
       toastLocal(`انسخ التقرير (${fr.length} إطار) — الصقه لـ Claude`);
     };
