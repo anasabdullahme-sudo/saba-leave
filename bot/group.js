@@ -451,7 +451,7 @@ async function resetExpired() {
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
-  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [], asks = [];
+  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [], asks = [], hourAsks = [];
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi_today");
     const cur = fresh((await tx.get(ref)).data(), t.iso);
@@ -459,7 +459,7 @@ async function apply(evs, ctx) {
       let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
       // (2.9.13) «دوام اليوم» بدون ولا وقت → ما نطبقه (كان يمسح «موجود» ويحط حالة فاضية)
-      if (d && e.kind === "starts_at" && !String(e.at_time || "").trim() && !String(e.until_time || "").trim()) { (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — «دوام اليوم» بدون وقت: ما طبّقته`); continue; }
+      if (d && e.kind === "starts_at" && e.at_min == null && !String(e.at_time || "").trim() && !String(e.until_time || "").trim()) { (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — «دوام اليوم» بدون وقت: ما طبّقته`); continue; }
       // تغيير دوام (ثابت، أو ليوم ثاني) → ما نطبّق لحالنا: نرسل للمسؤول خيارات ويختار
       if (d && !ctx.confirmed && !ctx.fix && !ctx.planned && admins.length && needsConfirm(e, ctx.text, t)) {
         e.__asked = true; if (!asks.some(a => a.d.id === d.id)) asks.push({ d, e: { ...e } });
@@ -555,6 +555,7 @@ async function apply(evs, ctx) {
       // مجدول من أمس (يتطبّق أول اليوم): «لين 7» = 7م — نختار الوقت الأقرب لدوامه (مو حسب الساعة الحين)
       const fit = m => fitMin(m, d, t.wd);
       const at = Date.now(); let atMin = ctx.planned ? fit(toMin(e.at_time)) : pm(toMin(e.at_time)), untilMin = ctx.planned ? fit(toMin(e.until_time)) : nextDay(pm(toMin(e.until_time)));
+      if (ctx.exact && e.at_min != null) { atMin = e.at_min; untilMin = e.until_min ?? null; }   // (2.9.13) جواب المسؤول «من كم لكم دوامه» — الأوقات محسوبة جاهزة
       // «موجود / يطلع / مداوم لين 7» (اليوم أو بكرة، قبل دوامه أو وهو فيه): البداية دايماً من الجدول، بس النهاية تتغيّر
       if (d && (["present", "leaves_at"].includes(e.kind) || (e.kind === "starts_at" && atMin == null))) {
         const raw = e.kind === "leaves_at" ? (toMin(e.at_time) ?? toMin(e.until_time)) : toMin(e.until_time), sh0 = shiftsOn(d, t.wd)[0];
@@ -596,6 +597,11 @@ async function apply(evs, ctx) {
         info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
+        // (2.9.13) «موجود الحين» وهو برا دوامه بالجدول (لسى ما بدا / خلص / ما عنده دوام اليوم) → نسأل المسؤول من كم لكم دوامه اليوم
+        if (d && untilMin == null && !ctx.fix && !ctx.planned && admins.length) {
+          const sh = shiftsOn(d, t.wd), last = sh.length ? Math.max(...sh.map(x => x.e > x.s ? x.e : x.e + 1440)) : 0;
+          if (!sh.length || t.m < sh[0].s - 30 || t.m > last) hourAsks.push({ d, sh });
+        }
         if (untilMin != null && untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }   // بعد الوقت: «خلص دوامه اليوم»
         if (!d && !cur.extra.some(x => x.key === key)) cur.extra.push({ key, name, dep, until: untilMin });
       }
@@ -635,6 +641,7 @@ async function apply(evs, ctx) {
   if (heres.length) await endVacationsToday(heres, ctx);
   for (const x of leavers) await askRemove(x.d, x.e, ctx);
   for (const a of asks) await askOptions(a, ctx).catch(err => log.warn({ err: String(err?.message || err) }, "خيارات الدوام"));
+  for (const a of hourAsks) await askHours(a, ctx).catch(err => log.warn({ err: String(err?.message || err) }, "سؤال الدوام"));
   for (const x of newDocs) await askAdmin(x, ctx);
   return applied;
 }
@@ -879,6 +886,32 @@ async function askAdmin({ e, sch }, ctx) {
   if (!sent) await db.doc("board/bawadi_inbox").set({ items: FieldValue.arrayUnion({ id: uid(), at: Date.now(), kind: "new_doctor", name, dept: e.dept || "", room: e.room || "", branch: "", date: "", doctorId: "", text: ctx.text.slice(0, 300), by: ctx.by }), at: Date.now() }, { merge: true });
 }
 
+/* ---------- (2.9.13) موجود برا دوامه → نسأل المسؤول «من كم لكم دوامه اليوم؟» ---------- */
+async function askHours({ d, sh }, ctx) {
+  const code = "H" + code3().slice(0, 2), ref = db.doc("bot/pending_clarify");
+  const item = { code, at: Date.now(), text: String(ctx.text || "").slice(0, 600), by: ctx.by, key: ctx.key || null, evs: [{ doctor_id: d.id, name: shortName(d.name), kind: "starts_at" }], hours: { id: d.id, name: shortName(d.name) } };
+  await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: [...(c.items || []).filter(i => Date.now() - i.at < 12 * 3600e3 && !(i.hours?.id === d.id)), item].slice(-30) }); });
+  await dmAdmin([`🕐 د. ${shortName(d.name)} موجود الحين، بس دوامه بالجدول اليوم ${sh.length ? sh.map(x => "من " + hm(x.s) + " لين " + hm(x.e)).join(" و ") : "— ما عنده دوام اليوم"}.  #${code}`,
+    `من رسالة ${ctx.by}: «${String(ctx.text || "").slice(0, 160)}»`, "",
+    `من كم لكم دوامه اليوم؟ اسحب هذي الرسالة ورد بالوقت، مثل: «من 8 الى 4».`,
+    `(لين ترد يظل «موجود» في الموقع والأداة)`].join("\n"));
+}
+// «من 8 الى 4» / «8ص - 4م» / «من 2 لين 10 الليل» → [بداية، نهاية] بالدقايق (النهاية ممكن تعدّي نص الليل)
+function parseHours(text) {
+  const s = latin(String(text || "")).replace(/[٫.]/g, ":");
+  const xs = [...s.matchAll(/(\d{1,2})(?::(\d{2}))?\s*(صباحا|صباحاً|الصبح|الصباح|ص|مساء|مساءً|المساء|العصر|عصر|الظهر|ظهر|بالليل|الليل|ليل|م)?/g)].filter(m => +m[1] <= 24).slice(0, 2);
+  if (xs.length < 2) return null;
+  const tag = (w, h) => !w ? null : /^(ص|صباحا|صباحاً|الصبح|الصباح)$/.test(w) ? "am" : /ليل/.test(w) && h <= 5 ? "am" : "pm";
+  const val = (m, t) => { const h = +m[1], mi = +(m[2] || 0); if (h >= 13) return h * 60 + mi; return (h % 12) * 60 + mi + (t === "pm" ? 720 : 0); };
+  const h0 = +xs[0][1], t0 = tag(xs[0][3], h0);
+  const a = t0 || h0 >= 13 ? val(xs[0], t0) : val(xs[0], h0 >= 7 && h0 <= 11 ? "am" : "pm");      // بدون ص/م: 7–11 = الصبح، 12–6 = الظهر/العصر
+  const h1 = +xs[1][1], t1 = tag(xs[1][3], h1);
+  const cands = t1 || h1 >= 13 ? [val(xs[1], t1), val(xs[1], t1) + 1440] : [0, 720, 1440, 2160].map(k => (h1 % 12) * 60 + +(xs[1][2] || 0) + k);
+  const b = cands.find(x => x > a);
+  if (b == null || b - a > 16 * 60 || a >= 1440) return null;
+  return [a, b];
+}
+
 /* ---------- تقرير للمسؤول: كل رسالة قروب انطبقت (يقدر يوقفه بـ «وقف التقارير») ---------- */
 let reportsOn = true;
 async function reportToAdmin(by, text, rep) {
@@ -920,7 +953,7 @@ async function handleClarify(m, text, who = "admin") {
   if (!mine.length) return false;
   const ctxi = m.message?.extendedTextMessage?.contextInfo;
   const qt = ctxi?.quotedMessage?.conversation || ctxi?.quotedMessage?.extendedTextMessage?.text || "";
-  const code = (/#([QRDS][A-Z0-9]{2})\b/.exec(qt) || [])[1];
+  const code = (/#([QRDSH][A-Z0-9]{2})\b/.exec(qt) || [])[1];
   let it = code ? mine.find(i => i.code === code) : null;
   const n = norm(text);
   if (/^تراجع/.test(n)) return false;
@@ -928,6 +961,17 @@ async function handleClarify(m, text, who = "admin") {
   if (!it && !qt && qs.length === 1 && Date.now() - qs[0].at < 30 * 60000) it = qs[0];   // سؤال واحد قريب وما سحب رسالة ثانية → رده عليه
   if (!it) return false;
   let evs, how;
+  if (it.hours && who !== "majed" && !isQuestion(text) && !/^(لا|تجاهل|خلها|اتركها)(\s|$)/.test(n)) {      // (2.9.13) جواب «من كم لكم دوامه اليوم؟»
+    const r = parseHours(text);
+    if (!r) { await say("ما فهمت الوقت 🙏 اكتبه كذا: «من 8 الى 4» (أو 8ص - 4م)."); return true; }
+    await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
+    const ev = { doctor_id: it.hours.id, name: it.hours.name, kind: "starts_at", at_min: r[0], until_min: r[1] };
+    const cx = { text: (text || "") + "\n" + (it.text || ""), by: it.by + " (دوام اليوم من المسؤول)", rep: [], fix: true, exact: true };
+    const done = await apply([ev], cx);
+    const bad = done.length ? await verifyApplied([ev], cx).catch(err => [String(err?.message || err)]) : ["ما انطبق"];
+    await say(bad.length ? `❌ ما انحفظ: د. ${it.hours.name} اليوم من ${hm(r[0])} لين ${hm(r[1])}${bad[0] ? "\n" + bad[0] : ""}` : `✅ انحفظ وتأكدت منه: د. ${it.hours.name} دوامه اليوم من ${hm(r[0])} لين ${hm(r[1])}\nالموقع والأداة: «دوام اليوم» بهالوقت، وبعده «خلص دوامه اليوم».`);
+    return true;
+  }
   if (it.opts && who !== "majed") {                                              // خيارات تغيير الدوام: رقم = نطبّق الخيار الجاهز
     const num = parseInt(latin(text).replace(/[^\d]/g, "").slice(0, 1) || "0", 10), o = it.opts[num - 1];
     if (o && /^\s*[0-9٠-٩]\s*[.)\-]?\s*$/.test(text.replace(/[️⃣]/g, ""))) {
