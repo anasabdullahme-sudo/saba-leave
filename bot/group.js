@@ -458,6 +458,8 @@ async function apply(evs, ctx) {
     for (const e of evs) {
       let d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
+      // (2.9.13) «دوام اليوم» بدون ولا وقت → ما نطبقه (كان يمسح «موجود» ويحط حالة فاضية)
+      if (d && e.kind === "starts_at" && !String(e.at_time || "").trim() && !String(e.until_time || "").trim()) { (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — «دوام اليوم» بدون وقت: ما طبّقته`); continue; }
       // تغيير دوام (ثابت، أو ليوم ثاني) → ما نطبّق لحالنا: نرسل للمسؤول خيارات ويختار
       if (d && !ctx.confirmed && !ctx.fix && !ctx.planned && admins.length && needsConfirm(e, ctx.text, t)) {
         e.__asked = true; if (!asks.some(a => a.d.id === d.id)) asks.push({ d, e: { ...e } });
