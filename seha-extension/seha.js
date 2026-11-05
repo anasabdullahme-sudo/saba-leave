@@ -348,7 +348,14 @@
   }
   function bestDoctorOption(names, opts) {
     const direct = bestDoctorOption0(names, opts);
-    return direct != null ? direct : bestDoctorOptionSk(names, opts);
+    if (direct != null) return direct;
+    const sk = bestDoctorOptionSk(names, opts);
+    if (sk != null) return sk;
+    // (1.9.5) احتياط 1.8.8: اسم مميز (مو شائع، 4 حروف+) موجود في خيار واحد بس → هو الطبيب
+    const rare = [...new Set(names.flatMap(docTokens))].filter(t => t.length >= 4 && !DOC_COMMON.has(t));
+    const toks = opts.map(o => docTokens(o));
+    for (const t of rare) { const hits = toks.map((ot, i) => ot.includes(t) ? i : -1).filter(i => i >= 0); if (hits.length === 1) return hits[0]; }
+    return null;
   }
   function bestDoctorOption0(names, opts) {
     const lists = names.map(docTokens).filter(l => l.length);
@@ -637,7 +644,7 @@
   const logDone = (id, n) => { const now = Date.now(); doneLog = Object.fromEntries(Object.entries({ ...doneLog, [id]: { at: now, n: Math.max(n || 0, doneLog[id]?.n || 0) } }).filter(([, v]) => now - (v?.at || 0) < 3 * 864e5)); return doneLog; };
   const loggedDone = id => { const d = doneLog[id]; if (!d) return false; const q = queue.find(x => x.id === id); return !q || (q.reopenN || 0) <= (d.n || 0); };
   const isHidden = id => { if (unacked.has(id) || loggedDone(id)) return true; const t = hidden[id]; return !!t && queueAt < t + 20000; };
-  const pendingQ = () => queueStale() ? [] : queue.filter(q => !isHidden(q.id) && q.id !== req?.id);   // قائمة قديمة → ما نعرض منها شي (ممكن فيها طلبات انرفعت من جهاز ثاني)
+  const pendingQ = () => queue.filter(q => !isHidden(q.id) && q.id !== req?.id);   // (1.9.5) القائمة القديمة تنعرض مع تنبيه (مثل 1.8.8) بدل ما تختفي   // قائمة قديمة → ما نعرض منها شي (ممكن فيها طلبات انرفعت من جهاز ثاني)
   const hideId = id => { const now = Date.now(); hidden = Object.fromEntries(Object.entries({ ...hidden, [id]: now }).filter(([, t]) => now - t < 3 * 864e5)); return hidden; };
   // القائمة لازم تكون جديدة: اللوحة ترسلها كل 15 ثانية، فلو مر 45 ثانية بدونها (اللوحة نايمة/مقفلة) ما نعرضها.
   // ولما يرجع الموظف لصحة نطلب قائمة جديدة على طول، ولين توصل ما نعرض القديمة
@@ -671,7 +678,8 @@
     const at = Date.now(); checking = { id: q.id, at }; toastLocal("⏳ أتأكد إن الطلب ما انرفع…");
     const done = r => {
       chrome.storage.onChanged.removeListener(l); clearTimeout(tm); checking = null;
-      if (!r) { chrome.storage.local.set({ sabaUnlock: { id: q.id, at: Date.now() } }); toastLocal("⚠ صفحة الموظفين ما ردّت — افتحها (أو حدّثها) وحاول مرة ثانية"); render(); return; }   // لو قفلته اللوحة متأخر → تفكه
+      // (1.9.5) مثل 1.8.8: ما نوقف الموظف أبداً — لو اللوحة/السيرفر ما ردّ نفتح الطلب مع تنبيه
+      if (!r || r.unverified) { toastLocal("⚠ ما قدرت أتأكد من السيرفر — فتحت الطلب، تأكد إنه ما انرفع من جهاز ثاني"); openReq(q); return; }
       if (r.status === "done") {
         dupInfo = { id: q.id, ref: q.ref || "", by: r.by || "", doneAt: r.doneAt || 0, name: q.patientName || "", at: Date.now() };
         hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden, sabaDup: dupInfo, sabaDoneLog: logDone(q.id, q.reopenN) }); setMin(false); render(); return;
@@ -727,7 +735,7 @@
       const free = pend.filter(q => !q.lockedBy);
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
       const sameId = q => q.idNumber && queue.some(o => o.id !== q.id && o.idNumber === q.idNumber && !isHidden(o.id));
-      b.innerHTML = `${dupHtml()}${queueStale() && queueAt ? (wantAt && Date.now() - wantAt < 2500 ? `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏳ يحدّث القائمة…</div>` : `<div class="note" style="background:#FFF4E5;color:#8A4B00;font-weight:600">⏳ القائمة مو محدّثة — ما أعرض منها شي عشان ما ترفع طلب انرفع من جهاز ثاني. افتح صفحة الموظفين (أو حدّثها) وبتطلع الطلبات</div>`) : ""}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
+      b.innerHTML = `${dupHtml()}${queueStale() && queueAt ? (wantAt && Date.now() - wantAt < 2500 ? `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏳ يحدّث القائمة…</div>` : `<div class="note" style="background:#FFF4E5;color:#8A4B00;font-weight:600">⏳ القائمة مو محدّثة (آخر تحديث ${hh}) — الأداة تتأكد من كل طلب قبل ما تفتحه</div>`) : ""}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
         ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
         <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}${q.dateFlag ? ` <i class="lkb" style="background:#FDECEC;color:#9B1C1C">${/🙋/.test(q.dateFlag) ? "🙋 تعديل تاريخ" : "⚠ تاريخ"}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")

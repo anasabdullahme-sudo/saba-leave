@@ -1723,7 +1723,7 @@ addEventListener("message", async e => {
     let res;
     if (api.lock) {                                                                // (1.9.2) القفل نفسه يقرا الطلب من السيرفر: انرفع؟ انحذف؟ عند غيرك؟ — قراءة وحدة بدل ثنتين
       const L = await lockReq(m.id, "tool");
-      if (L.err) return;                                                           // ما قدرنا نوصل للسيرفر → ما نرد (الأداة تقول «ما ردّت» وتفك)
+      if (L.err) res = { status: "pending", unverified: true };                    // (1.9.5) السيرفر ما رد (نت/القراءات خلصت) → نفتحه مثل 1.8.8 مع تنبيه، ما نوقف الموظف
       res = L.ok ? { status: "pending" } : L.by ? { status: "locked", by: L.by, at: L.at } : L.done ? { status: "done", by: L.doneBy, doneAt: L.doneAt } : { status: "gone" };
       if (L.ok) { (S.sentSeha ||= new Set()).add(m.id); const k = myLocks.get(m.id); if (k) k.act = Date.now(); }
       // الإضافة القديمة (قبل 1.9.2) ما تعرف «مقفول» وتفتحه — نقول لها «انتقل» عشان تخفيه لين تتحدث

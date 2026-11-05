@@ -58,13 +58,18 @@ const dec = v => v == null ? null : "stringValue" in v ? v.stringValue : "intege
   : "mapValue" in v ? Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, dec(x)])) : null;
 const riyadhHour = () => +new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", hour: "2-digit", hourCycle: "h23" }).format(new Date());
 chrome.alarms.create("saba-alerts", { periodInMinutes: 0.5 });
-let polling = false;
+let polling = false, lastPoll = 0;
 async function pollAlerts() {
   if (polling) return; polling = true;
   try {
     const h = riyadhHour(); if (h >= 1 && h < 7) return;                          // آخر الليل ما فيه دوام
     const st = await chrome.storage.local.get(["sabaDoctorMe", "sabaDocSeen", "sabaBoardCache", "sabaAlertsInit"]);
     if (st.sabaDoctorMe) return;                                                   // جهاز طبيب
+    // (1.9.5) توفير قراءات: لو صفحة سابا مفتوحة هي اللي توصل التنبيهات (تقرأ بس لما يتغير شي) → نقرأ بنفسنا كل 5 دقايق بس
+    // (بدل كل 30 ثانية = 120 قراءة بالساعة لكل جهاز)
+    const pages = await chrome.tabs.query({ url: "https://anasabdullahme-sudo.github.io/saba-leave/*" }).catch(() => []);
+    if (pages.some(t => !t.discarded && /\/(staff|home|doctors)\.html/.test(t.url || "")) && Date.now() - lastPoll < 5 * 60000) return;
+    lastPoll = Date.now();
     const r = await fetch(TODAY_URL); if (!r.ok) return;
     const today = dec({ mapValue: { fields: (await r.json()).fields || {} } });
     const c = st.sabaBoardCache || {};
