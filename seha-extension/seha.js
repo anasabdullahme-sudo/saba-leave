@@ -295,7 +295,54 @@
   // يرجّع رقم الخيار، أو null لو ما فيه تطابق أكيد (الموظف يختار بنفسه)
   const DOC_COMMON = new Set(["محمد", "احمد", "عبدالله", "عبد", "علي", "حسن", "حسين", "محمود", "ابراهيم", "عبدالرحمن", "خالد", "عمر", "مصطفي", "سيد", "صالح",
     "mohamed", "mohammed", "muhammad", "mohammad", "ahmed", "ahmad", "ali", "abdullah", "abdel", "abdul", "hassan", "hussein", "mahmoud", "ibrahim", "khaled", "khalid", "omar", "mostafa", "mustafa", "saleh"]);
+  // (1.9.3) اسم الطبيب في الإجازة إنجليزي (Dr. Magdy Nassif) وقائمة صحة عربي (مجدي نصيف سكلا) → نقارن «هيكل» الاسم بالحروف الساكنة:
+  // مجدي = Magdy = mgd ، امجد = Amjad/Amgad = amgd ، نصيف = Nassif = nsf ، كامل = Kamel = kml (الحرف الأول لو حرف علة نحطه a عشان امجد ≠ مجدي)
+  const AR_SK = { "ب": "b", "ت": "t", "ط": "t", "ث": "s", "ج": "g", "ح": "h", "ه": "h", "ة": "h", "خ": "k", "د": "d", "ض": "d", "ذ": "z", "ز": "z", "ظ": "z", "ر": "r", "س": "s", "ص": "s", "ش": "s",
+    "غ": "g", "ف": "f", "ق": "k", "ك": "k", "ل": "l", "م": "m", "ن": "n" };
+  function skel(tok) {
+    let t = String(tok || "").toLowerCase(), lead = "";
+    if (/[a-z]/.test(t)) {
+      t = t.replace(/^(abou|abo)(?=.)/, "abu").replace(/^(abd|abu|bin|ibn)[-]?(el|al|ul|ol)(?=..)/, "$1");
+      lead = /^[aeiou]/.test(t) ? "a" : "";
+      t = t.replace(/kh/g, "k").replace(/sh/g, "s").replace(/gh/g, "g").replace(/ph/g, "f").replace(/th/g, "s").replace(/ch/g, "s")
+        .replace(/[aeiouyw]/g, "").replace(/[cq]/g, "k").replace(/j/g, "g").replace(/x/g, "ks").replace(/v/g, "f").replace(/[^a-z]/g, "");
+    } else {
+      lead = /^[اأإآعء]/.test(t) ? "a" : "";
+      t = [...t].map(c => AR_SK[c] ?? "").join("");
+    }
+    return lead + t.replace(/(.)\1+/g, "$1");
+  }
+  const SK_COMMON = new Set(["mhmd", "ahmd", "abdlh", "ab", "abd", "al", "hsn", "mhmd", "abrhm", "abdrhmn", "kld", "amr", "mstf", "sd", "slh"]);
+  // كلمات الاسم: العربي نفس docTokens، والإنجليزي: نشيل Dr و al-/el- (بس من الكلمات الطويلة: Alwareeth → wareeth، و Aliya تظل Aliya)
+  const skTokens = n => /[a-z]/i.test(n)
+    ? String(n).toLowerCase().replace(/\b(dr|doctor|prof|consultant|specialist)\b\.?/g, " ")
+      .replace(/\b(abu|abou|abo)\b/g, "abu").replace(/\b(abu|abd|bin|ibn)[\s-]+(?:(el|al|ul)[\s-]+)?(?=[a-z])/g, "$1")   // Abu El Kheir = Abukheir ، Abdel Hamid = Abdhamid
+      .split(/[\s\-\/.,]+/).filter(t => t.length > 1).map(t => t.length >= 6 ? t.replace(/^(al|el)(?=...)/, "") : t)
+    : docTokens(n);
+  function bestDoctorOptionSk(names, opts) {                                       // نفس قواعد المطابقة بس على «الهيكل»
+    const lists = names.map(n => skTokens(n).map(skel)).filter(l => l.length >= 2 && l[0].length >= 2);   // لازم اسم أول + اسم ثاني
+    if (!lists.length) return null;
+    const firsts = new Set(lists.map(l => l[0])), want = new Set(lists.flat().filter(x => x.length >= 2));
+    for (const l of lists) for (let i = 0; i < l.length - 1; i++) want.add(l[i] + l[i + 1]);
+    let best = null, bestScore = 0, second = 0;
+    opts.forEach((txt, idx) => {
+      const ot = skTokens(txt).map(skel).filter(x => x.length >= 2); if (!ot.length) return;
+      const otAll = new Set(ot); for (let i = 0; i < ot.length - 1; i++) otAll.add(ot[i] + ot[i + 1]);
+      const hits = [...want].filter(t => otAll.has(t));
+      const f = firsts.has(ot[0]) ? (SK_COMMON.has(ot[0]) ? 1 : 3) : 0;
+      const rare = hits.filter(t => !SK_COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
+      const common = hits.filter(t => SK_COMMON.has(t) && t !== ot[0]).length;
+      if (f < 3 && !rare) return;
+      const sc = f + rare * 2 + common * 0.5;
+      if (sc > bestScore) { second = bestScore; best = idx; bestScore = sc; } else if (sc > second) second = sc;
+    });
+    return best != null && bestScore >= 3 && bestScore - second >= 1.5 ? best : null;   // أشد من المطابقة العادية (فرق أكبر عن ثاني أقرب اسم)
+  }
   function bestDoctorOption(names, opts) {
+    const direct = bestDoctorOption0(names, opts);
+    return direct != null ? direct : bestDoctorOptionSk(names, opts);
+  }
+  function bestDoctorOption0(names, opts) {
     const lists = names.map(docTokens).filter(l => l.length);
     const firsts = new Set(lists.map(l => l[0]));
     const want = new Set(lists.flat());
