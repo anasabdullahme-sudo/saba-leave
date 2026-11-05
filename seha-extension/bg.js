@@ -30,7 +30,24 @@ chrome.alarms.onAlarm.addListener(async a => {
 });
 
 // صورة التقرير في تبويب خاص بالإضافة (صفحة صحة ممكن تمنع عرض الصور داخلها)
-chrome.runtime.onMessage.addListener(m => { if (m?.type === "SABA_OPEN_IMG") chrome.tabs.create({ url: chrome.runtime.getURL("viewer.html") }); });
+chrome.runtime.onMessage.addListener((m, sender) => {
+  if (m?.type === "SABA_OPEN_IMG") chrome.tabs.create({ url: chrome.runtime.getURL("viewer.html") });
+  // (1.9.2) تبويب لوحة الموظفين: كروم ما يطفيه لتوفير الذاكرة (كان يطفيه والقائمة تقدم)
+  if (m?.type === "SABA_BOARD_HERE" && sender?.tab?.id) chrome.tabs.update(sender.tab.id, { autoDiscardable: false }).catch(() => {});
+  if (m?.type === "SABA_NEED_BOARD") ensureBoard();
+});
+// أداة صحة ما وصلتها قائمة واللوحة مو مفتوحة أبداً → نفتحها مثبّتة بالخلفية (مرة كل دقيقتين بالكثير)
+const BOARD_URL = "https://anasabdullahme-sudo.github.io/saba-leave/staff.html";
+let boardOpenedAt = 0;
+async function ensureBoard() {
+  if (Date.now() - boardOpenedAt < 120000) return;
+  try {
+    const tabs = await chrome.tabs.query({ url: "https://anasabdullahme-sudo.github.io/saba-leave/staff*" });
+    if (tabs.length) { for (const t of tabs) if (t.discarded) chrome.tabs.reload(t.id).catch(() => {}); return; }
+    boardOpenedAt = Date.now();
+    await chrome.tabs.create({ url: BOARD_URL, pinned: true, active: false });
+  } catch { /* */ }
+}
 
 /* ---------- تنبيهات الأطباء بدون ما تكون صفحة سابا مفتوحة ----------
    كل 30 ثانية (وقت الدوام بس) نشيك حالات اليوم؛ أي حدث جديد يطلع تنبيه صغير في التبويب اللي قدامك،

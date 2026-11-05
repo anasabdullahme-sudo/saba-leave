@@ -14,7 +14,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.9.11";
+const VERSION = "2.9.12";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -969,12 +969,18 @@ async function applyPatches() {
       const ups = (p.updates || []).filter(u => !done.has(u.id));
       const ves = (p.vacEnds || []).filter(u => !done.has(u.id));
       const pls = (p.plans || []).filter(u => !done.has(u.id));
-      if (!todo.length && !newDocs.length && !ups.length && !ves.length && !pls.length) return [];
+      const drops = (p.vacDrops || []).filter(u => !done.has(u.id));            // حذف إجازة مكررة بعينها (برقمها)
+      if (!todo.length && !newDocs.length && !ups.length && !ves.length && !pls.length && !drops.length) return [];
       const next = structuredClone(cur);
       if (pls.length) {                                                         // أحداث مجدولة (مثل شيل طبيب يوم معيّن)
         const pref = db.doc("board/bawadi_plan"), pc = (await tx.get(pref)).data() || {};
         tx.set(pref, { ...pc, items: [...(pc.items || []), ...pls.map(({ id, ...x }) => ({ id, ...x }))], at: Date.now() });
         for (const u of pls) todo.push({ id: u.id, name: "", isDoc: true, upd: true, quiet: true });
+      }
+      for (const u of drops) {
+        const n0 = (next.vacations || []).length;
+        next.vacations = (next.vacations || []).filter(v => v.id !== u.vacId);
+        todo.push({ id: u.id, name: n0 !== next.vacations.length ? "حذف إجازة مكررة: " + (u.name || "") : "", isDoc: true, upd: true, quiet: true, skip: n0 === next.vacations.length });
       }
       for (const u of ves) {                                                    // نهاية إجازة مفتوحة (يباشر) — كل إجازاته المفتوحة، مو بس الأخيرة
         const dd = docs.find(x => x.id === u.doctorId);

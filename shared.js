@@ -809,11 +809,29 @@ async function liveBackend(role) {
     markDone: (id, by, extra = {}) => FS.runTransaction(db, async tx => {
       const ref = FS.doc(col, id), cur = await tx.get(ref);
       if (cur.exists() && cur.data().status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: cur.data().doneBy, doneAt: cur.data().doneAt?.toMillis?.() || 0 });
-      tx.update(ref, { ...extra, status: "done", doneAt: FS.serverTimestamp(), doneBy: by });   // رقم PSL مع «تم الرفع» بكتابة وحدة (كان كتابتين → الطلب يرجع ثانيتين)
+      // «تم الرفع» ينقبل دايم حتى لو القفل صار عند جهاز ثاني: الموظف رفعه فعلاً في صحة، ورفضه يخلّي الثاني يرفعه مرة ثانية.
+      // الجهاز الثاني يجيه تنبيه «تم رفعه مسبقاً» على طول. ونفك القفل بنفس الكتابة
+      tx.update(ref, { ...extra, status: "done", doneAt: FS.serverTimestamp(), doneBy: by, openedBy: "", openedAt: null });   // رقم PSL مع «تم الرفع» بكتابة وحدة (كان كتابتين → الطلب يرجع ثانيتين)
     }),
     // حالة طلب واحد من قاعدة البيانات نفسها (قراءة وحدة)
     async getStatus(id, server) { const d = await (server ? FS.getDocFromServer : FS.getDoc)(FS.doc(col, id)); if (!d.exists()) return null; const x = d.data(); return { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt?.toMillis?.() || 0, ref: x.ref || "", patientName: x.patientName || "" }; },
     claim: (id, by) => FS.updateDoc(FS.doc(col, id), { openedBy: by, openedAt: FS.serverTimestamp() }),
+    // قفل المراجع: جهاز واحد بس. معاملة (transaction) → لو جهازين ضغطوا بنفس اللحظة واحد بس ياخذه.
+    // now() = وقت السيرفر التقريبي (من اللوحة) — عشان ساعة جهاز غلط ما تفك قفل غيره بدري
+    lock: (id, tag, lockMs, now = Date.now) => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(col, id), cur = await tx.get(ref);
+      if (!cur.exists()) throw Object.assign(new Error("gone"), { code: "gone" });
+      const x = cur.data();
+      if (x.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy, doneAt: x.doneAt?.toMillis?.() || 0 });
+      const at = x.openedAt?.toMillis?.() || 0;
+      if (x.openedBy && x.openedBy !== tag && at && now() - at < lockMs) throw Object.assign(new Error("locked"), { code: "locked", by: x.openedBy, at });
+      tx.update(ref, { openedBy: tag, openedAt: FS.serverTimestamp() });
+    }),
+    // فك القفل — بس لو للحين حقي (لو انتهى وأخذه جهاز ثاني ما نلمسه)
+    unlock: (id, tag) => FS.runTransaction(db, async tx => {
+      const ref = FS.doc(col, id), cur = await tx.get(ref);
+      if (cur.exists() && cur.data().openedBy === tag) tx.update(ref, { openedBy: "", openedAt: null });
+    }),
     undoDone: id => FS.runTransaction(db, async tx => {
       const ref = FS.doc(col, id), cur = await tx.get(ref);
       if (cur.data()?.status !== "done") return;
@@ -1049,6 +1067,8 @@ function demoBackend() {
     async markDone(id, by, extra = {}) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy, doneAt: x.doneAt }); if (x) Object.assign(x, extra, { status: "done", doneAt: Date.now(), doneBy: by }); save(l); },
     async getStatus(id) { const x = load().find(r => r.id === id); return x ? { status: x.status, doneBy: x.doneBy || "", doneAt: x.doneAt || 0, ref: x.ref || "", patientName: x.patientName || "" } : null; },
     async claim(id, by) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.openedBy = by; x.openedAt = Date.now(); } save(l); },
+    async lock(id, tag, lockMs) { const l = load(); const x = l.find(r => r.id === id); if (!x) throw Object.assign(new Error("gone"), { code: "gone" }); if (x.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy, doneAt: x.doneAt }); if (x.openedBy && x.openedBy !== tag && x.openedAt && Date.now() - x.openedAt < lockMs) throw Object.assign(new Error("locked"), { code: "locked", by: x.openedBy, at: x.openedAt }); x.openedBy = tag; x.openedAt = Date.now(); save(l); },
+    async unlock(id, tag) { const l = load(); const x = l.find(r => r.id === id); if (x && x.openedBy === tag) { x.openedBy = ""; x.openedAt = null; save(l); } },
     async undoDone(id) { const l = load(); const x = l.find(r => r.id === id); if (x) { x.status = "pending"; x.doneAt = null; x.doneBy = null; } save(l); },
     async markHeld(id, reason, note, by) { const l = load(); const x = l.find(r => r.id === id); if (x?.status === "done") throw Object.assign(new Error("already_done"), { code: "already_done", by: x.doneBy }); if (x) Object.assign(x, { status: "held", holdReason: reason, holdNote: note || "", heldAt: Date.now(), heldBy: by }); save(l); },
     async unhold(id) { const l = load(); const x = l.find(r => r.id === id); if (x) Object.assign(x, { status: "pending", holdReason: null, holdNote: null, heldAt: null, heldBy: null }); save(l); },

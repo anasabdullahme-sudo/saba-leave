@@ -47,6 +47,8 @@ button{cursor:pointer;border:0;background:none}
 .seha:focus-visible{outline:3px solid var(--sky);outline-offset:2px}
 .seha-wide{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;border-radius:12px;border:1.5px dashed var(--sky-2);background:var(--ice-2);color:var(--blue);font-weight:600;font-size:15px;text-decoration:none}
 .seha-wide:hover{background:var(--ice);border-style:solid}
+.seha-wide.off{opacity:.45;pointer-events:none;filter:grayscale(1)}
+#drawer.locked .open-banner{background:#FDECEC;color:#9B1C1C;font-weight:600}
 .seha-wide{flex-direction:column;gap:0;height:auto;min-height:44px;padding:7px 10px;line-height:1.35}
 .seha-wide .l1{display:flex;align-items:center;gap:8px}
 .seha-wide .l2{font-size:12px;font-weight:500;color:var(--muted)}
@@ -121,7 +123,7 @@ main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
 .hold-box textarea:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(217,139,18,.15)}
 .hold-banner{margin:0 20px;padding:10px 12px;border-radius:12px;background:#FFF1DC;color:#7A4A00;font-size:14px;line-height:1.6}
 .hold-banner b{display:block}
-.chip.open{background:#E6F0FB;color:#0B5CA8}
+.chip.open{background:#FDECEC;color:#9B1C1C;font-weight:600}
 .open-banner{margin:12px 20px 0;padding:10px 12px;border-radius:12px;background:#E6F0FB;color:#0B4A87;font-size:14px;line-height:1.6}
 .lane-h span{font-size:13px;color:var(--muted)}
 .list{max-height:calc(100vh - 330px);min-height:240px;overflow:auto;padding:10px}
@@ -465,7 +467,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261104e";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261105a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -568,11 +570,12 @@ function start() {
     S.firstLoad = false;
     reroute(list);
     archiveExactDupes(list);
+    syncLocks(list); lostMine(ids);
     renderCounts(); renderPending(); renderHeld(); postQueue();
     if (doneMsgQueue) handleSehaDone(doneMsgQueue);
     if (S.openId) {
       const x = list.find(r => r.id === S.openId);
-      if (x) { fillDrawerMeta(x); const o = openByOther(x); $("#dOpenInfo").hidden = !o; if (o) $("#dOpenInfo").textContent = `هذا الطلب مفتوح الآن عند ${o}. تأكد منه قبل الرفع حتى لا ينرفع مرتين.`; }
+      if (x) { fillDrawerMeta(x); renderLockState(x); }
       else if (!S.done.some(r => r.id === S.openId)) { closeDrawer(); toast("هذا الطلب تمت معالجته من موظف ثاني"); }
     }
   };
@@ -589,7 +592,7 @@ setInterval(wakeCheck, 10000);
 document.addEventListener("resume", () => S.resub?.());
 addEventListener("online", () => S.resub?.());
 document.addEventListener("visibilitychange", () => { wakeCheck(); if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 120000) S.resub?.(); });
-document.documentElement.dataset.sabaBoard = "3";                                   // أداة صحة 1.9+ تعرف إن الصفحة محدّثة (القديمة تحدّثها لحالها)
+document.documentElement.dataset.sabaBoard = "4";   // 4 = فيها قفل المراجع (الإضافة 1.9.2 تحدّث الصفحات الأقدم لحالها)                                   // أداة صحة 1.9+ تعرف إن الصفحة محدّثة (القديمة تحدّثها لحالها)
 function renderLive() {
   let bar = document.getElementById("liveBar");
   if (!bar) { bar = document.createElement("div"); bar.id = "liveBar"; bar.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#FFF4E5;color:#8A4B00;border-bottom:1px solid #F0C98A;padding:8px 14px;font-weight:600;text-align:center"; document.body.prepend(bar); }
@@ -641,8 +644,14 @@ function dates(x) {
   if (!x.leaveStart) return "";
   return x.leaveEnd && x.leaveEnd !== x.leaveStart ? `${x.leaveStart} ← ${x.leaveEnd}` : x.leaveStart;
 }
-const OPEN_MS = 5 * 60000;
-// كل جهاز له اسم موظف ومعرّف خاص (لأن الموظفين يدخلون بنفس الحساب)
+// قفل المراجع (1.9.2): أول جهاز يفتح المراجع ياخذه، والباقين ما يقدرون يفتحونه.
+// ينفك لحاله بعد 5 دقايق بدون أي حركة (لا في اللوحة ولا في صحة)، أو لو الجهاز انقفل/طاح نته (بعد 6 دقايق بالكثير)
+const LOCK_T = (() => { try { const t = JSON.parse(localStorage.getItem("saba_lock_test") || "null"); if (t?.idle && t?.lock) return t; } catch {} return null; })();   // للتجربة بس
+const IDLE_MS = LOCK_T?.idle || 5 * 60000;           // بدون حركة → نفكه بأنفسنا
+const LOCK_MS = LOCK_T?.lock || 6 * 60000;           // الجهاز مات (ما جدّد) → ينفك عند الكل
+const OPEN_MS = LOCK_MS;
+let skew = 0;                                        // فرق ساعة الجهاز عن السيرفر (نتعلمه من وقت قفلنا اللي يرجع من السيرفر)
+const srvNow = () => Date.now() + skew;
 const LSx = { get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 const DEV_ID = LSx.get("saba_dev_id") || (() => { const d = Math.random().toString(36).slice(2, 8); LSx.set("saba_dev_id", d); return d; })();
 let devNo = +LSx.get("saba_dev_no") || 0;
@@ -653,7 +662,7 @@ const claimTag = () => `${myLabel()}~${DEV_ID}`;          // يميّز الجه
 const whoOf = s => String(s || "").split("~")[0];
 const openByOther = x => {
   const o = x.openedBy;
-  if (!o || !x.openedAt || Date.now() - x.openedAt >= OPEN_MS || o === claimTag()) return "";
+  if (!o || !x.openedAt || srvNow() - x.openedAt >= LOCK_MS || o === claimTag()) return "";
   if (!o.includes("~") && o === accName() && !devNo) return "";            // أجهزة قديمة بدون رقم
   const w = whoOf(o) || "جهاز ثاني";
   return w === myLabel() ? `${w} (جهاز ثاني)` : w;
@@ -667,15 +676,110 @@ async function ensureDevice() {
   catch (e) { console.warn("deviceNo", e); }
   finally { devBusy = false; }
 }
-// حجز الطلب: أي طلب مفتوح عندك يظهر للباقين «مفتوح عند فلان» (يتجدد كل دقيقتين وينتهي بعد 5 دقايق)
-const myClaims = new Map();   // id → آخر تجديد
-function claimReq(id) { if (!id) return; myClaims.set(id, Date.now()); api.claim?.(id, claimTag()).catch(() => {}); }
-function releaseReq(id) {
-  if (!myClaims.has(id)) return; myClaims.delete(id);
-  const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id);
-  if (x && x.openedBy === claimTag()) api.update(id, { openedBy: "", openedAt: null }).catch(() => {});
+// القفل: myLocks = الطلبات المقفولة على هالجهاز. أي حركة (هنا أو في صحة) تجدد القفل (كل 40 ثانية بالكثير)
+const myLocks = new Map();   // id → { act: آخر حركة, renew: آخر تجديد, sent: وقت إرسال القفل }
+const liveReq = id => S.pending.find(r => r.id === id) || S.held.find(r => r.id === id);
+const lostSent = new Set();                                 // بلّغنا الأداة إن القفل راح → لما يرجع نبلّغها
+const lockMsg = (id, extra) => { if (extra.ok) { if (!lostSent.delete(id)) return; } else lostSent.add(id); window.postMessage({ type: "SABA_LOCK", id, ...extra }, location.origin); };   // للأداة في صحة
+async function lockReq(id, why = "") {
+  if (!id) return { ok: false };
+  const L = myLocks.get(id) || { act: Date.now(), renew: 0 };
+  if (L.busy) return L.busy;
+  const run = (async () => {
+    if (!api.lock) { api.claim?.(id, claimTag()).catch(() => {}); myLocks.set(id, { ...L, renew: Date.now() }); return { ok: true }; }   // نسخة تجريبية بدون قفل
+    try {
+      const sent = Date.now();
+      await api.lock(id, claimTag(), LOCK_MS, srvNow);
+      myLocks.set(id, { act: L.act, renew: Date.now(), sent });
+      lockMsg(id, { ok: true });                                                  // رجع لنا بعد ما انتهى (ما ترسل شي لو ما كان ضايع)
+      return { ok: true };
+    } catch (e) {
+      if (e?.code === "locked") {
+        myLocks.delete(id); lockMsg(id, { ok: false, reason: "taken", by: whoOf(e.by) });
+        return { ok: false, by: whoOf(e.by) || "جهاز ثاني", at: e.at };
+      }
+      if (e?.code === "already_done") { myLocks.delete(id); return { ok: false, done: true, doneBy: e.by, doneAt: e.doneAt }; }
+      if (e?.code === "gone") { myLocks.delete(id); return { ok: false, gone: true }; }
+      console.warn("lock", why, e); return { ok: false, err: e?.code || "net" };      // بدون نت: نخليه، ونحاول مع الحركة الجاية
+    } finally { const c = myLocks.get(id); if (c) delete c.busy; }
+  })();
+  myLocks.set(id, { ...L, busy: run });
+  return run;
 }
-setInterval(() => { for (const [id, t] of myClaims) { if (Date.now() - t > 10 * 60000) myClaims.delete(id); else if (S.pending.some(r => r.id === id) || S.held.some(r => r.id === id)) api.claim?.(id, claimTag()).catch(() => {}); } }, 120000);
+function touchReq(id) {                                     // حركة على الطلب → نجدد القفل
+  const L = myLocks.get(id);
+  if (!L) { if (liveReq(id)) lockReq(id, "touch"); return; }
+  L.act = Date.now();
+  if (L.lost || Date.now() - L.renew > 120000) lockReq(id, "renew");      // تجديد كل دقيقتين بالكثير (توفير قراءات — القفل يعيش 6 دقايق)
+}
+function releaseReq(id, reason = "") {
+  const L = myLocks.get(id); if (!L) return;
+  myLocks.delete(id);
+  api.unlock ? api.unlock(id, claimTag()).catch(() => {}) : (liveReq(id)?.openedBy === claimTag() && api.update(id, { openedBy: "", openedAt: null }).catch(() => {}));
+  if (reason === "idle") lockMsg(id, { ok: false, reason: "idle" });
+}
+const claimReq = id => { const L = myLocks.get(id); if (L) L.act = Date.now(); return lockReq(id, "claim"); };
+// كل 15 ثانية: اللي ما عليه حركة 5 دقايق نفكه، واللي أخذه جهاز ثاني (بعد ما انتهى عندنا) نبلّغ فيه
+setInterval(() => {
+  for (const [id, L] of [...myLocks]) {
+    const x = liveReq(id);
+    if (!x) { myLocks.delete(id); continue; }
+    if (Date.now() - L.act > IDLE_MS) {
+      releaseReq(id, "idle");
+      if (S.openId === id) { $("#dOpenInfo").hidden = false; $("#dOpenInfo").textContent = "⏱ انتهى وقتك على هالطلب (5 دقايق بدون حركة) وصار متاح لغيرك — لو تكمّل يرجع لك إذا ما أخذه أحد"; }
+      toast(`⏱ انتهى وقتك على «${x.patientName}» — صار متاح لغيرك`);
+      continue;
+    }
+    if (Date.now() - L.renew > 150000 && Date.now() - L.act < IDLE_MS && !L.busy) lockReq(id, "keep");      // احتياط لو تأخرت التجديدات
+  }
+}, 15000);
+// اللوحة تشوف القفل من السيرفر: نتعلم فرق الساعة، ونعرف لو جهاز ثاني أخذ طلبنا
+const takenSent = new Map();   // طلب انتهى وقتنا عليه وأخذه جهاز ثاني → نبلّغ الأداة مرة وحدة
+function syncLocks(list) {
+  const me = claimTag();
+  for (const x of list) {
+    if (lostSent.has(x.id) && !myLocks.has(x.id) && x.openedBy && x.openedBy !== me && srvNow() - (x.openedAt || 0) < LOCK_MS && takenSent.get(x.id) !== x.openedBy) {
+      takenSent.set(x.id, x.openedBy); lockMsg(x.id, { ok: false, reason: "taken", by: whoOf(x.openedBy) });
+    }
+    const L = myLocks.get(x.id); if (!L) continue;
+    if (x.openedBy === me && x.openedAt && L.sent && !L.skewAt && x.openedAt > L.sent - 5000) {   // أول مرة نشوف وقت قفلنا من السيرفر
+      const local = (L.sent + L.renew) / 2; skew = Math.max(-36e5, Math.min(36e5, x.openedAt - local)); L.skewAt = Date.now();
+    }
+    if (x.openedBy && x.openedBy !== me && srvNow() - (x.openedAt || 0) < LOCK_MS) {
+      myLocks.delete(x.id); lockMsg(x.id, { ok: false, reason: "taken", by: whoOf(x.openedBy) });
+      if (S.openId === x.id) { $("#dOpenInfo").hidden = false; $("#dOpenInfo").textContent = `🔒 هالطلب صار عند ${whoOf(x.openedBy)} — لا ترفعه`; renderLockState(x); }
+    }
+  }
+}
+// الدرج: لو الطلب عند جهاز ثاني → كل الأزرار تتقفل ونبيّن عند مين ومتى ينفك
+function renderLockState(x, r) {
+  if (!x || S.openId !== x.id) return;
+  const isDone = x.status === "done", o = !isDone && (openByOther(x) || r?.by || "");
+  const left = o && x.openedAt ? Math.max(1, Math.ceil((x.openedAt + LOCK_MS - srvNow()) / 60000)) : 0;
+  const ban = $("#dOpenInfo");
+  if (o) { ban.hidden = false; ban.textContent = `🔒 هالطلب مفتوح عند ${o} — ما تقدر تشتغل عليه. ينفك لحاله لو ما اشتغل عليه 5 دقايق${left ? ` (بالكثير بعد ${arNum(left)} د)` : ""}`; }
+  else if (/^🔒/.test(ban.textContent)) ban.hidden = true;
+  $("#drawer").classList.toggle("locked", !!o);
+  for (const el of $("#drawer").querySelectorAll("#dActions button, #dHold, #dUnhold, #dFix, #dFields input, #dFields select")) { if (o) { el.dataset.lk = "1"; el.disabled = true; } else if (el.dataset.lk) { delete el.dataset.lk; el.disabled = false; } }
+  $("#sehaDrawer").classList.toggle("off", !!o); $("#sehaDrawer").setAttribute("aria-disabled", o ? "true" : "false");
+}
+// طلب كان مقفول/مفتوح عندنا واختفى من القائمة وما رفعناه إحنا → غالباً جهاز ثاني رفعه: نبلّغ هنا وفي أداة صحة على طول
+const lostSeen = new Set();
+function lostMine(ids) {
+  const mine = new Set([...myLocks.keys(), ...(S.sentSeha || [])]);
+  for (const id of mine) {
+    if (ids.has(id) || S.doneLocal?.has(id) || lostSeen.has(id)) continue;
+    lostSeen.add(id); myLocks.delete(id); S.sentSeha?.delete(id);
+    api.getStatus?.(id).then(st => { if (st?.status === "done" && st.doneBy !== myName()) alreadyDone({ id, ref: st.ref, by: st.doneBy, doneAt: st.doneAt, name: st.patientName }); }).catch(() => {});
+  }
+}
+// القفل ينتهي بالوقت (بدون أي تغيير في قاعدة البيانات) → نعيد رسم القائمة والأداة أول ما ينفك
+let lockSig = "";
+setInterval(() => {
+  const sig = (S.pending || []).map(x => openByOther(x) ? x.id : "").join(",");
+  if (sig === lockSig) return; lockSig = sig;
+  renderPending(); postQueue(); if (S.openId) renderLockState(liveReq(S.openId));
+}, 5000);
 function rowHTML(x, mode) {
   const done = mode === "done", held = mode === "held";
   const dupe = mode === "pending" && S.pending.filter(y => y.idNumber === x.idNumber && y.type === x.type && (y.leaveStart || y.visitDate) === (x.leaveStart || x.visitDate)).length > 1;
@@ -689,7 +793,7 @@ function rowHTML(x, mode) {
     : `<div class="quick-row">${waBtn}<button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
   return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
-      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">مفتوح عند ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq" title="${esc(x.inquiryText || "")}">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}${x.inquiryText && !/^SB-?\w{5}$/i.test(x.inquiryText.trim()) ? `: «${esc(x.inquiryText.slice(0, 50))}${x.inquiryText.length > 50 ? "…" : ""}»` : ""}</span>` : ""}${held && x.fixToken ? (S.answered?.has(x.id) ? '<span class="chip fix">✓ المريض عدّل — يتطبّق…</span>' : '<span class="chip fix">بانتظار تعديل المريض</span>') : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${!done && x.docKind === "other" ? '<span class="chip dup">⚠ مو ورقة إجازة</span>' : ""}${x.dateFlag && !x.dateChecked && !done ? `<span class="chip dup" title="${esc(x.dateFlag)}">⚠ تأكد من التاريخ</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip warn" title="الختم يختلف عن الاسم المطبوع — المعتمد طبيب الختم">الختم: د. ${esc(rd?.ar || x.stampDoctor)} · المطبوع: ${esc(x.doctorName)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">🔒 مع ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq" title="${esc(x.inquiryText || "")}">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}${x.inquiryText && !/^SB-?\w{5}$/i.test(x.inquiryText.trim()) ? `: «${esc(x.inquiryText.slice(0, 50))}${x.inquiryText.length > 50 ? "…" : ""}»` : ""}</span>` : ""}${held && x.fixToken ? (S.answered?.has(x.id) ? '<span class="chip fix">✓ المريض عدّل — يتطبّق…</span>' : '<span class="chip fix">بانتظار تعديل المريض</span>') : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${!done && x.docKind === "other" ? '<span class="chip dup">⚠ مو ورقة إجازة</span>' : ""}${x.dateFlag && !x.dateChecked && !done ? `<span class="chip dup" title="${esc(x.dateFlag)}">⚠ تأكد من التاريخ</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip warn" title="الختم يختلف عن الاسم المطبوع — المعتمد طبيب الختم">الختم: د. ${esc(rd?.ar || x.stampDoctor)} · المطبوع: ${esc(x.doctorName)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(rd && byStamp ? rd.ar : shownDoctor(x))}</span><span>${esc(dates(x))}</span></div>
       ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
     </div>
@@ -816,7 +920,7 @@ async function archiveExactDupes(list) {
 /* ---------- تم الرفع ---------- */
 async function markDone(id, opt = {}) {
   const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id); if (!x) return;
-  const by = myName();
+  const by = myName(); myLocks.delete(id);
   // تحديث فوري في الواجهة
   S.pending = S.pending.filter(r => r.id !== id); S.held = S.held.filter(r => r.id !== id);
   (S.doneLocal ||= new Map()).set(id, Date.now());                                // لين يأكدها السيرفر: ما يرجع يطلع في القائمة
@@ -1095,6 +1199,7 @@ const FIELDS = x => [
 
 async function openDrawer(id, holdNow) {
   const x = S.pending.find(r => r.id === id) || S.held.find(r => r.id === id) || S.done.find(r => r.id === id); if (!x) return;
+  if (x.status !== "done" && openByOther(x)) { chime(); toast(`🔒 هالمراجع مفتوح عند ${openByOther(x)} — ينفك لحاله لو ما اشتغل عليه 5 دقايق`); return; }
   S.openId = id; rot = 0; zoom = false;
   document.querySelectorAll(".row").forEach(r => r.classList.toggle("sel", r.dataset.id === id));
   fillDrawerMeta(x);
@@ -1128,10 +1233,8 @@ async function openDrawer(id, holdNow) {
   if (isHeld) $("#dHoldInfo").innerHTML = `<b>معلّق: ${esc(holdName(x.holdReason))}</b>${esc(x.holdNote || "")}${x.heldBy ? ` — ${esc(x.heldBy)}` : ""}`;
   showFixInfo(isHeld ? x : null);
   if (holdNow && !isHeld && !isDone) showHoldBox(true);
-  const other = !isDone && openByOther(x);
-  $("#dOpenInfo").hidden = !other;
-  if (other) $("#dOpenInfo").textContent = `هذا الطلب مفتوح الآن عند ${other}. تأكد منه قبل الرفع حتى لا ينرفع مرتين.`;
-  if (!isDone && !other) claimReq(id);
+  renderLockState(x);
+  if (!isDone && !openByOther(x)) claimReq(id).then(r => { if (S.openId !== id) return; if (r.done) { closeDrawer(); alreadyDone({ id, ref: x.ref, by: r.doneBy, doneAt: r.doneAt, name: x.patientName }); } else renderLockState(liveReq(id) || x, r); });
   // الصورة
   const img = $("#dImg"), pdf = $("#dPdf");
   img.style.transform = ""; $("#viewer").classList.remove("zoom");
@@ -1156,17 +1259,20 @@ function fillDrawerMeta(x) {
   $("#dMeta").title = x.scanInfo ? "مدة المسح: " + x.scanInfo : "";                  // مرّر الماوس = كم أخذ المسح عند المريض
 }
 function closeDrawer() {
-  if (S.openId && !S.sentSeha?.has(S.openId)) releaseReq(S.openId);    // فتحته بس شفته؟ نفكّ الحجز
+  if (S.openId && !S.sentSeha?.has(S.openId)) releaseReq(S.openId);    // فتحته بس شفته؟ نفكّ القفل (لو مرسله لصحة يظل لين «تم الرفع» أو 5 دقايق بدون حركة)
   S.openId = null;
   $("#scrim").classList.remove("on"); $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true");
   document.querySelectorAll(".row.sel").forEach(r => r.classList.remove("sel"));
 }
 $("#dClose").onclick = closeDrawer; $("#scrim").onclick = closeDrawer;
-$("#dDone").onclick = () => S.openId && markDone(S.openId);
+const lockedAway = () => { const x = S.openId && liveReq(S.openId); const o = x && openByOther(x); if (o) { chime(); toast(`🔒 هالطلب عند ${o} — ما تقدر تشتغل عليه لين يخلص أو ينفك (5 دقايق بدون حركة)`); } return !!o; };
+$("#dDone").onclick = () => S.openId && !lockedAway() && markDone(S.openId);
+// أي حركة داخل الطلب المفتوح = يجدد القفل
+["pointerdown", "keydown", "input", "wheel"].forEach(ev => $("#drawer").addEventListener(ev, () => { if (S.openId && liveReq(S.openId) && !openByOther(liveReq(S.openId))) touchReq(S.openId); }, { passive: true }));
 addEventListener("keydown", e => {
   if (!S.openId) return;
   if (e.key === "Escape") closeDrawer();
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && $("#holdBox").hidden) { e.preventDefault(); markDone(S.openId); }
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && $("#holdBox").hidden) { e.preventDefault(); if (!lockedAway()) markDone(S.openId); }
 });
 $("#dFields").addEventListener("click", async e => {
   const b = e.target.closest("[data-cp]"); if (!b) return;
@@ -1591,9 +1697,8 @@ function postQueue() {
 $("#sehaDrawer").addEventListener("click", e => {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
   e.preventDefault();
-  const other = openByOther(x);
-  if (other && sehaWarned !== x.id) { sehaWarned = x.id; chime(); return toast(`⚠ ${other} فاتح هالطلب الحين — لو متأكد إنه ما يرفعه، اضغط زر صحة مرة ثانية`); }
-  sehaWarned = null; (S.sentSeha ||= new Set()).add(x.id); claimReq(x.id);
+  if (lockedAway()) return;
+  sehaWarned = null; (S.sentSeha ||= new Set()).add(x.id); claimReq(x.id).then(r => { if (r.by) { S.sentSeha.delete(x.id); renderLockState(liveReq(x.id) || x, r); } });
   const payload = sehaPayload(x);
   window.postMessage({ type: "SABA_SEHA_FILL", payload }, location.origin);
   if (extVersion) {
@@ -1613,17 +1718,32 @@ addEventListener("message", async e => {
   if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; extReadyAt = Date.now(); renderExtHint(); renderExtLink(); postQueue(); }
   if (m.type === "SABA_QUEUE_REQ") postQueue();                                    // الأداة رجع لها الموظف وتبي القائمة الحين
   if (m.type === "SABA_CHECK" && m.id) {                                           // الأداة بتفتح طلب: نتأكد من قاعدة البيانات نفسها إنه ما انرفع
-    let r = null;
-    try { r = await api.getStatus?.(m.id, true); } catch (e) { console.warn("check", e); return; }          // ما قدرنا نوصل للسيرفر → ما نرد (الأداة تقول «ما ردّت»)
-    const res = r ? { status: r.status, by: r.doneBy, doneAt: r.doneAt } : { status: api.getStatus ? "gone" : "pending" };
+    let res;
+    if (api.lock) {                                                                // (1.9.2) القفل نفسه يقرا الطلب من السيرفر: انرفع؟ انحذف؟ عند غيرك؟ — قراءة وحدة بدل ثنتين
+      const L = await lockReq(m.id, "tool");
+      if (L.err) return;                                                           // ما قدرنا نوصل للسيرفر → ما نرد (الأداة تقول «ما ردّت» وتفك)
+      res = L.ok ? { status: "pending" } : L.by ? { status: "locked", by: L.by, at: L.at } : L.done ? { status: "done", by: L.doneBy, doneAt: L.doneAt } : { status: "gone" };
+      if (L.ok) { (S.sentSeha ||= new Set()).add(m.id); const k = myLocks.get(m.id); if (k) k.act = Date.now(); }
+    } else {
+      let r = null;
+      try { r = await api.getStatus?.(m.id, true); } catch (e) { console.warn("check", e); return; }
+      res = r ? { status: r.status, by: r.doneBy, doneAt: r.doneAt } : { status: api.getStatus ? "gone" : "pending" };
+    }
     window.postMessage({ type: "SABA_CHECK_RES", at: m.at, id: m.id, ...res }, location.origin);
     if (res.status === "done") { const x = S.pending.find(q => q.id === m.id); if (x) { S.pending = S.pending.filter(q => q.id !== m.id); renderCounts(); renderPending(); postQueue(); } }
   }
   if (m.type === "SABA_SEHA_FILL_ACK") toast("انرسل الطلب لصحة — الخانات بتتعبى هناك");
   if (m.type === "SABA_SEHA_DONE") handleSehaDone(m);
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
-  if (m.type === "SABA_ACTIVE" && m.id && (S.pending.some(r => r.id === m.id) || S.held.some(r => r.id === m.id))) { (S.sentSeha ||= new Set()).add(m.id); claimReq(m.id); sendReqImg(m.id); checkNotDone(m.id); }
-  if (m.type === "SABA_RELEASE" && m.id) { S.sentSeha?.delete(m.id); if (S.openId !== m.id) releaseReq(m.id); }
+  // الطلب المفتوح في صحة بهالجهاز (نبضة كل دقيقتين من الإضافة): نرجّع القفل لو اللوحة انفتحت من جديد — بس لو فيه حركة آخر 5 دقايق
+  if (m.type === "SABA_ACTIVE" && m.id && liveReq(m.id)) {
+    (S.sentSeha ||= new Set()).add(m.id); sendReqImg(m.id); checkNotDone(m.id);
+    const fresh = !m.act || Date.now() - m.act < IDLE_MS;
+    if (!myLocks.has(m.id) && fresh) { myLocks.set(m.id, { act: m.act || Date.now(), renew: 0 }); lockReq(m.id, "active"); }
+  }
+  if (m.type === "SABA_ACT" && m.id && liveReq(m.id)) touchReq(m.id);                 // الموظف يكتب/يضغط في صحة على هالطلب
+  // الأداة قفلت الطلب بدون رفع → نفك القفل بعد 3 ثواني (لو وصل «تم الرفع» بنفس اللحظة ما نفكه)
+  if (m.type === "SABA_RELEASE" && m.id) { const id = m.id; setTimeout(() => { if (S.doneLocal?.has(id) || !liveReq(id)) return; S.sentSeha?.delete(id); if (S.openId !== id) releaseReq(id); }, 3000); }
   if (m.type === "SABA_SEHA_ALERT") { chime(); toast(`⚠ صحة غيّرت شي في النموذج: ${(m.labels || []).join("، ") || "خانات ما تتعبّى"} — من قائمة الإضافة اضغط «تقرير فني» وأرسله لـ Claude`, "تمام", () => {}); }
 });
 let doneMsgQueue = null;

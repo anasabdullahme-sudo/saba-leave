@@ -545,12 +545,26 @@
   // ولما يرجع الموظف لصحة نطلب قائمة جديدة على طول، ولين توصل ما نعرض القديمة
   let wantAt = 0;
   const queueStale = () => !queueAt || Date.now() - queueAt > 45000 || (!!wantAt && queueAt < wantAt - 5000);
-  const askQueue = () => { if (!TOP || !alive()) return; wantAt = Date.now(); chrome.storage.local.set({ sabaWantQueue: wantAt }); setTimeout(() => { if (!req && !minimized) render(); else updateCount(); }, 2600); };
+  const askQueue = quiet => {
+    if (!TOP || !alive()) return; const ask = Date.now(); if (!quiet || !wantAt || queueAt >= wantAt - 5000) wantAt = ask;   // نبضة هادية ما تخلي القائمة «قديمة» لحالها
+    chrome.storage.local.set({ sabaWantQueue: ask });
+    setTimeout(() => { if (queueAt < ask - 1000) try { chrome.runtime.sendMessage({ type: "SABA_NEED_BOARD" }); } catch {} ; if (!req && !minimized) render(); else updateCount(); }, 4000);
+  };
   if (TOP) { document.addEventListener("visibilitychange", () => { if (!document.hidden) askQueue(); }); addEventListener("focus", askQueue); setTimeout(askQueue, 1500); }
   function bindDup() { const d = $("#dupOk"); if (d) d.onclick = () => { dupInfo = null; chrome.storage.local.remove("sabaDup"); render(); }; }
   function setMin(v) { minimized = v; $("#p").classList.toggle("min", v); $("#min").textContent = v ? "+" : "–"; }
   function updateCount() { const c = $("#cnt"), n = pendingQ().filter(q => !q.lockedBy).length; c.hidden = !n; c.textContent = n; }
   let lockWarned = null;
+  // (1.9.2) القفل: اللوحة تبلّغنا لو انتهى وقتك أو أخذه جهاز ثاني (sabaLock)، وإحنا نبلّغها بأي حركة هنا (sabaAct) عشان يتجدد
+  let lockInfo = null, actAt = 0;
+  chrome.storage.local.get("sabaLock", d => { lockInfo = d.sabaLock || null; });
+  const reportAct = () => {
+    if (!alive() || !req?.id || Date.now() - actAt < 20000) return; actAt = Date.now();
+    chrome.storage.local.set({ sabaAct: { id: req.id, at: actAt } });
+  };
+  ["input", "change", "keydown", "pointerdown"].forEach(ev => addEventListener(ev, e => { if (e.isTrusted) reportAct(); }, { capture: true, passive: true }));
+  // القائمة: الأداة تطلبها بنفسها كل 15 ثانية وهي ظاهرة (تبويب اللوحة بالخلفية كروم يبطّئه — كانت القائمة «تقدم»)
+  if (TOP) setInterval(() => { if (alive() && !document.hidden && !req) askQueue(true); }, 15000);
   function openReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
   // قبل ما نفتح طلب من القائمة: نسأل صفحة الموظفين تتأكد من قاعدة البيانات إنه ما انرفع (من جهاز ثاني) — عشان ما ينرفع مرتين
   let checking = null;
@@ -559,17 +573,18 @@
     const at = Date.now(); checking = { id: q.id, at }; toastLocal("⏳ أتأكد إن الطلب ما انرفع…");
     const done = r => {
       chrome.storage.onChanged.removeListener(l); clearTimeout(tm); checking = null;
-      if (!r) { toastLocal("⚠ صفحة الموظفين ما ردّت — افتحها (أو حدّثها) وحاول مرة ثانية"); render(); return; }
+      if (!r) { chrome.storage.local.set({ sabaUnlock: { id: q.id, at: Date.now() } }); toastLocal("⚠ صفحة الموظفين ما ردّت — افتحها (أو حدّثها) وحاول مرة ثانية"); render(); return; }   // لو قفلته اللوحة متأخر → تفكه
       if (r.status === "done") {
         dupInfo = { id: q.id, ref: q.ref || "", by: r.by || "", doneAt: r.doneAt || 0, name: q.patientName || "", at: Date.now() };
         hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden, sabaDup: dupInfo }); setMin(false); render(); return;
       }
       if (r.status === "gone") { toastLocal("هذا الطلب انحذف أو انتقل"); hidden = hideId(q.id); chrome.storage.local.set({ sabaHidden: hidden }); render(); return; }
+      if (r.status === "locked") { toastLocal(`🔒 ${r.by || "جهاز ثاني"} أخذ هالمراجع قبلك بلحظة — اختر غيره`); askQueue(); render(); return; }
       openReq(q);
     };
     const l = (ch, area) => { const v = area === "local" && ch.sabaCheckRes?.newValue; if (v && v.at === at) done(v); };
     chrome.storage.onChanged.addListener(l);
-    const tm = setTimeout(() => done(null), 5000);
+    const tm = setTimeout(() => done(null), 10000);                                // الجهاز مزحوم ممكن ياخذ ثواني
     chrome.storage.local.set({ sabaCheck: { id: q.id, at } });
   }
   const TYPE_AR = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
@@ -624,8 +639,8 @@
       const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(free[0]);
       root.querySelectorAll(".qi").forEach(el => el.onclick = () => {
         const q = queue.find(x => x.id === el.dataset.id); if (!q) return;
-        if (q.lockedBy && lockWarned !== q.id) { lockWarned = q.id; return toastLocal(`${q.lockedBy} فاتح هالطلب — لو متأكد اضغط عليه مرة ثانية`); }
-        lockWarned = null; useReq(q);
+        if (q.lockedBy) return toastLocal(`🔒 هالمراجع عند ${q.lockedBy} — ينفك لحاله لو ما اشتغل عليه 5 دقايق`);   // (1.9.2) قفل: ما يفتحه إلا واحد
+        useReq(q);
       });
       bindDup(); bindPaste(); return;
     }
@@ -645,7 +660,10 @@
     const fxFields = FIX_FIELDS.filter(f => !f.types || f.types.includes(fxType));
     const need = fxType === req.type ? [] : fxType === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : [];
     const lockedNow = queue.find(q => q.id === req.id)?.lockedBy;
-    b.innerHTML = `${dupInfo && req && dupInfo.id === req.id ? dupHtml() : ""}${lockedNow ? `<div class="acc wrong" style="font-weight:600">⚠ ${esc(lockedNow)} فاتح نفس الطلب الحين — تأكدوا مين يرفعه عشان ما ينرفع مرتين</div>` : ""}
+    const lk = lockInfo && lockInfo.id === req.id && !lockInfo.ok ? lockInfo : null;
+    const lkTxt = lk?.reason === "taken" || (lockedNow && !lk) ? `🔒 هالمراجع صار عند <b>${esc(lk?.by || lockedNow)}</b> — لا ترفعه. لو رفعته فعلاً اضغط «تم الرفع» عشان ما يرفعه مرة ثانية`
+      : lk?.reason === "idle" ? "⏱ انتهى وقتك على هالمراجع (5 دقايق بدون حركة) وصار متاح لغيرك — لو تكمّل الحين يرجع لك تلقائياً إذا ما أخذه أحد" : "";
+    b.innerHTML = `${dupInfo && req && dupInfo.id === req.id ? dupHtml() : ""}${lkTxt ? `<div class="acc wrong" style="font-weight:600">${lkTxt}</div>` : ""}
       <div class="card ${reqImg?.id === req.id ? "withimg" : ""}">
         ${reqImg?.id === req.id ? `<button class="thumb" id="viewImg" title="افتح صورة التقرير">${reqImg.pdf ? '<span class="pdf">PDF</span>' : '<img alt="">'}<i>🔍</i></button>` : ""}
         <div><div class="nm">${esc(req.patientName)}</div>
@@ -867,6 +885,13 @@
     if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
+    if (ch.sabaLock && TOP) {
+      lockInfo = ch.sabaLock.newValue || null;
+      if (req && lockInfo?.id === req.id) {
+        if (!lockInfo.ok) { setMin(false); toastLocal(lockInfo.reason === "taken" ? `🔒 المراجع صار عند ${lockInfo.by}` : "⏱ انتهى وقتك على المراجع — صار متاح لغيرك"); actAt = 0; }
+        render();
+      }
+    }
     if (ch.sabaDup && TOP) {
       dupInfo = ch.sabaDup.newValue || null;
       if (dupInfo) {

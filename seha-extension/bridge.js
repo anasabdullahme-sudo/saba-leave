@@ -47,18 +47,28 @@
   chrome.storage.onChanged.addListener((ch, area) => { const c = area === "local" && ch.sabaCheck?.newValue; if (c && isBoard() && alive()) post({ type: "SABA_CHECK", id: c.id, at: c.at }); });   // الأداة تسأل: انرفع؟
   // صفحة موظفين قديمة (قبل التحديث التلقائي) → نحدّثها لحالها لما تكون فاضية (ما فيه طلب مفتوح ولا كتابة) — مرة كل 10 دقايق بالكثير
   setTimeout(function oldBoard() {
-    if (!alive() || !isBoard() || document.documentElement.dataset.sabaBoard) return;
+    if (!alive() || !isBoard() || +(document.documentElement.dataset.sabaBoard || 0) >= 4) return;   // 4 = فيها قفل المراجع
     const a = document.activeElement, busy = document.querySelector("#drawer.on, .modal:not([hidden])") || (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value);
     if (busy) return setTimeout(oldBoard, 15000);
     try { if (Date.now() - (+sessionStorage.getItem("sabaOldReload") || 0) < 10 * 60000) return; sessionStorage.setItem("sabaOldReload", String(Date.now())); } catch { return; }
     location.reload();
   }, 8000);
   // الطلب المفتوح في صحة بهالجهاز → اللوحة تحجزه («مفتوح عند فلان» عند الباقين)
-  const active = () => alive() && chrome.storage.local.get("sabaReq", ({ sabaReq: r }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id }); });
+  // (1.9.2) نرسل معه آخر حركة في صحة — اللوحة ترجّع القفل بس لو فيه حركة آخر 5 دقايق
+  const active = () => alive() && chrome.storage.local.get(["sabaReq", "sabaAct"], ({ sabaReq: r, sabaAct: a }) => { if (r?.id && isBoard() && Date.now() - (r.sentAt || 0) < 60 * 60000) post({ type: "SABA_ACTIVE", id: r.id, act: Math.max(a?.id === r.id ? a.at || 0 : 0, r.sentAt || 0) }); });
+  // الأداة طلبت طلب واللوحة تأخرت بالرد (الأداة استسلمت) → نفك القفل اللي ممكن انحجز
+  chrome.storage.onChanged.addListener((ch, area) => { const u = area === "local" && ch.sabaUnlock?.newValue; if (u?.id && isBoard() && alive()) post({ type: "SABA_RELEASE", id: u.id }); });
+  // الموظف يكتب/يضغط في صحة → اللوحة تجدد القفل (الأداة ترسلها كل 20 ثانية بالكثير)
+  chrome.storage.onChanged.addListener((ch, area) => { const a = area === "local" && ch.sabaAct?.newValue; if (a?.id && isBoard() && alive()) post({ type: "SABA_ACT", id: a.id, at: a.at }); });
+  // اللوحة: القفل راح (انتهى وقتك / أخذه جهاز ثاني) أو رجع لك → الأداة في صحة تبيّنه
+  listen(e => { if (e.source !== window || e.data?.type !== "SABA_LOCK" || !e.data.id || !isBoard()) return; const { id, ok, reason, by } = e.data; chrome.storage.local.set({ sabaLock: { id, ok: !!ok, reason: reason || "", by: by || "", at: Date.now() } }); });
+  // تبويب اللوحة ما ينام ولا ينمسح من الذاكرة (هو اللي يوصل الأداة بقاعدة البيانات)
+  const keepAwake = () => { if (isBoard() && alive()) try { chrome.runtime.sendMessage({ type: "SABA_BOARD_HERE" }); } catch {} };
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local" || !ch.sabaReq || !isBoard()) return;
     const o = ch.sabaReq.oldValue, n = ch.sabaReq.newValue;
-    if (o?.id && o.id !== n?.id) post({ type: "SABA_RELEASE", id: o.id });
+    // الطلب انقفل في الأداة: لو بسبب «تم الرفع» لا نفك القفل (يبقى لين ينحفظ «تم الرفع» — وإلا جهاز ثاني يلحق ياخذه بهالثانية)
+    if (o?.id && o.id !== n?.id) chrome.storage.local.get(null, all => { if (!Object.entries(all).some(([k, v]) => k.startsWith("sabaDone_") && v?.id === o.id)) post({ type: "SABA_RELEASE", id: o.id }); });
     if (n?.id) active();
   });
   timer = setInterval(() => { try { active(); } catch { alive(); } }, 120000);
@@ -120,6 +130,7 @@
     post({ type: "SABA_DOCTOR_ME", doctor: me, version: chrome.runtime.getManifest().version });
   });
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", announce, on); else announce();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { announce(); keepAwake(); }, on); else { announce(); keepAwake(); }
+  setTimeout(keepAwake, 3000);
   setTimeout(announce, 1500);
 })();
