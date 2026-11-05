@@ -645,11 +645,12 @@ function dates(x) {
   return x.leaveEnd && x.leaveEnd !== x.leaveStart ? `${x.leaveStart} ← ${x.leaveEnd}` : x.leaveStart;
 }
 // قفل المراجع (1.9.2): أول جهاز يفتح المراجع ياخذه، والباقين ما يقدرون يفتحونه.
-// ينفك لحاله بعد 5 دقايق بدون أي حركة (لا في اللوحة ولا في صحة)، أو لو الجهاز انقفل/طاح نته (بعد 6 دقايق بالكثير)
+// ينفك لحاله بعد 5 دقايق بدون أي حركة (لا في اللوحة ولا في صحة)، أو لو الجهاز انقفل/طاح نته (بعد 7 دقايق بالكثير)
 const LOCK_T = (() => { try { const t = JSON.parse(localStorage.getItem("saba_lock_test") || "null"); if (t?.idle && t?.lock) return t; } catch {} return null; })();   // للتجربة بس
 const IDLE_MS = LOCK_T?.idle || 5 * 60000;           // بدون حركة → نفكه بأنفسنا
-const LOCK_MS = LOCK_T?.lock || 6 * 60000;           // الجهاز مات (ما جدّد) → ينفك عند الكل
+const LOCK_MS = LOCK_T?.lock || 7 * 60000;           // الجهاز مات (ما جدّد) → ينفك عند الكل (5 دقايق + فترة التجديد)
 const OPEN_MS = LOCK_MS;
+const RENEW_MS = Math.max(10000, LOCK_MS - IDLE_MS);  // تجديد القفل مع الحركة: كل دقيقتين بالكثير (توفير قراءات) — كذا ما ينفك قبل 5 دقايق من آخر حركة
 let skew = 0;                                        // فرق ساعة الجهاز عن السيرفر (نتعلمه من وقت قفلنا اللي يرجع من السيرفر)
 const srvNow = () => Date.now() + skew;
 const LSx = { get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
@@ -710,7 +711,7 @@ function touchReq(id) {                                     // حركة على �
   const L = myLocks.get(id);
   if (!L) { if (liveReq(id)) lockReq(id, "touch"); return; }
   L.act = Date.now();
-  if (L.lost || Date.now() - L.renew > 120000) lockReq(id, "renew");      // تجديد كل دقيقتين بالكثير (توفير قراءات — القفل يعيش 6 دقايق)
+  if (L.lost || Date.now() - L.renew > RENEW_MS) lockReq(id, "renew");    // تجديد كل دقيقتين بالكثير (القفل يعيش 7 دقايق)
 }
 function releaseReq(id, reason = "") {
   const L = myLocks.get(id); if (!L) return;
@@ -730,7 +731,7 @@ setInterval(() => {
       toast(`⏱ انتهى وقتك على «${x.patientName}» — صار متاح لغيرك`);
       continue;
     }
-    if (Date.now() - L.renew > 150000 && Date.now() - L.act < IDLE_MS && !L.busy) lockReq(id, "keep");      // احتياط لو تأخرت التجديدات
+    if (Date.now() - L.renew > RENEW_MS * 1.25 && Date.now() - L.act < IDLE_MS && !L.busy) lockReq(id, "keep");      // احتياط لو تأخرت التجديدات
   }
 }, 15000);
 // اللوحة تشوف القفل من السيرفر: نتعلم فرق الساعة، ونعرف لو جهاز ثاني أخذ طلبنا
@@ -1724,6 +1725,8 @@ addEventListener("message", async e => {
       if (L.err) return;                                                           // ما قدرنا نوصل للسيرفر → ما نرد (الأداة تقول «ما ردّت» وتفك)
       res = L.ok ? { status: "pending" } : L.by ? { status: "locked", by: L.by, at: L.at } : L.done ? { status: "done", by: L.doneBy, doneAt: L.doneAt } : { status: "gone" };
       if (L.ok) { (S.sentSeha ||= new Set()).add(m.id); const k = myLocks.get(m.id); if (k) k.act = Date.now(); }
+      // الإضافة القديمة (قبل 1.9.2) ما تعرف «مقفول» وتفتحه — نقول لها «انتقل» عشان تخفيه لين تتحدث
+      if (res.status === "locked" && String(extVersion || "0").split(".").map(Number).reduce((a, n, i) => a + n * [1e6, 1e3, 1][i], 0) < 1009002) res = { status: "gone" };
     } else {
       let r = null;
       try { r = await api.getStatus?.(m.id, true); } catch (e) { console.warn("check", e); return; }
