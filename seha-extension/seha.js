@@ -211,6 +211,7 @@
   // ---------- التعبئة ----------
   const filledEls = new WeakSet();
   let lastReport = {};
+  const wroteVals = new WeakMap();                                                   // الخانة ← القيمة اللي كتبناها (عشان نعرف لو الموظف غيّرها)
   function fillPass(req, labs, report, hijriPass, explicit) {
     for (const rule of RULES) {
       if (!!rule.hijri !== hijriPass || rule.skipIf?.(req)) continue;
@@ -227,11 +228,18 @@
       if (rule.selectOnly && !(c instanceof HTMLSelectElement)) continue;   // «طبيعة المرافق» قائمة اختيار بس — ما نكتب في خانة نص بالغلط
       const val = rule.val ? rule.val(req, c) : String(req[rule.key] || "");
       if (!val) continue;
-      if (c.value) { if (!hijriPass) report[rule.key] = report[rule.key] || "ok"; continue; } // ما نكتب فوق شي موجود
+      if (c.value) {
+        // (1.9.4) الموقع هو الأساس: لو القيمة اللي في الخانة هي اللي كتبناها إحنا والطلب تعدّل في اللوحة → نكتب الجديدة.
+        // لو الموظف كتب بيده في صحة ما نلمسها
+        const mine = wroteVals.get(c);
+        if (mine == null || norm(c.value) !== norm(mine) || norm(mine) === norm(val)) { if (!hijriPass) report[rule.key] = report[rule.key] || "ok"; continue; }
+        if (c instanceof HTMLSelectElement) { if (!pickOption(c, val)) continue; } else setValue(c, val);
+        wroteVals.set(c, c.value); flash(c); if (!hijriPass) report[rule.key] = norm(c.value) === norm(val) ? "ok" : "check"; continue;
+      }
       if (filledEls.has(c) && !explicit) continue;
       if (c instanceof HTMLSelectElement) { if (!pickOption(c, val)) continue; }
       else setValue(c, val);
-      filledEls.add(c); flash(c);
+      filledEls.add(c); wroteVals.set(c, c.value); flash(c);
       if (!hijriPass) report[rule.key] = norm(c.value) === norm(val) ? "ok" : "check";
     }
   }
@@ -391,11 +399,13 @@
     const box = doctorBox(); if (!box) return "";
     const sel = box.querySelector("select");
     if (sel && !sel.disabled) {
-      if (sel.value && sel.selectedIndex > 0) return "ok";
+      const ours = sel.value && wroteVals.get(sel) === sel.value;                   // (1.9.4) الطبيب اللي اخترناه إحنا — لو تعدّل في اللوحة نغيّره
+      if (sel.value && sel.selectedIndex > 0 && !ours) return "ok";
       const opts = [...sel.options].filter(o => o.value), texts = opts.map(o => o.textContent);
       if (!opts.length) return "check";                                             // القائمة لسى ما تحمّلت — نعيد مع التحديث الجاي
       const best = learnedIdx(req, texts) ?? bestDoctorOption(names, texts);
-      if (best != null) { setValue(sel, opts[best].value); flash(sel); return "ok"; }
+      if (best != null) { if (sel.value !== opts[best].value) { setValue(sel, opts[best].value); flash(sel); } wroteVals.set(sel, sel.value); return "ok"; }
+      if (ours) return "ok";
       docMiss(req, texts); return "check";
     }
     // (1.9.2) قائمة بحث (مو select): نفتحها ونكتب اسم الطبيب، ولو طلع خيار أكيد نختاره لحالنا — مرة وحدة لكل طلب
@@ -1005,6 +1015,18 @@
     if (ch.sabaDoneLog) { doneLog = ch.sabaDoneLog.newValue || {}; if (TOP) { updateCount(); if (!req && !minimized) render(); } }
     if (Object.keys(ch).some(k => k.startsWith("sabaDone_"))) loadUnacked();
     if (ch.sabaReqImg && TOP) { reqImg = ch.sabaReqImg.newValue || null; if (req && (!reqImg || reqImg.id === req.id)) render(); }
+    // (1.9.4) نفس الطلب وتعدّلت بياناته في اللوحة → نحدّث ونعبّي الخانات اللي تغيّرت بس (مو طلب جديد)
+    if (ch.sabaReq && ch.sabaReq.oldValue?.id && ch.sabaReq.oldValue.id === ch.sabaReq.newValue?.id) {
+      const o = ch.sabaReq.oldValue, n = ch.sabaReq.newValue;
+      req = n;
+      if (TOP) {
+        const changed = Object.keys(FIELD_LABELS).filter(k => String(o[k] ?? "") !== String(n[k] ?? "")).map(k => FIELD_LABELS[k]);
+        if (changed.length) toastLocal("✎ تعدّل من اللوحة: " + changed.slice(0, 3).join("، "));
+        render();
+      }
+      if (auto && fillActive()) setTimeout(() => { fill(req); if (TOP) render(); }, 200);
+      return;
+    }
     if (ch.sabaReq) {
       req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
       if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }

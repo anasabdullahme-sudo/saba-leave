@@ -66,6 +66,17 @@
       next[id] = { at: now, n: n || 0 }; chrome.storage.local.set({ sabaDoneLog: next });
     });
   });
+  // (1.9.4) بيانات الطلب المفتوح في صحة تعدّلت في اللوحة → نحدّثها في الأداة (نفس الطلب، ما يعتبر طلب جديد)
+  listen(e => {
+    if (e.source !== window || e.data?.type !== "SABA_REQ_SYNC" || !e.data.payload?.id || !isBoard()) return;
+    const p = e.data.payload;
+    chrome.storage.local.get("sabaReq", ({ sabaReq: cur }) => {
+      if (!cur || cur.id !== p.id) return;
+      const { sentAt, ...old } = cur;
+      if (JSON.stringify(old) === JSON.stringify(p)) return;
+      chrome.storage.local.set({ sabaReq: { ...p, sentAt } });
+    });
+  });
   // الأداة طلبت طلب واللوحة تأخرت بالرد (الأداة استسلمت) → نفك القفل اللي ممكن انحجز
   chrome.storage.onChanged.addListener((ch, area) => { const u = area === "local" && ch.sabaUnlock?.newValue; if (u?.id && isBoard() && alive()) post({ type: "SABA_RELEASE", id: u.id }); });
   // الموظف يكتب/يضغط في صحة → اللوحة تجدد القفل (الأداة ترسلها كل 20 ثانية بالكثير)

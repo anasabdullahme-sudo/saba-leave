@@ -570,7 +570,7 @@ function start() {
     S.firstLoad = false;
     reroute(list);
     archiveExactDupes(list);
-    syncLocks(list); lostMine(ids);
+    syncLocks(list); lostMine(ids); syncSehaReqs();
     renderCounts(); renderPending(); renderHeld(); postQueue();
     if (doneMsgQueue) handleSehaDone(doneMsgQueue);
     if (S.openId) {
@@ -1741,7 +1741,7 @@ addEventListener("message", async e => {
   if (m.type === "SABA_FIX_REQ") handleExtFix(m);
   // الطلب المفتوح في صحة بهالجهاز (نبضة كل دقيقتين من الإضافة): نرجّع القفل لو اللوحة انفتحت من جديد — بس لو فيه حركة آخر 5 دقايق
   if (m.type === "SABA_ACTIVE" && m.id && liveReq(m.id)) {
-    (S.sentSeha ||= new Set()).add(m.id); sendReqImg(m.id); checkNotDone(m.id);
+    (S.sentSeha ||= new Set()).add(m.id); sendReqImg(m.id); checkNotDone(m.id); syncSehaReqs(true);
     const fresh = !m.act || Date.now() - m.act < IDLE_MS;
     if (!myLocks.has(m.id) && fresh) { myLocks.set(m.id, { act: m.act || Date.now(), renew: 0 }); lockReq(m.id, "active"); }
   }
@@ -1770,6 +1770,16 @@ function alreadyDone({ id, ref, by, doneAt, name, at }) {
   chime(); toast(`⚠ ${nm ? "«" + nm + "» " : "هذا الطلب "}تم رفعه مسبقاً${by ? " — رفعه " + by : ""}${t ? " الساعة " + t : ""}. لا ترفعه مرة ثانية في صحة.`);
 }
 const ackSeha = m => window.postMessage({ type: "SABA_SEHA_DONE_ACK", at: m.at }, location.origin);
+// (1.9.4) الموقع هو الأساس: أي تعديل على طلب مفتوح في صحة (من اللوحة أو المريض) يوصل للأداة على طول وتعبّيه من جديد
+const reqSynced = new Map();
+function syncSehaReqs(force) {
+  for (const id of new Set([...(S.sentSeha || []), ...myLocks.keys()])) {
+    const x = liveReq(id); if (!x) continue;
+    const { sentAt, ...p } = sehaPayload(x), sig = JSON.stringify(p);
+    if (!force && reqSynced.get(id) === sig) continue;
+    reqSynced.set(id, sig); window.postMessage({ type: "SABA_REQ_SYNC", payload: p }, location.origin);
+  }
+}
 // (1.9.2) «سجل المرفوع» في الإضافة: أي طلب انرفع من هالجهاز ما يرجع يطلع في الأداة — إلا لو رجع للانتظار فعلاً (reopenN زاد)
 const doneMark = (id, n) => window.postMessage({ type: "SABA_DONE_MARK", id, n: n || 0 }, location.origin);
 async function handleSehaDone(m) {
