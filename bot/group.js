@@ -952,6 +952,9 @@ async function handleClarify(m, text, who = "admin") {
   if (dayAns && it.evs?.length) { const tt = nowR(), day = /^(اليوم)$/.test(n.trim()) ? tt.iso : (dayOf(text) || tt.iso); evs = it.evs.map(e => ({ ...e, date: day })); how = "ليوم " + DAYN[new Date(day + "T12:00:00Z").getUTCDay()] + " " + day.split("-").reverse().slice(0, 2).join("/"); }
   else if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
   else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say("تمام، تجاهلتها."); return true; }
+  else if (who !== "majed" && isQuestion(text)) {                                 // (2.9.13) سؤال على التقرير («متى دوامه؟») → نجاوب بس، ما نغيّر شي
+    return adminAssist(m, text, { quoted: qt || it.text, answerOnly: true });
+  }
   else {
     evs = await aiParse(`تصحيح من ${who === "majed" ? "كاتب الرسالة" : "المسؤول"} على رسالة القروب «${it.text}»:\n${text}`, it.text); if (evs == null) evs = ruleParse(text, it.text); how = "حسب كلامك";
     if (!evs.length) { await say("ما فهمت تصحيحك 🙏 اكتبها بشكل أوضح (اسم الطبيب + وش صار + الوقت)."); return true; }
@@ -973,23 +976,26 @@ async function handleClarify(m, text, who = "admin") {
 export async function handleMajedMessage(m, text) { try { return await handleClarify(m, text, "majed"); } catch (e) { log.warn({ err: String(e?.message || e) }, "تصحيح ماجد"); return false; } }
 
 /* ---------- المسؤول يكتب كلام عادي (سؤال «ليش؟» أو تصحيح بدون ما يسحب رسالة) ---------- */
+// سؤال؟ (ينتهي بـ ؟ أو يبدأ بكلمة سؤال) — السؤال ما يتطبّق على الجدول أبداً، نجاوب عليه بس
+const isQuestion = t => { const s = String(t || "").trim(), n = norm(s); return /[؟?]\s*$/.test(s) || /^(متى|متي|كم|وش|ايش|اش|شنو|ليش|ليه|لماذا|هل|مين|من وين|وين|كيف|ايه اللي|شو)(\s|$)/.test(n); };
 const ASSIST = `أنت بوت قروب استقبال عيادات سابا (فرع البوادي). تكلّم المسؤول (أنس) على الخاص باللهجة السعودية وباختصار.
 عندك: آخر رسائلك له (تقارير وش سويت بالجدول)، ورسائل القروب الأصلية، وبيانات الأطباء المذكورين.
 - لو يسأل ليش سويت شي أو من وين جبت معلومة: جاوب بصراحة من السياق. لو أخطأت أو اخترعت (مثل وقت مو مكتوب) اعترف بجملة وحدة واقترح التصحيح.
 - لو يطلب تصحيح أو يعطيك معلومة: حط الأحداث في events بنفس أنواع القروب (للطبيب المقصود)، و reply يقول وش بتسوي.
 - لو يطلب ترجع آخر تعديل: undo = true.
 - لا تخترع أوقات أو أرقام ما قالها هو أو ما كانت في الرسالة.`;
-async function adminAssist(m, text) {
+async function adminAssist(m, text, opt = {}) {
   const recent = adminLog.filter(x => Date.now() - x.at < 2 * 3600e3);
   const items = ((await db.doc("bot/pending_clarify").get()).data()?.items || []).filter(i => Date.now() - i.at < 3 * 3600e3).slice(-3);
   if (!gemini || (!recent.length && !items.length)) { await dmAdmin("أنا معك 👋 لو تبغى تصحّح شي سويته، اسحب رسالتي (رد) واكتب الصح. ولو تبغى ترجع آخر تعديل اكتب «تراجع»."); return true; }
-  const names = [...new Set((items.map(i => i.text).join(" ") + " " + recent.map(r => r.text).join(" ") + " " + text).match(/د\.?\s*[^\s،,.:]+(\s[^\s،,.:]+)?/g) || [])].slice(0, 6);
+  if (!opt.answerOnly && isQuestion(text)) opt = { ...opt, answerOnly: true };     // سؤال بدون ما يسحب رسالة → نفس الشي: جواب بس
+  const names = [...new Set(((opt.quoted || "") + " " + items.map(i => i.text).join(" ") + " " + recent.map(r => r.text).join(" ") + " " + text).match(/د\.?\s*[^\s،,.:]+(\s[^\s،,.:]+)?/g) || [])].slice(0, 6);
   const ds = names.map(nm => matchDoctor(nm.replace(/^د\.?\s*/, ""))).filter(Boolean);
   const info = [...new Set(ds)].map(d => `${d.id} | ${shortName(d.name)} | ${d.dep} | الدوام: ${(d.shifts || []).map(x => hm(x.s) + "-" + hm(x.e)).join(" و ") || "—"} | الأيام: ${(d.workdays || []).map(i => DAYN[i]).join("،")} | كشفية ${d.fee || "—"} | غرفة ${d.room || "—"}`).join("\n");
   const t = nowR();
   const body = {
     systemInstruction: { parts: [{ text: ASSIST + `\nاليوم ${t.iso}. الأنواع: ${KINDS.join(", ")}.\n\nرسائل القروب الأخيرة:\n${items.map(i => "«" + i.text + "»").join("\n") || "—"}\n\nآخر رسائلك للمسؤول:\n${recent.map(r => r.text).join("\n---\n")}\n\nبيانات الأطباء:\n${info || "—"}` }] },
-    contents: [{ role: "user", parts: [{ text }] }],
+    contents: [{ role: "user", parts: [{ text: (opt.quoted ? `(يرد على رسالتك: «${String(opt.quoted).slice(0, 400)}»)\n` : "") + text + (opt.answerOnly ? `\n\n[هذا سؤال: جاوب من بيانات الأطباء بس — events فاضية و undo = false. اليوم ${DAYN[new Date(nowR().iso + "T12:00:00Z").getUTCDay()]}]` : "") }] }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 700, responseMimeType: "application/json",
       responseSchema: { type: "OBJECT", properties: { reply: { type: "STRING" }, undo: { type: "BOOLEAN" }, events: { type: "ARRAY", items: { type: "OBJECT", properties: {
         doctor_id: { type: "STRING" }, name: { type: "STRING" }, kind: { type: "STRING", enum: KINDS }, at_time: { type: "STRING" }, until_time: { type: "STRING" }, date: { type: "STRING" },
@@ -1005,8 +1011,8 @@ async function adminAssist(m, text) {
     } catch {}
   }
   if (!out) { await dmAdmin("ما قدرت أفهم الحين 🙏 اسحب رسالتي اللي تبغى تصحّحها واكتب الصح."); return true; }
-  if (out.undo) { await restorePrev(); }
-  const evs = (out.events || []).filter(e => KINDS.includes(e.kind) && e.kind !== "none");
+  if (out.undo && !opt.answerOnly) { await restorePrev(); }
+  const evs = opt.answerOnly ? [] : (out.events || []).filter(e => KINDS.includes(e.kind) && e.kind !== "none");   // السؤال ما يغيّر شي
   let rep = [];
   if (evs.length) { const c = { text: text + "\n" + items.map(i => i.text).join("\n"), by: "أنس (الخاص)", rep: [] }; await apply(evs, c); rep = c.rep; }
   await dmAdmin([String(out.reply || "تمام").slice(0, 600), rep.length ? "\n" + rep.join("\n") : ""].join(""));
