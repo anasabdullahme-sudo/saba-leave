@@ -898,7 +898,7 @@ async function askHours({ d, sh }, ctx) {
 }
 // «من 8 الى 4» / «8ص - 4م» / «من 2 لين 10 الليل» → [بداية، نهاية] بالدقايق (النهاية ممكن تعدّي نص الليل)
 function parseHours(text) {
-  const s = latin(String(text || "")).replace(/[٫.]/g, ":");
+  const s = latin(String(text || "")).replace(/\d+\s*(ساعه|ساعة|ساعات|دقيقه|دقيقة|دقايق|دقائق|يوم|ايام)/g, " ").replace(/[٫.]/g, ":");   // «16 ساعة» مو وقت
   const xs = [...s.matchAll(/(\d{1,2})(?::(\d{2}))?\s*(صباحا|صباحاً|الصبح|الصباح|ص|مساء|مساءً|المساء|العصر|عصر|الظهر|ظهر|بالليل|الليل|ليل|م)?/g)].filter(m => +m[1] <= 24).slice(0, 2);
   if (xs.length < 2) return null;
   const tag = (w, h) => !w ? null : /^(ص|صباحا|صباحاً|الصبح|الصباح)$/.test(w) ? "am" : /ليل/.test(w) && h <= 5 ? "am" : "pm";
@@ -910,6 +910,25 @@ function parseHours(text) {
   const b = cands.find(x => x > a);
   if (b == null || b - a > 16 * 60 || a >= 1440) return null;
   return [a, b];
+}
+
+// (2.9.14) «د اكرامي من 5 مساء السبت الى 9 صباح الأحد» → طبيب + وقت صريح (ص/م) + يوم البداية = أول يوم مذكور (اسم اليوم يغلب «بكرة»)
+function explicitShift(text, ctxText) {
+  const n = norm(text);
+  if (!/(\d|[٠-٩])\s*(ص|م|صباحا|صباح|الصبح|الصباح|مساء|مساءا|المساء|العصر|عصر|الظهر|ظهر|الليل|بالليل|ليل)(\s|$)|(صباح|مساء|عصر|ليل)/.test(n)) return null;   // لازم ص/م عشان نكون متأكدين
+  const r = parseHours(text); if (!r) return null;
+  const d = fuzzyPick(text) || (ctxText ? fuzzyPick(ctxText) : null); if (!d) return null;
+  const t = nowR(); let iso = null, at = Infinity;
+  for (const [k, wd] of DAYW) { const m = new RegExp("(^|\\s)(يوم\\s+)?(ال|و|وال)?" + k + "(?=\\s|$)").exec(n); if (m && m.index < at) { at = m.index; iso = wd === t.wd ? t.iso : nextOcc(wd, t); } }
+  if (!iso) { if (/(^|\s)(بكره|بكرا|غدا|باكر)(\s|$)/.test(n)) iso = isoPlus(t.iso, 1); else iso = t.iso; }
+  return { d, a: r[0], b: r[1], iso, today: iso === t.iso };
+}
+async function applyExplicit(x, by, say) {
+  const ev = { doctor_id: x.d.id, name: shortName(x.d.name), kind: "starts_at", at_min: x.a, until_min: x.b };
+  const cx = { text: "", by: by + " (المسؤول)", rep: [], fix: true, exact: true };
+  const done = await apply([ev], cx);
+  const bad = done.length ? await verifyApplied([ev], cx).catch(err => [String(err?.message || err)]) : ["ما انطبق"];
+  await say(bad.length ? `❌ ما انحفظ: د. ${ev.name} اليوم من ${hm(x.a)} لين ${hm(x.b)}` : `✅ انحفظ وتأكدت منه: د. ${ev.name} — دوام اليوم من ${hm(x.a)} لين ${hm(x.b % 1440)}${x.b >= 1440 ? " (صباح بكرة)" : ""}`);
 }
 
 /* ---------- تقرير للمسؤول: كل رسالة قروب انطبقت (يقدر يوقفه بـ «وقف التقارير») ---------- */
@@ -998,6 +1017,10 @@ async function handleClarify(m, text, who = "admin") {
   if (dayAns && it.evs?.length) { const tt = nowR(), day = /^(اليوم)$/.test(n.trim()) ? tt.iso : (dayOf(text) || tt.iso); evs = it.evs.map(e => ({ ...e, date: day })); how = "ليوم " + DAYN[new Date(day + "T12:00:00Z").getUTCDay()] + " " + day.split("-").reverse().slice(0, 2).join("/"); }
   else if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
   else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say("تمام، تجاهلتها."); return true; }
+  else if (who !== "majed" && (() => { const x = explicitShift(text, qt || it.text); return x?.today ? (it.__x = x) : null; })()) {
+    await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
+    await applyExplicit(it.__x, "أنس", say); delete it.__x; return true;
+  }
   else if (who !== "majed" && isQuestion(text)) {                                 // (2.9.13) سؤال على التقرير («متى دوامه؟») → نجاوب بس، ما نغيّر شي
     return adminAssist(m, text, { quoted: qt || it.text, answerOnly: true });
   }
@@ -1072,10 +1095,17 @@ export async function handleAdminMessage(m, phone, text) {
   { const n0 = norm(text);
     if (/^(وقف|اوقف|طفي|سكر) (ال)?تقارير/.test(n0)) { reportsOn = false; db.doc("bot/prefs").set({ reports: false }, { merge: true }).catch(() => {}); await dmAdmin("تمام، وقفت تقارير القروب. لو تبغاها رجّعها بـ «شغل التقارير»."); return true; }
     if (/^(شغل|رجع|فعل) (ال)?تقارير/.test(n0)) { reportsOn = true; db.doc("bot/prefs").set({ reports: true }, { merge: true }).catch(() => {}); await dmAdmin("تمام، رجعت تقارير القروب ✅"); return true; } }
+  // (2.9.14) رسالة محوّلة من القروب → نعاملها كأنها انكتبت في القروب
+  const ci = m.message?.extendedTextMessage?.contextInfo || {};
+  if (ci.isForwarded || ci.forwardingScore > 0) {
+    await handleGroupMessage({ ...m, pushName: "أنس (محوّلة)", __fwd: true, message: { conversation: text } });
+    return true;
+  }
   try { if (await handleClarify(m, text)) return true; } catch (e) { log.warn({ err: String(e?.message || e) }, "تصحيح المسؤول"); }
+  { const x = explicitShift(text); if (x?.today) { await applyExplicit(x, "أنس", dmAdmin); return true; } }
   const n = norm(text);
   const yes = /^(نعم|ايوه|ايوا|اي|ايه|اضف|اضفه|ضيف|ضيفه|ضيفها|موافق|تمام|اوكي|ok|1)(?:\s|$)/.test(n) || /^(👍|✅)/.test(text);
-  const no = /^(لا|تجاهل|الغ|الغيه|لاتضيف|لا تضيف|2)(?:\s|$)/.test(n) || /^❌/.test(text);
+  const no = (/^(لا|تجاهل|الغ|الغيه|لاتضيف|لا تضيف|2)(?:\s|$)/.test(n) && n.split(" ").length <= 3) || /^❌/.test(text);   // (2.9.14) «لا اليوم دوامه…» = تصحيح، مو رفض
   const undo = /^تراجع/.test(n);
   if (!yes && !no && !undo) return adminAssist(m, text);
   if (undo) { await restorePrev(); return true; }
@@ -1172,7 +1202,7 @@ const done = new Set();
 export async function handleGroupMessage(m) {
   const jid = m.key?.remoteJid || "";
   if (m.key?.id) { if (done.has(m.key.id)) return; done.add(m.key.id); if (done.size > 2000) done.clear(); }
-  if (!(await isOurGroup(jid))) return;
+  if (!m.__fwd && !(await isOurGroup(jid))) return;
   const msg = m.message || {};
   if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
