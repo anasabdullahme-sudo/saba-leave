@@ -1,6 +1,7 @@
 // قروب «For information saba 1»: البوت يقرأ رسايل الاستقبال عن الأطباء (وقف، فاضي، غائب، متأخر…)
 // ويحدّث صفحة أطباء البوادي + يطلع تنبيه في كروم. ما يكتب أي رد في القروب — بس ✅ على الرسالة اللي فهمها.
 import { FieldValue } from "firebase-admin/firestore";
+import { initBrain, handle as brainHandle, noteOut, bootFixes } from "./brain.js";
 
 const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
@@ -27,6 +28,19 @@ export function initGroup(opts) {
   setInterval(runScheduled, 30000);
   setInterval(resetExpired, 60000);
   listenSignals();
+  db.doc("bot/group_log").get().then(d => { gLog.unshift(...(d.data()?.items || []).filter(g => Date.now() - g.at < 48 * 3600e3)); }).catch(() => {});
+  initBrain({ db, log, getSock, gemini, models, FieldValue, docs, getBoard: () => board, getToday: () => today, groupLog: () => gLog, shortName, norm, hm, hhmm, nowR, isoPlus, uid, findDep,
+    apply, updateSchedules, endVacations, removeDoctor, restorePrev, applyOption, addDoctor, askAdmin, aiParse, dmAdmin, setReports: on => { reportsOn = on; db.doc("bot/prefs").set({ reports: on }, { merge: true }).catch(() => {}); } });
+  // تصحيحات 7/11: بعد ما يتصل واتساب ويوصل الجدول (عشان التقرير يوصل لأنس)
+  let tries = 0; const go = setInterval(() => { if (++tries > 120) return clearInterval(go); if (!board || !getSock()?.user || !admins.length) return; clearInterval(go); bootFixes().catch(e => log.warn({ err: String(e?.message || e) }, "تصحيحات 7/11")); }, 5000);
+}
+
+/* ---------- (2.10.0) آخر رسايل القروب ووش سوى البوت فيها — سياق للذكاء في الخاص ---------- */
+const gLog = []; let gLogT = null;
+function noteGroup(by, text, res) {
+  gLog.push({ at: Date.now(), by: String(by || "").slice(0, 40), text: String(text || "").slice(0, 400), res: String(res || "").slice(0, 300) });
+  while (gLog.length > 30) gLog.shift();
+  clearTimeout(gLogT); gLogT = setTimeout(() => db.doc("bot/group_log").set({ items: gLog.slice(-30), at: Date.now() }).catch(() => {}), 5000);
 }
 
 /* ---------- زر الطبيب في أثير → signals/{id} → نفس مسار رسائل القروب ---------- */
@@ -429,7 +443,10 @@ async function applyPlans() {
     for (const i of due.filter(i => i.kind === "remove_doctor")) { const nm = await removeDoctor(i.doctorId, "البوت (مجدول)"); if (nm) await dmAdmin(`✅ شلت د. ${nm} من الجدول (زي ما اتفقنا).`); }
     const sets = due.filter(i => i.kind === "set_schedule").map(i => ({ d: docs().find(x => x.id === i.doctorId), sch: i.sch })).filter(x => x.d && x.sch);
     if (sets.length) await updateSchedules(sets, { by: "القروب (مجدول)" });
-    for (const i of due.filter(i => i.kind !== "remove_doctor" && i.kind !== "set_schedule")) await apply([{ kind: i.kind, doctor_id: i.doctorId, name: "", at_time: i.at_time, until_time: i.until_time, delay_minutes: i.delay_minutes }], { text: "", by: (i.by || "القروب") + " (مجدول)", planned: true });
+    for (const i of due.filter(i => i.kind !== "remove_doctor" && i.kind !== "set_schedule")) {
+      const ex = i.at_min != null || i.until_min != null;          // (2.10.0) أوقات محسوبة جاهزة من الخاص (مع الدوام اللي يعدّي نص الليل)
+      await apply([{ kind: i.kind, doctor_id: i.doctorId, name: "", ...(ex ? { at_min: i.at_min ?? null, until_min: i.until_min ?? null } : { at_time: i.at_time, until_time: i.until_time }), delay_minutes: i.delay_minutes }], { text: "", by: (i.by || "القروب") + " (مجدول)", planned: true, exact: ex, confirmed: true });
+    }
     if (due.length) log.info({ n: due.length }, "طبّقنا أحداث اليوم المجدولة");
   } catch (e) { log.warn({ err: String(e?.message || e) }, "الأحداث المجدولة"); }
 }
@@ -488,10 +505,10 @@ async function apply(evs, ctx) {
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d && ctx.fix) { delete cur.st?.[d.id]; cur.events = (cur.events || []).filter(x => !(x.doctorId === d.id && x.kind === e.kind)); }   // تصحيح: كان مطبّق اليوم بالغلط → نشيله من اليوم
       if (evDate && evDate > t.iso && PLAN_KINDS.includes(e.kind) && d) {
         if (evDate <= isoPlus(t.iso, 14)) {
-          plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by }); applied.push("planned");
+          plans.push({ id: uid(), date: evDate, doctorId: d.id, kind: e.kind, at_time: e.at_time || "", until_time: e.until_time || "", delay_minutes: e.delay_minutes || 0, by: ctx.by, ...(ctx.exact && (e.at_min != null || e.until_min != null) ? { at_min: e.at_min ?? null, until_min: e.until_min ?? null } : {}) }); applied.push("planned");
           // تنبيه للموظفين الحين: «🗓 بكرة: دوامه من 2م إلى 7م»
           const dl = evDate === isoPlus(t.iso, 1) ? "بكرة" : DAYN[new Date(evDate + "T12:00:00Z").getUTCDay()] + " " + evDate.slice(8, 10) + "/" + evDate.slice(5, 7);
-          const pwd = new Date(evDate + "T12:00:00Z").getUTCDay(), a = fitMin(toMin(e.at_time), d, pwd), u = fitMin(toMin(e.until_time), d, pwd);
+          const pwd = new Date(evDate + "T12:00:00Z").getUTCDay(), a = ctx.exact && e.at_min != null ? e.at_min : fitMin(toMin(e.at_time), d, pwd), u = ctx.exact && e.until_min != null ? e.until_min % 1440 : fitMin(toMin(e.until_time), d, pwd);
           const what = e.kind === "starts_at" ? (a != null ? `دوامه من ${hm(a)}${u != null ? " إلى " + hm(u) : ""}` : "دوام مختلف") : e.kind === "absent_today" ? "غير متواجد" : e.kind === "late" ? "بيتأخر" : e.kind === "appointments_only" ? "مواعيد فقط" : e.kind === "stop" ? "ما يستقبل" : e.kind === "leaves_at" ? `يطلع ${a != null ? hm(a) : "بدري"}` : "";
           cur.events.push({ id: uid(), at: Date.now(), kind: "planned", doctorId: d.id, name: shortName(d.name), dep: d.dep, room: d.room || "", ext: d.ext || "", info: `${dl}: ${what}`, title: `🗓 ${dl}`, color: "blue", by: ctx.by });
           (ctx.rep ||= []).push(`🗓 د. ${shortName(d.name)} — ${dl}: ${what}\n   الموقع: ينطبق يوم ${evDate.split("-").reverse().slice(0, 2).join("/")} · الأداة: تنبيه «🗓 ${dl}»`);
@@ -555,7 +572,7 @@ async function apply(evs, ctx) {
       // مجدول من أمس (يتطبّق أول اليوم): «لين 7» = 7م — نختار الوقت الأقرب لدوامه (مو حسب الساعة الحين)
       const fit = m => fitMin(m, d, t.wd);
       const at = Date.now(); let atMin = ctx.planned ? fit(toMin(e.at_time)) : pm(toMin(e.at_time)), untilMin = ctx.planned ? fit(toMin(e.until_time)) : nextDay(pm(toMin(e.until_time)));
-      if (ctx.exact && e.at_min != null) { atMin = e.at_min; untilMin = e.until_min ?? null; }   // (2.9.13) جواب المسؤول «من كم لكم دوامه» — الأوقات محسوبة جاهزة
+      if (ctx.exact && (e.at_min != null || e.until_min != null)) { atMin = e.at_min ?? null; untilMin = e.until_min ?? null; }   // (2.9.13) جواب المسؤول «من كم لكم دوامه» — الأوقات محسوبة جاهزة
       // «موجود / يطلع / مداوم لين 7» (اليوم أو بكرة، قبل دوامه أو وهو فيه): البداية دايماً من الجدول، بس النهاية تتغيّر
       if (d && (["present", "leaves_at"].includes(e.kind) || (e.kind === "starts_at" && atMin == null))) {
         const raw = e.kind === "leaves_at" ? (toMin(e.at_time) ?? toMin(e.until_time)) : toMin(e.until_time), sh0 = shiftsOn(d, t.wd)[0];
@@ -598,7 +615,7 @@ async function apply(evs, ctx) {
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
         // (2.9.13) «موجود الحين» وهو برا دوامه بالجدول (لسى ما بدا / خلص / ما عنده دوام اليوم) → نسأل المسؤول من كم لكم دوامه اليوم
-        if (d && untilMin == null && !ctx.fix && !ctx.planned && admins.length) {
+        if (d && untilMin == null && !ctx.fix && !ctx.planned && !ctx.admin && admins.length) {
           const sh = shiftsOn(d, t.wd), last = sh.length ? Math.max(...sh.map(x => x.e > x.s ? x.e : x.e + 1440)) : 0;
           if (!sh.length || t.m < sh[0].s - 30 || t.m > last) hourAsks.push({ d, sh });
         }
@@ -835,6 +852,7 @@ const adminLog = [];                       // آخر رسائلنا للمسؤو
 export async function dmAdmin(text) {
   adminLog.push({ at: Date.now(), text: String(text).slice(0, 700) }); while (adminLog.length > 8) adminLog.shift();
   const sock = getSock(); if (!sock || !admins.length) return false;
+  try { noteOut(text); } catch {}
   let ok = false;
   for (const p of admins) {
     try {
@@ -924,11 +942,12 @@ function explicitShift(text, ctxText) {
   return { d, a: r[0], b: r[1], iso, today: iso === t.iso };
 }
 async function applyExplicit(x, by, say) {
-  const ev = { doctor_id: x.d.id, name: shortName(x.d.name), kind: "starts_at", at_min: x.a, until_min: x.b };
-  const cx = { text: "", by: by + " (المسؤول)", rep: [], fix: true, exact: true };
+  const ev = { doctor_id: x.d.id, name: shortName(x.d.name), kind: "starts_at", at_min: x.a, until_min: x.b, ...(x.today ? {} : { date: x.iso, at_time: hhmm(x.a), until_time: hhmm(x.b) }) };   // (2.10.0) يوم جاي → خطة بالأوقات نفسها
+  const cx = { text: "", by: by + (/ماجد|majed/i.test(by) ? "" : " (المسؤول)"), rep: [], fix: !!x.today, exact: true, confirmed: true, admin: true };
   const done = await apply([ev], cx);
   const bad = done.length ? await verifyApplied([ev], cx).catch(err => [String(err?.message || err)]) : ["ما انطبق"];
-  await say(bad.length ? `❌ ما انحفظ: د. ${ev.name} اليوم من ${hm(x.a)} لين ${hm(x.b)}` : `✅ انحفظ وتأكدت منه: د. ${ev.name} — دوام اليوم من ${hm(x.a)} لين ${hm(x.b % 1440)}${x.b >= 1440 ? " (صباح بكرة)" : ""}`);
+  const dayTxt = x.today ? "اليوم" : `${DAYN[new Date(x.iso + "T12:00:00Z").getUTCDay()]} ${x.iso.slice(8, 10)}/${x.iso.slice(5, 7)}`;
+  await say(bad.length ? `❌ ما انحفظ: د. ${ev.name} ${dayTxt} من ${hm(x.a)} لين ${hm(x.b % 1440)}` : `✅ انحفظ وتأكدت منه: د. ${ev.name} — دوام ${dayTxt} من ${hm(x.a)} لين ${hm(x.b % 1440)}${x.b >= 1440 ? " (صباح اليوم اللي بعده)" : ""}`);
 }
 
 /* ---------- تقرير للمسؤول: كل رسالة قروب انطبقت (يقدر يوقفه بـ «وقف التقارير») ---------- */
@@ -1017,9 +1036,9 @@ async function handleClarify(m, text, who = "admin") {
   if (dayAns && it.evs?.length) { const tt = nowR(), day = /^(اليوم)$/.test(n.trim()) ? tt.iso : (dayOf(text) || tt.iso); evs = it.evs.map(e => ({ ...e, date: day })); how = "ليوم " + DAYN[new Date(day + "T12:00:00Z").getUTCDay()] + " " + day.split("-").reverse().slice(0, 2).join("/"); }
   else if (/^(صح|صحيح|ايوه|ايوا|نعم|اي|ايه|تمام|اوكي|ok|طبق|طبقها)(\s|$)/.test(n) && it.evs?.length) { evs = it.evs; how = "زي ما فهمتها"; }
   else if (/^(لا|تجاهل|خلها|اتركها|ولا شي|ولاشي)(\s|$)/.test(n)) { await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) }); await say("تمام، تجاهلتها."); return true; }
-  else if (who !== "majed" && (() => { const x = explicitShift(text, qt || it.text); return x?.today ? (it.__x = x) : null; })()) {
+  else if ((() => { const x = explicitShift(text, qt || it.text); return x ? (it.__x = x) : null; })()) {   // (2.10.0) ماجد بعد، ويوم جاي بعد (أكرامي 7/11 انحفظ على الأحد بالغلط)
     await db.doc("bot/pending_clarify").set({ items: items.filter(i => i.code !== it.code) });
-    await applyExplicit(it.__x, "أنس", say); delete it.__x; return true;
+    await applyExplicit(it.__x, who === "majed" ? (it.by || "ماجد") + " (تصحيح ماجد)" : "أنس", say); delete it.__x; return true;
   }
   else if (who !== "majed" && isQuestion(text)) {                                 // (2.9.13) سؤال على التقرير («متى دوامه؟») → نجاوب بس، ما نغيّر شي
     return adminAssist(m, text, { quoted: qt || it.text, answerOnly: true });
@@ -1092,6 +1111,10 @@ async function adminAssist(m, text, opt = {}) {
 export async function handleAdminMessage(m, phone, text) {
   const p = String(phone || "").replace(/^0/, "");
   if (!admins.includes(p)) return false;
+  // (2.10.0) أي رسالة من أنس (رد، محوّلة، كلام عادي) → الذكاء مع كل السياق. لو الذكاء ما رد نكمل بالطريقة القديمة تحت
+  { const ci0 = m.message?.extendedTextMessage?.contextInfo || {};
+    try { if (await brainHandle(m, text, { forwarded: !!(ci0.isForwarded || ci0.forwardingScore > 0) })) return true; }
+    catch (e) { log.warn({ err: String(e?.message || e) }, "الذكاء في الخاص"); } }
   { const n0 = norm(text);
     if (/^(وقف|اوقف|طفي|سكر) (ال)?تقارير/.test(n0)) { reportsOn = false; db.doc("bot/prefs").set({ reports: false }, { merge: true }).catch(() => {}); await dmAdmin("تمام، وقفت تقارير القروب. لو تبغاها رجّعها بـ «شغل التقارير»."); return true; }
     if (/^(شغل|رجع|فعل) (ال)?تقارير/.test(n0)) { reportsOn = true; db.doc("bot/prefs").set({ reports: true }, { merge: true }).catch(() => {}); await dmAdmin("تمام، رجعت تقارير القروب ✅"); return true; } }
@@ -1119,6 +1142,12 @@ export async function handleAdminMessage(m, phone, text) {
   if (!it) { await dmAdmin(`عندي ${items.length} أطباء ينتظرون: ${items.map(i => "د. " + i.name + " #" + i.code).join("، ")}\nرد على رسالة الطبيب نفسها بـ «نعم» أو «لا».`); return true; }
   await ref.set({ items: items.filter(i => i.code !== it.code) });
   if (no) { await dmAdmin(`تمام، تجاهلت د. ${it.name}.`); return true; }
+  const added = await addDoctor(it, "البوت (موافقة المسؤول)");
+  await dmAdmin(added === "exists" ? `د. ${it.name} موجود أصلاً في الجدول.` : added ? `✅ انضاف د. ${it.name} في ${added}.\nتقدر تعدّل بياناته من صفحة الأطباء.` : "ما قدرت أضيفه — جرّب من صفحة الأطباء.");
+  return true;
+}
+// طبيب جديد في الجدول (موافقة المسؤول) → اسم القسم، أو "exists"، أو "" لو ما انضاف
+async function addDoctor(it, by) {
   let added = "";
   await db.runTransaction(async tx => {
     const bref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(bref)).data(); if (!cur) return;
@@ -1127,23 +1156,23 @@ export async function handleAdminMessage(m, phone, text) {
     let dep = next.departments.find(x => x.id === it.depId);
     if (!dep) { dep = { id: uid().slice(0, 7), name: it.dept || "أخرى", floor: "G", notes: "", doctors: [] }; next.departments.push(dep); }
     (dep.doctors ||= []).push({ id: uid().slice(0, 7), name: it.name, code: "", ext: it.ext || "", room: it.room || "", fee: it.fee || "",
-      workdays: it.days.length ? it.days : [0, 1, 2, 3, 4, 6], shifts: it.shifts || [] });
-    next.log = [{ at: Date.now(), by: "البوت (موافقة المسؤول)", what: `طبيب جديد: د. ${it.name}` }, ...(cur.log || [])].slice(0, 60);
+      workdays: (it.days || []).length ? it.days : [0, 1, 2, 3, 4, 6], shifts: it.shifts || [] });
+    next.log = [{ at: Date.now(), by, what: `طبيب جديد: د. ${it.name}` }, ...(cur.log || [])].slice(0, 60);
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
-    tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "طبيب جديد من القروب" }); tx.set(bref, next);
+    tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "طبيب جديد" }); tx.set(bref, next);
     added = dep.name;
   });
-  await dmAdmin(added === "exists" ? `د. ${it.name} موجود أصلاً في الجدول.` : added ? `✅ انضاف د. ${it.name} في ${added}.\nتقدر تعدّل بياناته من صفحة الأطباء.` : "ما قدرت أضيفه — جرّب من صفحة الأطباء.");
-  return true;
+  return added;
 }
-async function restorePrev() {
+async function restorePrev(quiet = false) {
   const prev = (await db.doc("board/bawadi_prev").get()).data();
-  if (!prev?.departments?.length) { await dmAdmin("ما فيه نسخة سابقة أرجع لها."); return; }
+  if (!prev?.departments?.length) { if (!quiet) await dmAdmin("ما فيه نسخة سابقة أرجع لها."); return false; }
   const { savedAt, replacedBy, ...data } = prev;
   const cur = (await db.doc("board/bawadi").get()).data();
   await db.doc("board/bawadi").set({ ...data, log: [{ at: Date.now(), by: "البوت (المسؤول)", what: "تراجع عن آخر تعديل: " + (replacedBy || "") }, ...(cur?.log || [])].slice(0, 60), updatedAt: Date.now(), updatedBy: "البوت" });
   if (cur) await db.doc("board/bawadi_prev").set({ ...cur, savedAt: Date.now(), replacedBy: "تراجع" });
-  await dmAdmin(`↩️ رجّعت الجدول للنسخة اللي قبل: ${replacedBy || "آخر تعديل"}.`);
+  if (!quiet) await dmAdmin(`↩️ رجّعت الجدول للنسخة اللي قبل: ${replacedBy || "آخر تعديل"}.`);
+  return true;
 }
 
 // المجدول («9:45 وقف له») يتنفذ في وقته
@@ -1222,23 +1251,25 @@ export async function handleGroupMessage(m) {
     } }
   const fromMajed = majed && (await groupSender(m).catch(() => "")) === majed;
   // القروب ما يطلع فيه إلا ✅ (بعد ما نتأكد). ما فهمنا؟ نسأل على الخاص بدون أي إيموجي في القروب
-  if ((evs.unclear || (!evs.length && evs.unknown)) && (fromMajed || admins.length)) { await askClarify(m, text, by, evs, fromMajed ? "majed" : ""); return; }
-  if (!evs.length) return;
+  if ((evs.unclear || (!evs.length && evs.unknown)) && (fromMajed || admins.length)) { noteGroup(by, text, "ما فهمتها — سألت " + (fromMajed ? "ماجد" : "أنس") + (evs.question ? ": " + evs.question : "")); await askClarify(m, text, by, evs, fromMajed ? "majed" : ""); return; }
+  if (!evs.length) { noteGroup(by, text, "ما فيها شي عن الأطباء — تجاهلتها"); return; }
   const ctx = { text, by, rep: [], m };
   let applied;
   try { applied = await apply(evs, ctx); }
   catch (err) {
     log.error({ err: String(err?.message || err), text: text.slice(0, 80) }, "رسالة القروب ما انطبقت");
+    noteGroup(by, text, "❌ خطأ وما انطبقت: " + String(err?.message || err).slice(0, 100));
     await dmAdmin(`❌ رسالة ${by} ما انطبقت على الجدول (صار خطأ):\n«${text.slice(0, 200)}»\n${String(err?.message || err).slice(0, 160)}\n\nطبّقها من صفحة الأطباء أو أرسلها مرة ثانية.`).catch(() => {});
     return;
   }
   log.info({ text: text.slice(0, 80), applied }, "قروب الاستقبال");
-  if (!applied.length) { if (admins.length) await askClarify(m, text, by, Object.assign(evs, { question: "ما قدرت أطبّق منها شي — وش المقصود؟" })); return; }
-  if (applied.every(a => a === "known") && admins.length) { await askClarify(m, text, by, Object.assign(evs, { question: "فهمت الطبيب بس ما لقيت وش يتغيّر — وش المقصود؟" })); return; }
-  if (applied.every(a => a === "asked")) return;                                  // رسالة الخيارات كافية — ✅ بعد ما تختار   // ننتظر اختيارك، ✅ بعدها
+  if (!applied.length) { noteGroup(by, text, "ما قدرت أطبّق منها شي — سألت أنس"); if (admins.length) await askClarify(m, text, by, Object.assign(evs, { question: "ما قدرت أطبّق منها شي — وش المقصود؟" })); return; }
+  if (applied.every(a => a === "known") && admins.length) { noteGroup(by, text, "فهمت الطبيب بس ما لقيت وش يتغيّر — سألت أنس"); await askClarify(m, text, by, Object.assign(evs, { question: "فهمت الطبيب بس ما لقيت وش يتغيّر — وش المقصود؟" })); return; }
+  if (applied.every(a => a === "asked")) { noteGroup(by, text, "تغيير دائم — أرسلت لأنس خيارات: " + ctx.rep.join(" | ")); return; }                                  // رسالة الخيارات كافية — ✅ بعد ما تختار   // ننتظر اختيارك، ✅ بعدها
   // نتأكد من القاعدة إن اللي طبّقناه انحفظ فعلاً، وبعدها بس ✅
   const bad = await verifyApplied(evs, ctx).catch(err => [String(err?.message || err)]);
-  if (bad.length) { await dmAdmin(`❌ رسالة ${by} ما انحفظت كاملة:\n«${text.slice(0, 200)}»\nاللي ما لقيته في الموقع: ${bad.join("، ")}\n\nأرسلها مرة ثانية أو عدّلها من صفحة الأطباء.`).catch(() => {}); return; }
+  if (bad.length) { noteGroup(by, text, "❌ ما انحفظت كاملة: " + bad.join("، ")); await dmAdmin(`❌ رسالة ${by} ما انحفظت كاملة:\n«${text.slice(0, 200)}»\nاللي ما لقيته في الموقع: ${bad.join("، ")}\n\nأرسلها مرة ثانية أو عدّلها من صفحة الأطباء.`).catch(() => {}); return; }
+  noteGroup(by, text, "✅ انطبقت: " + (ctx.rep.join(" | ").replace(/\n\s*/g, " ") || describeEvs(evs)));
   if (ctx.rep.length) reportToAdmin(by, text, ctx.rep).catch(() => {});
   try { await getSock()?.sendMessage(jid, { react: { text: "✅", key: m.key } }); } catch {}
 }
