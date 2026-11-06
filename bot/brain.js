@@ -70,7 +70,9 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 
 كيف تشتغل:
 - افهم قصده من كلامه ومن السياق كله: المحادثة، الرسالة اللي يرد عليها، رسايل القروب الأخيرة، الطلبات المنتظرة، والجدول.
-- في reply قل وش فهمت بالضبط (الطبيب، اليوم والتاريخ، الوقت) ووش بتسوي — بجملة أو جملتين.
+- في reply قل وش فهمت بالضبط (الطبيب، اليوم والتاريخ، الوقت) ووش بتسوي — بصيغة المستقبل («بعدّل…»، «بحط…»)، مو الماضي، لأن التنفيذ يصير بعد ردك.
+- قبل أي فعل شيك على حالات اليوم والخطط والجدول: لو الشي المطلوب موجود أصلاً قل له إنه موجود وبدون أفعال.
+- «فقط/بس السبت» أو «هذا السبت» أو يوم معيّن بدون «كل/دائم/ثابت» = يوم واحد (status)، مو دوام ثابت.
 - الشي واضح؟ حط الأفعال في actions وطبّق على طول. مو متأكد من شي يغيّر النتيجة (مين الطبيب، أي يوم، الوقت، ليوم واحد ولا دائم)؟ اسأله سؤال واحد واضح و actions فاضية.
 - تغيير كبير (دوام ثابت، إضافة/حذف طبيب، تراجع) وأنت فاهمه من كلامه الصريح → طبّق. لو فاهمه من استنتاجك أو من رسالة قروب محوّلة بس → confirm_first = true و actions = اللي بتسويه، واسأله «أطبّق؟».
 - لو عندك «اقتراح ينتظر موافقته» ووافق («ايوه/طبق/تمام») → use_proposal = true. لو عدّل عليه → اكتب الأفعال الجديدة كاملة.
@@ -79,21 +81,23 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - رسالة محوّلة من القروب = كلام الاستقبال؛ افهمها زي رسالة قروب وطبّق اللي فيها (التغييرات اليومية على طول، الدائمة بتأكيد).
 - لا تكتب أبداً «انحفظ» أو «تم» أو «حفظت» أو ✅ — النظام يقرا الموقع بعد التنفيذ ويضيف النتيجة بنفسه.
 - لا تخترع أوقات أو أيام أو أرقام ما انقالت. الأوقات بصيغة 24 ساعة HH:MM. في العيادة 1–7 بدون ص/م غالباً مساءً، و8–11 حسب دوام الطبيب.
-- الدوام اللي يعدّي نص الليل (مثل 5 العصر لين 9 الصبح): date = يوم البداية، from = 17:00، until = 09:00، و until_next_day = true. لا تحطه على اليوم اللي بعده.
+- الدوام اللي يعدّي نص الليل (مثل 5 العصر لين 9 الصبح): date = يوم البداية، start_time = 17:00، end_time = 09:00، و until_next_day = true. لا تحطه على اليوم اللي بعده.
 - بعد 12 بالليل ولين 5 الفجر، «بكرة» و«الليلة» ممكن تعني يومين — لو ما وضّح اسأل باسم اليوم.
 - لا تضيف طبيب ما انذكر في القروب أو ما طلبه أنس صراحة.
 
 الأفعال (type):
-- status: حالة ليوم واحد (اليوم أو يوم جاي خلال أسبوعين). kind واحد من: starts_at (دوام ذاك اليوم from–until)، present (موجود، until اختياري)، leaves_at (يطلع الساعة until)، late (يوصل الساعة at أو delay_minutes)، stop (وقف استقبال، at لو بوقت جاي)، free، appointments_only (at = من متى مواعيد فقط)، busy، absent_today (غير متواجد ذاك اليوم)، clear (يشيل حالة اليوم ويرجع لجدوله). date = YYYY-MM-DD.
+كل الأوقات في start_time / end_time / at_time بصيغة "HH:MM" أرقام إنجليزية 24 ساعة (مثل "12:00" و "20:00") — لا تحطها في reply بس، لازم في الحقول.
+- status: حالة ليوم واحد (اليوم أو يوم جاي خلال أسبوعين). kind واحد من: starts_at (دوام ذاك اليوم: start_time و end_time — الاثنين لازم)، present (موجود، end_time اختياري)، leaves_at (يطلع الساعة end_time)، late (يوصل الساعة at_time أو delay_minutes)، stop (وقف استقبال، at_time لو بوقت جاي)، free، appointments_only (at_time = من متى مواعيد فقط)، busy، absent_today (غير متواجد ذاك اليوم)، clear (يشيل حالة اليوم ويرجع لجدوله). date = YYYY-MM-DD.
 - cancel_plan: يلغي كل الخطط المحفوظة لطبيب في date.
-- schedule: دوام ثابت. mode = all_days (كل أيامه صارت from–until) / only_days (الأيام days بس بدوام مختلف، الباقي زي ما هو) / set_days (أيام دوامه صارت days بهالوقت). start_date لو يبدأ يوم جاي.
+- schedule: دوام ثابت (start_time و end_time). mode = all_days (كل أيامه صارت هالوقت) / only_days (الأيام days بس بدوام مختلف، الباقي زي ما هو) / set_days (أيام دوامه صارت days بهالوقت). start_date لو يبدأ يوم جاي.
 - info: room / ext / fee.
 - vacation: start_date و end_date (آخر يوم إجازة).
 - end_vacation: return_date = يوم المباشرة.
-- add_doctor: name, dept, days, from, until, room, ext, fee.
+- add_doctor: name, dept (لازم قسم من أقسام الجدول — لو ما تعرفه اسأل قبل ما تضيف)، days, start_time, end_time, room, ext, fee.
+- move_doctor: doctor_id + dept — ينقل الطبيب لقسم ثاني.
 - remove_doctor: doctor_id (و start_date لو من يوم جاي).
 - alias: doctor_id + alias (اسم ثاني يكتبونه في القروب).
-- pending_doctor: code + decision (approve/reject)، وتقدر تعدّل dept/days/from/until/room/fee قبل الإضافة.
+- pending_doctor: code + decision (approve/reject)، وتقدر تعدّل dept/days/start_time/end_time/room/fee قبل الإضافة.
 - option: code + n (رقم خيار من رسالة الخيارات).
 - resolve: code — يقفل سؤال/رسالة قروب منتظرة (ويحط ✅ على رسالتها في القروب بعد ما ينحفظ). حطه مع أفعال التصحيح، أو لحاله لو قال «تجاهلها».
 - undo: يرجّع الجدول الثابت للنسخة اللي قبل آخر تعديل.
@@ -103,9 +107,9 @@ doctor_id لازم من الجدول تحت.`;
 const SCHEMA = { type: "OBJECT", properties: {
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "remove_doctor", "alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
-    from: { type: "STRING" }, until: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
+    start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
     mode: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, start_date: { type: "STRING" }, end_date: { type: "STRING" }, return_date: { type: "STRING" },
     name: { type: "STRING" }, dept: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" }, alias: { type: "STRING" },
     code: { type: "STRING" }, decision: { type: "STRING" }, n: { type: "INTEGER" }, on: { type: "BOOLEAN" } }, required: ["type"] } } },
@@ -158,9 +162,11 @@ export async function handle(m, text, { forwarded = false } = {}) {
   try { if (jid) sock?.sendPresenceUpdate("paused", jid); } catch {}
   if (!out) return false;                                        // الذكاء ما رد → group.js يكمل بالطريقة القديمة
   noteIn(user);
-  let actions = Array.isArray(out.actions) ? out.actions : [];
+  let actions = (Array.isArray(out.actions) ? out.actions : []).map(normA);
+  blog(user, out);
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
-  const reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
+  let reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
+  if (actions.length) for (const [a, b] of TENSE) reply = reply.replace(a, b);   // التنفيذ بعد الرد — ما نقول «عدّلت» قبل ما ينحفظ
   if (out.confirm_first && actions.length && !out.use_proposal) {
     const bad = actions.map(a => check(a)).filter(Boolean);
     if (bad.length) { await A.dmAdmin(`${reply}\n\n⚠️ ${bad.join("\n⚠️ ")}`); return true; }
@@ -175,13 +181,38 @@ export async function handle(m, text, { forwarded = false } = {}) {
   return true;
 }
 
+const TENSE = [[/(^|\s)(عدّلت|عدلت)(?=\s|$)/g, "$1بعدّل"], [/(^|\s)(أضفت|اضفت|ضفت)(?=\s|$)/g, "$1بضيف"], [/(^|\s)(حطيت)(?=\s|$)/g, "$1بحط"], [/(^|\s)(شلت)(?=\s|$)/g, "$1بشيل"],
+  [/(^|\s)(سجّلت|سجلت)(?=\s|$)/g, "$1بسجّل"], [/(^|\s)(غيّرت|غيرت)(?=\s|$)/g, "$1بغيّر"], [/(^|\s)(طبّقت|طبقت)(?=\s|$)/g, "$1بطبّق"], [/(^|\s)(خليت|خلّيت)(?=\s|$)/g, "$1بخلّي"],
+  [/(^|\s)(ألغيت|الغيت)(?=\s|$)/g, "$1بلغي"], [/(^|\s)(رجّعت|رجعت)(?=\s|$)/g, "$1برجّع"], [/(^|\s)(نقلت)(?=\s|$)/g, "$1بنقل"], [/(^|\s)(وأضفت|واضفت)(?=\s|$)/g, "$1وبضيف"], [/(^|\s)(وعدّلت|وعدلت)(?=\s|$)/g, "$1وبعدّل"]];
+// آخر 10 ردود للذكاء (للمراجعة لو صار شي غلط) — بدون بيانات مراجعين
+const bl = [];
+function blog(user, out) {
+  bl.push({ at: Date.now(), user: String(user).slice(0, 400), reply: String(out.reply || "").slice(0, 400), actions: JSON.stringify(out.actions || []).slice(0, 1500), cf: !!out.confirm_first, up: !!out.use_proposal });
+  while (bl.length > 10) bl.shift();
+  A.db.doc("board/bawadi_brainlog").set({ items: bl, at: Date.now() }).catch(() => {});
+}
+
 /* ---------- التحقق قبل التنفيذ ---------- */
-const toMin = s => { const x = /^(\d{1,2}):(\d{2})/.exec(String(s || "").trim()); return x && +x[1] <= 24 ? (+x[1] % 24) * 60 + +x[2] : null; };
+const lat = s => String(s ?? "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+// «12:00» / «١٢:٠٠» / «8» / «8:30 م» / «8pm» → دقايق (ص/م لو انكتبت تغلب)
+const toMin = s => {
+  const t = lat(s).trim().toLowerCase(), x = /^(\d{1,2})(?::(\d{2}))?\s*(ص|م|am|pm|صباحا|مساء|مساءً)?/.exec(t); if (!x || +x[1] > 24) return null;
+  let h = +x[1] % 24; const ap = x[3] || ""; if (/^(م|pm|مساء)/.test(ap) && h < 12) h += 12; if (/^(ص|am|صباح)/.test(ap) && h === 12) h = 0;
+  return h * 60 + +(x[2] || 0);
+};
+// أسماء الحقول من الذكاء → الأسماء الداخلية (يقبل الاسم القديم احتياط)
+function normA(a) {
+  const o = { ...a };
+  o.from = a.start_time ?? a.from ?? (a.kind === "starts_at" ? a.at_time : undefined);
+  o.until = a.end_time ?? a.until;
+  o.at = a.at_time ?? a.at;
+  return o;
+}
 const ISO = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 const docOf = id => A.docs().find(x => x.id === id);
 function check(a) {
   const d = a.doctor_id ? docOf(a.doctor_id) : null, t = A.nowR();
-  if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
+  if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "move_doctor"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
   if (a.type === "status") {
     const date = ISO(a.date) ? a.date : t.iso;
     if (date < t.iso && !(date === A.isoPlus(t.iso, -1) && a.until_next_day)) return `التاريخ ${a.date} فات`;
@@ -193,6 +224,8 @@ function check(a) {
   if (a.type === "vacation" && (!ISO(a.start_date) || !ISO(a.end_date))) return "ناقص تاريخ بداية/نهاية الإجازة";
   if (a.type === "end_vacation" && !ISO(a.return_date)) return "ناقص يوم المباشرة";
   if (a.type === "add_doctor" && !String(a.name || "").trim()) return "ناقص اسم الطبيب";
+  if (a.type === "add_doctor" && !A.findDep(a.dept)) return `ناقص القسم${a.dept ? " («" + a.dept + "» مو من أقسام الجدول)" : ""} — وش قسمه؟`;
+  if (a.type === "move_doctor" && !A.findDep(a.dept)) return `القسم «${a.dept || "—"}» مو موجود في الجدول`;
   return "";
 }
 function describe(a) {
@@ -208,6 +241,7 @@ function describe(a) {
     case "vacation": return `• ${n} — إجازة ${dmy(a.start_date)} → ${dmy(a.end_date)}`;
     case "end_vacation": return `• ${n} — يباشر ${dayName(a.return_date)} ${dmy(a.return_date)}`;
     case "add_doctor": return `• إضافة د. ${a.name} — ${a.dept || "—"}${f != null && u != null ? " · " + H(f) + " – " + H(u) : ""}${a.days?.length ? " · " + a.days.map(i => WD[i]).join("،") : ""}`;
+    case "move_doctor": return `• نقل ${n} لقسم ${a.dept}`;
     case "remove_doctor": return `• شيل ${n} من الجدول${ISO(a.start_date) ? " يوم " + dmy(a.start_date) : ""}`;
     case "alias": return `• ${n} — اسم ثاني «${a.alias}»`;
     case "pending_doctor": return `• الطبيب المنتظر #${a.code}: ${a.decision === "approve" ? "إضافة" : "رفض"}`;
@@ -352,6 +386,21 @@ async function run(a, t, pclar, pdocs) {
     await sleep(1000); const b = (await A.db.doc("board/bawadi").get()).data() || {};
     const has = (b.departments || []).flatMap(p => p.doctors || []).some(x => A.norm(A.shortName(x.name)) === A.norm(it.name));
     return { ok: has, note: has && r ? "في " + r : "" };
+  }
+  if (a.type === "move_doctor") {
+    const dep = A.findDep(a.dept);
+    await A.db.runTransaction(async tx => {
+      const ref = A.db.doc("board/bawadi"), prev = A.db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data(); if (!cur) return;
+      const next = structuredClone(cur); let doc = null;
+      for (const p of next.departments) { const i = (p.doctors || []).findIndex(x => x.id === id); if (i >= 0) doc = p.doctors.splice(i, 1)[0]; }
+      const to = next.departments.find(p => p.id === dep.id); if (!doc || !to) return;
+      (to.doctors ||= []).push(doc);
+      next.departments = next.departments.filter(p => (p.doctors || []).length || p.notes);   // قسم فاضي (مثل «أخرى» الزايد) ينشال
+      next.log = [{ at: Date.now(), by: BY, what: `نقل د. ${A.shortName(doc.name)} لقسم ${to.name}` }, ...(cur.log || [])].slice(0, 60); next.updatedAt = Date.now(); next.updatedBy = "البوت";
+      tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "نقل طبيب" }); tx.set(ref, next);
+    });
+    await sleep(1000); const b = (await A.db.doc("board/bawadi").get()).data() || {};
+    return { ok: (b.departments || []).some(p => p.id === dep.id && (p.doctors || []).some(x => x.id === id)) };
   }
   if (a.type === "remove_doctor") {
     if (ISO(a.start_date) && a.start_date > t.iso) {
