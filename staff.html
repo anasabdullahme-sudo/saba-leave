@@ -467,7 +467,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261105a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261107a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1659,7 +1659,7 @@ function sehaPayload(x) {
   return {
     // حساب صحة يتبع فرع الطبيب الفعلي (حتى لو الطلب لسى ما انتقل) — إلا إذا الموظف حدد الفرع يدوياً
     v: 1, id: x.id, ref: x.ref, type: x.type, branch: br, account: SEHA_ACCOUNTS[br] || null, reopenN: x.reopenN || 0,
-    fileNo: pick("fileNo"), doctorAr: doc?.ar || "", doctorEn: doc?.en || "",
+    fileNo: pick("fileNo"), doctorAr: doc?.ar || "", doctorEn: doc?.en || "", doctorSeha: doc?.seha || "",   // (1.9.7) اسمه بالضبط في قائمة صحة
     patientName: pick("patientName"), patientNameEn: pick("patientNameEn"), idNumber: pick("idNumber"), dob: pick("dob"), phone: pick("phone"),
     leaveStart: pick("leaveStart"), leaveEnd: pick("leaveEnd"), leaveDays: pick("leaveDays"), visitDate: pick("visitDate"),
     companionName: pick("companionName"), companionId: pick("companionId"), companionDob: pick("companionDob"), relationship: pick("relationship"),

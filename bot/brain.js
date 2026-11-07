@@ -281,10 +281,10 @@ async function execute(actions, pclar, pdocs) {
     const why = check(a);
     if (why) { out.push(`⚠️ ما طبّقت: ${describe(a).replace(/^• /, "")} — ${why}`); continue; }
     if (a.type === "resolve") { resolves.push(a); continue; }
-    let r;
+    let r; const desc = describe(a);                                             // قبل التنفيذ (بعد الحذف ما نلقى اسم الطبيب)
     try { r = await run(a, t, pclar, pdocs); } catch (e) { r = { ok: false, why: String(e?.message || e).slice(0, 140) }; }
     if (r?.skip) continue;
-    out.push(r?.ok ? `✅ انحفظ وتأكدت منه في الموقع: ${describe(a).replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${describe(a).replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
+    out.push(r?.ok ? `✅ انحفظ وتأكدت منه في الموقع: ${desc.replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${desc.replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
   }
   // نقفل الأسئلة المنتظرة ونحط ✅ في القروب — بس لو كل اللي قبلها انحفظ
   const allOk = !out.some(l => /^(❌|⚠️)/.test(l));
@@ -514,6 +514,32 @@ export async function bootFixes() {
     if (sa && (sa.aliases || []).some(y => /^امين/.test(A.norm(y)))) for (const y of sa.aliases.filter(y => /^امين/.test(A.norm(y)))) acts.push({ type: "remove_alias", doctor_id: sa.id, alias: y });
     if (acts.length) { const out = await execute(acts, [], []); lines.push(`د. أمينة الحلواني / د. سحر محمد:\n${out.join("\n")}`); if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0711am2"); }
     else mark.push("fx0711am2");
+  }
+  // 5) (2.10.3 — «ابدأ» 7/11) د. مدحت عبدالحكيم ترك سابا → ينشال، نورة اليامي → قسم الأسنان (الاسم يظل)، واسم صحة + فرع الترخيص لكل طبيب
+  if (!doneIds.has("fx0711seha")) {
+    const acts = [], out = [];
+    const md = A.docs().find(x => x.id === "3l52c9c") || byName("مدحت عبدالحكيم");
+    if (md) acts.push({ type: "remove_doctor", doctor_id: md.id });
+    const nr = A.docs().find(x => x.id === "psaved4") || byName("نورة اليامي");
+    if (nr && !/اسنان/.test(A.norm(nr.dep))) acts.push({ type: "move_doctor", doctor_id: nr.id, dept: "الأسنان" });
+    if (acts.length) out.push(...await execute(acts, [], []));
+    let n = 0;
+    try {
+      const list = JSON.parse((await import("node:fs")).readFileSync(new URL("./seha-names.json", import.meta.url), "utf8"));
+      await A.db.runTransaction(async tx => {
+        const bref = A.db.doc("board/bawadi"), cur = (await tx.get(bref)).data(); if (!cur) return;
+        for (const p of cur.departments) for (const x of p.doctors || []) { const e = list.find(l => l.id === x.id); if (e) { x.sehaName = e.seha; x.sehaBranch = e.branch; } }
+        cur.log = [{ at: Date.now(), by: BY, what: "اسم صحة وفرع الترخيص لكل طبيب" }, ...(cur.log || [])].slice(0, 60); cur.updatedAt = Date.now(); cur.updatedBy = "البوت";
+        tx.set(bref, cur);
+      });
+      await sleep(1000);
+      const b = (await A.db.doc("board/bawadi").get()).data() || {}, all = (b.departments || []).flatMap(p => p.doctors || []);
+      n = all.filter(x => list.some(l => l.id === x.id && x.sehaName === l.seha)).length;
+      const miss = all.filter(x => !x.sehaName).map(x => A.shortName(x.name));
+      out.push(`${n ? "✅" : "❌"} اسم صحة انحفظ لـ ${n} طبيب${miss.length ? ` — بدون اسم صحة: ${miss.join("، ")}` : ""}`);
+    } catch (e) { out.push("❌ أسماء صحة ما انحفظت: " + String(e?.message || e).slice(0, 100)); }
+    lines.push(`الجدول (مدحت، نورة، أسماء صحة):\n${out.join("\n")}`);
+    if (n && !out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0711seha");
   }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);

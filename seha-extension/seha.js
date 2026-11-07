@@ -340,9 +340,8 @@
       const f = firsts.has(ot[0]) ? (SK_COMMON.has(ot[0]) ? 1 : 3) : 0;
       const rare = hits.filter(t => !SK_COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
       const common = hits.filter(t => SK_COMMON.has(t) && t !== ot[0]).length;
-      const pair = ot.length >= 2 && lists.some(l => l[0] === ot[0] && l[1] === ot[1]);   // (1.9.6) «Ahmed Ibrahim» = أول اسمين بالترتيب (حتى لو شائعين)
-      if (f < 3 && !rare && !pair) return;
-      const sc = f + rare * 2 + common * 0.5 + (pair ? 1.5 : 0);
+      if (f < 3 && !rare) return;
+      const sc = f + rare * 2 + common * 0.5;
       if (sc > bestScore) { second = bestScore; best = idx; bestScore = sc; } else if (sc > second) second = sc;
     });
     return best != null && bestScore >= 3 && bestScore - second >= 1.5 ? best : null;   // أشد من المطابقة العادية (فرق أكبر عن ثاني أقرب اسم)
@@ -374,12 +373,46 @@
       const f = firsts.has(ot[0]) ? (DOC_COMMON.has(ot[0]) ? 1 : 3) : 0;            // الاسم الأول نفسه
       const rare = hits.filter(t => !DOC_COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
       const common = hits.filter(t => DOC_COMMON.has(t) && t !== ot[0]).length;
-      const pair = ot.length >= 2 && lists.some(l => l.length >= 2 && l[0] === ot[0] && l[1] === ot[1]);   // (1.9.6) «أحمد إبراهيم» = أول اسمين بالترتيب (حتى لو شائعين)
-      if (f < 3 && !rare && !pair) return;                                          // ما فيه اسم أول مميز ولا اسم عائلة مميز = مو هو
-      const sc = f + rare * 2 + common * 0.5 + (pair ? 1.5 : 0);
+      if (f < 3 && !rare) return;                                                   // ما فيه اسم أول مميز ولا اسم عائلة مميز = مو هو
+      const sc = f + rare * 2 + common * 0.5;
       if (sc > bestScore) { second = bestScore; best = idx; bestScore = sc; } else if (sc > second) second = sc;
     });
     return best != null && bestScore >= 2.5 && bestScore - second >= 1 ? best : null;
+  }
+  // (1.9.7) اسم كل طبيب في صحة (من قوائم الممارسين لكل فرع — 7/11): [اسم صحة، [أسماءه عندنا: الجدول/الأسماء الثانية/الإنجليزي]]
+  // نعرف الطبيب من أسماءه عندنا، وبعدين نختار خيار صحة اللي فيه اسمه الكامل — كذا «أحمد إبراهيم أبو الفضل» ما يروح لـ«احمد ابراهيم الجزيري»
+  // أبو الفضل ما عنده ترخيص → إجازاته باسم د. عادل احمد الوداني
+  const SEHA_DOCS = [["مجدي نصيف سكلا", ["مجدي نصيف", "مجدي نصيف سكلا", "Magdy Nassif", "Magdy Nasif"]], ["ساره فؤاد الشوربجي الجارحي", ["سارة الجارحي", "ساره فؤاد الشوربجي الجارحي", "سارة الشوربجي", "Sara Elgarhi", "Sara Elshorbagy", "Sara Fouad"]], ["اشرف محمد السنجيدي", ["أشرف السنجيدي", "اشرف محمد السنجيدي", "Ashraf Elsengedy", "Ashraf Sengedy"]], ["اكرامي عبدالسلام الشرقاوي", ["أكرامي الشرقاوي", "اكرامي عبدالسلام الشرقاوي", "إكرامي الشرقاوي", "Ekramy Elsharkawy", "Ikramy Elsharkawy"]], ["حسين عبد الحميد حسن", ["حسين عبدالحميد", "حسين عبد الحميد حسن", "حسن عبدالحميد حسن", "Hussein Abdelhamid"]], ["اسامة يوسف ربيع", ["أسامة يوسف", "اسامة يوسف ربيع", "Osama Youssef", "Osama Yousef"]], ["نشوى عبد الكافي السقا", ["نشوى السقا", "نشوى عبد الكافي السقا", "Nashwa Elsakka", "Nashwa Sakka"]], ["امجد حامد محمد", ["أمجد كامل", "امجد حامد محمد", "Amgad Kamel", "Amjad Kamel", "Amgad Hamed"]], ["رشا الوزيرى على", ["رشا الوزيري", "رشا الوزيرى على", "رشا الوزيري محمد", "Rasha Elwaziry"]], ["عبدالحليم قطب قطب", ["عبدالحليم قطب", "عبدالحليم قطب قطب", "Abdelhalim Kotb"]], ["نرمين ابراهيم البشبيشي", ["نيرمين البشبيشي", "نرمين ابراهيم البشبيشي", "Nermeen Elbeshbishy", "Nermin Beshbishy"]], ["هيام محمد حلمي", ["هيام حلمي", "هيام محمد حلمي", "Hayam Helmy", "Hayam Hilmy"]], ["ولاء عبد الستار منصور", ["ولاء منصور", "ولاء عبد الستار منصور", "Walaa Mansour"]], ["احمد اسماعيل كشاف", ["أحمد كشاف", "احمد اسماعيل كشاف", "Ahmed Kashaf"]], ["شريف فتحي الأتربي", ["شريف الأتربي", "شريف فتحي الأتربي", "Sherif Elatreby"]], ["محمد محمد والي", ["محمد والي", "محمد محمد والي", "Mohamed Wali", "Mohamed Waly"]], ["كريم احمد شديد", ["كريم شديد", "كريم احمد شديد", "Karim Shedid", "Kareem Shadid"]], ["احمد عبد الحميد محمد", ["أحمد معتوق", "احمد عبد الحميد محمد", "Ahmed Maatouk", "Ahmed Matouk"]], ["منال نعيم دويدار", ["منال دويدار", "منال نعيم دويدار", "Manal Dowidar"]], ["الهام جمال الدين ابراهيم شاهين", ["إلهام شاهين", "الهام جمال الدين ابراهيم شاهين", "Elham Shaheen"]], ["رامى زين العابدين الكيلانى", ["رامي الكيلاني", "رامى زين العابدين الكيلانى", "Rami Elkilany", "Ramy Kilany"]], ["عليا ابراهيم احمد الوريث", ["علياء الوريث", "عليا ابراهيم احمد الوريث", "علياء الورع", "Alyaa Alwareeth"]], ["ندى محمد التركي", ["ندى الخميسي", "ندى محمد التركي", "Nada Elkhamisy", "Nada Elturki"]], ["عادل احمد الوداني", ["أحمد إبراهيم أبو الفضل", "أحمد أبو الفضل", "أحمد خالد إبراهيم", "Ahmed Abu Elfadl", "Ahmed Abo Elfadl", "Ahmed Khaled Ibrahim"]], ["وجدان ناصر باجبع", ["وجدان باجبع", "وجدان ناصر باجبع", "Wejdan Bajubaa"]], ["رائد شعبان على", ["رائد شعبان", "رائد شعبان على", "Raed Shaaban", "Raed Shaban"]], ["وائل محمد الهجين", ["وائل الهجين", "وائل محمد الهجين", "Wael Elhegeen"]], ["مجد معيوف العدواني", ["مجد العدواني", "مجد معيوف العدواني", "Majd Aladwani"]], ["خالد سعد علام", ["خالد علام", "خالد سعد علام", "Khaled Allam"]], ["محمد خالد يونس", ["محمد خالد يونس", "محمد خالد يونس", "Mohamed Khaled Younis"]], ["عمرو عبدالله ابوالخير", ["عمرو أبو الخير", "عمرو عبدالله ابوالخير", "Amr Abolkheir", "Amr Abu Elkheir"]], ["ايهاب محمد محمود المتولي", ["إيهاب المتولي", "ايهاب محمد محمود المتولي", "Ehab Elmetwally"]], ["عبدالصمد انور العشيري", ["عبدالصمد العشيري", "عبدالصمد انور العشيري", "Abdelsamad Elashiry"]], ["سحر محمد محمود علي", ["سحر محمد", "سحر محمد محمود علي", "Sahar Mohamed"]], ["حسام الدين محمد محمد", ["حسام الدين محمد", "حسام الدين محمد محمد", "حسام الدين حميد", "Hossam Eldin Mohamed", "Hussam Aldin Hameed"]], ["اسرار احمد احمد", ["أسرار أحمد", "اسرار احمد احمد", "Asrar Ahmed"]], ["هبه عادل باخريبه", ["هبة باخريبة", "هبه عادل باخريبه", "Heba Bakhuraiba"]], ["رشا محمود الفيشاوي", ["رشا الفيشاوي", "رشا محمود الفيشاوي", "Rasha Elfishawy"]], ["ايمان جمال منصور", ["إيمان منصور", "ايمان جمال منصور", "Eman Mansour", "Iman Mansour"]], ["اشرف عبدالقيوم امير", ["اشرف الامير", "اشرف عبدالقيوم امير", "Ashraf Elamir", "Ashraf Amir"]], ["امين محمدعلي محمود", ["أمين محمد علي محمود", "امين محمدعلي محمود", "أمين كيماوي", "Amin Kemawi", "Amin Mohamed Ali Mahmoud"]], ["محمد عبدالله السقاف", ["محمد السقاف", "محمد عبدالله السقاف", "Mohamed Alsaqqaf", "Mohammed Assaggaf"]], ["نوره عبدالعزيز المغربي", ["نورة اليامي", "نوره عبدالعزيز المغربي", "Noura Alyami", "Noura Elmaghrabi"]], ["امينه صدقي الحلواني", ["أمينة الحلواني", "امينه صدقي الحلواني", "Amina Elhalawany"]]];
+  function nameScore(names, txt) {                                                  // نفس قواعد المطابقة (عربي مباشر + هيكل للإنجليزي) → درجة
+    let best = 0;
+    for (const [tok, skl, COMMON] of [[docTokens, x => x, DOC_COMMON], [skTokens, skel, SK_COMMON]]) {
+      const ot = tok(txt).map(skl).filter(x => x.length >= 2); if (!ot.length) continue;
+      const otAll = new Set(ot); for (let i = 0; i < ot.length - 1; i++) otAll.add(ot[i] + ot[i + 1]);
+      for (const n of names) {
+        const l = tok(n).map(skl).filter(x => x.length >= 2); if (!l.length) continue;
+        const want = new Set(l); for (let i = 0; i < l.length - 1; i++) want.add(l[i] + l[i + 1]);
+        const hits = [...want].filter(t => otAll.has(t));
+        const f = l[0] === ot[0] ? (COMMON.has(ot[0]) ? 1 : 3) : 0;
+        const rare = hits.filter(t => !COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
+        const common = hits.filter(t => COMMON.has(t) && t !== ot[0]).length;
+        if (f < 3 && !rare) continue;
+        best = Math.max(best, f + rare * 2 + common * 0.5);
+      }
+    }
+    return best;
+  }
+  // الطبيب عندنا → اسمه في صحة (أو null لو مو أكيد)
+  function sehaTarget(req, names) {
+    if (req.doctorSeha) return req.doctorSeha;
+    const sc = SEHA_DOCS.map(([seha, keys]) => [seha, Math.max(...keys.map(k => nameScore(names, k)))]).sort((a, b) => b[1] - a[1]);
+    return sc[0] && sc[0][1] >= 3 && sc[0][1] - (sc[1]?.[1] || 0) >= 1.5 ? sc[0][0] : null;
+  }
+  // خيار صحة اللي فيه كل أجزاء الاسم (ى = ي، أبو الخير = ابوالخير) — لو واحد بس
+  function optForSeha(seha, texts) {
+    const want = docTokens(seha);
+    const full = texts.map((t, i) => [i, docTokens(t)]).filter(([, ot]) => want.every(w => ot.includes(w)));
+    if (full.length === 1) return full[0][0];
+    return bestDoctorOption0([seha], texts);
   }
   // (1.9.2) «تعلّم»: لو الأداة ما عرفت الطبيب واختاره الموظف بيده، نحفظ اختياره ونستخدمه المرة الجاية —
   // في chrome.storage.sync: يوصل لكل أجهزة الاستقبال (نفس حساب جوجل) بدون قاعدة البيانات
@@ -393,7 +426,7 @@
     try { chrome.storage.sync.set({ sabaDocMap: docLearn }); } catch {}
   }
   const learnedIdx = (req, opts) => { const v = docLearn[docKey(req)]; if (!v) return null; const i = opts.findIndex(t => norm(t).trim() === v); return i >= 0 ? i : null; };
-  const docMiss = (req, opts) => { try { chrome.storage.local.set({ sabaDocMiss: { at: Date.now(), names: [req.doctorAr, req.doctorEn, req.stampDoctor, req.doctorName].filter(Boolean), opts: opts.slice(0, 40) } }); } catch {} };
+  const docMiss = (req, opts, seha) => { try { chrome.storage.local.set({ sabaDocMiss: { at: Date.now(), names: [req.doctorAr, req.doctorEn, req.stampDoctor, req.doctorName].filter(Boolean), seha: seha || "", opts: opts.slice(0, 60) } }); } catch {} };
   function doctorBox() {
     const lab = labelCandidates().find(x => /^(اسم\s+)?(الطبيب|الممارس)(\s+الصحي)?(\s+المعالج)?(\s|$)/.test(x.t) && !/ترخيص|رقم/.test(x.t));
     if (!lab) return null;
@@ -406,8 +439,11 @@
   addEventListener("click", e => { if (!e.isTrusted || !req) return; const o = e.target.closest?.(".ng-option, .select2-results__option, [role=option], .mat-option, mat-option"); if (o && doneDocEls.get(doctorBox() || {}) === req.id) learnDoctor(req, o.textContent); }, true);
   const visibleOpts = () => deepAll(".ng-option, .select2-results__option, [role=option], .mat-option, mat-option").filter(o => visible(o) && !o.closest("#saba-seha-host") && !/aria-disabled="true"/.test(o.outerHTML.slice(0, 200)));
   function pickDoctor(req, explicit) {
+    // الختم يختلف عن المطبوع → طبيب الختم أول (اللوحة تحطه في doctorName)
     const names = [req.doctorAr, req.doctorEn, req.stampDoctor, req.doctorName].filter(Boolean);
     if (!names.length) return "";
+    const seha = sehaTarget(req, names);
+    const choose = texts => seha ? optForSeha(seha, texts) ?? learnedIdx(req, texts) : learnedIdx(req, texts) ?? bestDoctorOption(names, texts);   // نعرف اسمه في صحة → ما نخمّن بأسماء ثانية
     const box = doctorBox(); if (!box) return "";
     const sel = box.querySelector("select");
     if (sel && !sel.disabled) {
@@ -415,10 +451,10 @@
       if (sel.value && sel.selectedIndex > 0 && !ours) return "ok";
       const opts = [...sel.options].filter(o => o.value), texts = opts.map(o => o.textContent);
       if (!opts.length) return "check";                                             // القائمة لسى ما تحمّلت — نعيد مع التحديث الجاي
-      const best = learnedIdx(req, texts) ?? bestDoctorOption(names, texts);
+      const best = choose(texts);
       if (best != null) { if (sel.value !== opts[best].value) { setValue(sel, opts[best].value); flash(sel); } wroteVals.set(sel, sel.value); return "ok"; }
       if (ours) return "ok";
-      docMiss(req, texts); return "check";
+      docMiss(req, texts, seha); return "check";
     }
     // (1.9.2) قائمة بحث (مو select): نفتحها ونكتب اسم الطبيب، ولو طلع خيار أكيد نختاره لحالنا — مرة وحدة لكل طلب
     if (doneDocEls.get(box) === req.id) return "check";
@@ -428,15 +464,15 @@
     setTimeout(() => {
       const inp = box.querySelector("input[type=text], input:not([type])") || document.querySelector(".select2-search__field, .ng-dropdown-panel input");
       const learned = docLearn[docKey(req)];
-      const first = learned ? learned.split(" ").slice(0, 3).join(" ") : docTokens(req.doctorAr || names[0]).slice(0, 2).join(" ");
+      const first = seha ? norm(seha).split(" ").slice(0, 2).join(" ") : learned ? learned.split(" ").slice(0, 3).join(" ") : docTokens(req.doctorAr || names[0]).slice(0, 2).join(" ");
       if (inp && first) setValue(inp, first);
       let n = 0;
       const tick = () => {                                                          // نستنى الخيارات تطلع (لين 4 ثواني)
         const os = visibleOpts(), texts = os.map(o => o.textContent);
         if (os.length) {
-          const best = learnedIdx(req, texts) ?? bestDoctorOption(names, texts);
+          const best = choose(texts);
           if (best != null) { os[best].dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); os[best].click(); lastReport = { ...lastReport, doctorAr: "ok" }; updateDots?.(); return; }
-          if (n > 4) { docMiss(req, texts); return; }
+          if (n > 4) { docMiss(req, texts, seha); return; }
         }
         if (++n < 16) setTimeout(tick, 250);
       };
@@ -840,7 +876,7 @@
       const fr = await askFrames("sabaDiagCmd", "sabaDiag_");
       const frames = [...document.querySelectorAll("iframe, frame")].map(f => { const r = f.getBoundingClientRect(); return `iframe src=${String(f.src).slice(0, 140)} id=${f.id} @${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`; });
       const { sabaDocMiss: dm } = await chrome.storage.local.get("sabaDocMiss");     // آخر مرة ما عرفت الطبيب: الاسم اللي عندنا + خيارات صحة
-      const docTxt = dm ? `\n--doctor-miss ${new Date(dm.at).toLocaleTimeString("en-GB")}--\nwant: ${dm.names.join(" | ")}\nopts: ${dm.opts.map(o => String(o).trim().slice(0, 60)).join(" | ")}\nlearned: ${docLearn[docKey(req)] || "-"}` : "";
+      const docTxt = dm ? `\n--doctor-miss ${new Date(dm.at).toLocaleTimeString("en-GB")}--\nwant: ${dm.names.join(" | ")}\nseha: ${dm.seha || "-"}\nopts: ${dm.opts.map(o => String(o).trim().slice(0, 60)).join(" | ")}\nlearned: ${docLearn[docKey(req)] || "-"}` : "";
       const txt = "SABA-DIAG v" + chrome.runtime.getManifest().version + "\n--frames--\n" + (frames.join("\n") || "none") + "\n" + diagText() + docTxt + fr.map(x => "\n==== FRAME ====\n" + x.txt).join("");
       try { await navigator.clipboard.writeText(txt); } catch { const t = document.createElement("textarea"); t.value = txt; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
       toastLocal(`انسخ التقرير (${fr.length} إطار) — الصقه لـ Claude`);

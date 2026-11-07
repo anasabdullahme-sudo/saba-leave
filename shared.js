@@ -68,31 +68,33 @@ export const holdName = id => (HOLD_REASONS.find(r => r.id === id) || {}).ar || 
 /* ---------- الأطباء المرخّصين في فروع أخرى (عربي + إنجليزي + صيغ بديلة) ---------- */
 export const DOCTORS = [
   // عيادات تالا الجبل
-  { id: "rasha-waziri",     branch: "tala", ar: "رشا الوزيري",     en: "Rasha Al-Waziri",     alt: ["Rasha Elwaziry", "Rasha Waziry"] },
-  { id: "nashwa-saqqa",     branch: "tala", ar: "نشوى السقا",      en: "Nashwa Al-Saqqa",     alt: ["نشوى عبدالكافي السقا", "Nashwa Sakka", "Nachwa Sakka", "Nashwa Elsakka"] },
-  { id: "ahmed-kashaf",     branch: "tala", ar: "أحمد كشاف",       en: "Ahmed Kashaf",        alt: ["Ahmad Kashaf", "Ahmed Kashef"] },
-  { id: "walaa-mansour",    branch: "tala", ar: "ولاء منصور",      en: "Walaa Mansour",       alt: ["Wala Mansour", "Walaa Mansor"] },
-  { id: "manal-dowidar",    branch: "tala", ar: "منال دويدار",     en: "Manal Dowidar",       alt: ["Manal Dewidar", "Manal Doweidar"] },
-  { id: "khaled-allam",     branch: "tala", ar: "خالد علام",       en: "Khaled Allam",        alt: ["Khalid Allam", "Khaled Alam"] },
-  { id: "rami-kilany",      branch: "tala", ar: "رامي الكيلاني",   en: "Rami El-Kilany",      alt: ["Ramy Elkilany", "Rami Al-Kilani", "Ramy Kilany"] },
-  { id: "hussein-hamid",    branch: "tala", ar: "حسين عبدالحميد",  en: "Hussein Abdelhamid",  alt: ["Hussein Abdel Hamid", "Hussain Abdulhameed", "Hosein Abdelhamid"] },
-  { id: "wejdan-bajubaa",   branch: "tala", ar: "وجدان باجبع",     en: "Wejdan Bajubaa",      alt: ["Wijdan Bajabaa", "Wejdan Bajaba"] },
+  { id: "rasha-waziri",     branch: "tala", ar: "رشا الوزيري",     en: "Rasha Al-Waziri", seha: "رشا الوزيرى على",     alt: ["Rasha Elwaziry", "Rasha Waziry"] },
+  { id: "nashwa-saqqa",     branch: "tala", ar: "نشوى السقا",      en: "Nashwa Al-Saqqa", seha: "نشوى عبد الكافي السقا",     alt: ["نشوى عبدالكافي السقا", "Nashwa Sakka", "Nachwa Sakka", "Nashwa Elsakka"] },
+  { id: "ahmed-kashaf",     branch: "tala", ar: "أحمد كشاف",       en: "Ahmed Kashaf", seha: "احمد اسماعيل كشاف",        alt: ["Ahmad Kashaf", "Ahmed Kashef"] },
+  { id: "walaa-mansour",    branch: "tala", ar: "ولاء منصور",      en: "Walaa Mansour", seha: "ولاء عبد الستار منصور",       alt: ["Wala Mansour", "Walaa Mansor"] },
+  { id: "manal-dowidar",    branch: "tala", ar: "منال دويدار",     en: "Manal Dowidar", seha: "منال نعيم دويدار",       alt: ["Manal Dewidar", "Manal Doweidar"] },
+  { id: "khaled-allam",     branch: "tala", ar: "خالد علام",       en: "Khaled Allam", seha: "خالد سعد علام",        alt: ["Khalid Allam", "Khaled Alam"] },
+  { id: "rami-kilany",      branch: "tala", ar: "رامي الكيلاني",   en: "Rami El-Kilany", seha: "رامى زين العابدين الكيلانى",      alt: ["Ramy Elkilany", "Rami Al-Kilani", "Ramy Kilany"] },
+  { id: "hussein-hamid",    branch: "tala", ar: "حسين عبدالحميد",  en: "Hussein Abdelhamid", seha: "حسين عبد الحميد حسن",  alt: ["Hussein Abdel Hamid", "Hussain Abdulhameed", "Hosein Abdelhamid"] },
+  { id: "wejdan-bajubaa",   branch: "tala", ar: "وجدان باجبع",     en: "Wejdan Bajubaa", seha: "وجدان ناصر باجبع",      alt: ["Wijdan Bajabaa", "Wejdan Bajaba"] },
+  { id: "karim-shedid",     branch: "tala", ar: "كريم شديد",       en: "Karim Shedid", seha: "كريم احمد شديد",      alt: ["كريم احمد شديد", "Kareem Shadid", "Karim Ahmed Shedid"] },
+  { id: "mohamed-younis",   branch: "tala", ar: "محمد خالد يونس",  en: "Mohamed Khaled Younis", seha: "محمد خالد يونس", alt: ["Mohammed Khaled Younes", "Mohamed Khaled Yunis"] },
   // عيادات وطنك
   { id: "wafaa-mohamed",    branch: "watanak", ar: "وفاء محمد",    en: "Wafaa Mohamed",       alt: ["Wafa Mohammed", "Wafaa Muhammad"] },
-  { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen",       alt: ["Ilham Shahin", "Elham Shahin"] },
+  { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen", seha: "الهام جمال الدين ابراهيم شاهين",       alt: ["Ilham Shahin", "Elham Shahin"] },
+  { id: "amina-halawany",   branch: "watanak", ar: "أمينة الحلواني", en: "Amina Elhalawany", seha: "امينه صدقي الحلواني", alt: ["امينه الحلواني", "امينه صدقي الحلواني", "Amina Sedky Elhalawany", "Amina Halawani"] },
   // سابا البوادي (أي طبيب غير مذكور يروح للبوادي تلقائياً — هنا بس عشان يتعرّف على الاسم العربي)
-  { id: "amin-mahmoud",     branch: "bawadi", ar: "أمين محمد علي محمود", en: "Amin Mohammed Ali Mahmoud", alt: ["أمين كيماوي", "امين كيماوي", "Amin Kemawi", "Amin Kimawi", "Amin Kemawy", "Amin Mohamed Ali Mahmoud"] },
-  { id: "ahmed-abulfadl",   branch: "bawadi", ar: "أحمد أبو الفضل", en: "Ahmed Abu Elfadl", alt: ["أحمد إبراهيم أبو الفضل", "احمد ابو الفضل", "أحمد خالد إبراهيم", "احمد خالد ابراهيم", "Ahmed Abo Elfadl", "Ahmed Abouelfadl", "Ahmed Abo El Fadl", "Ahmed Khaled Ibrahim"] },
-  { id: "ikramy-sharkawy",  branch: "bawadi", ar: "إكرامي الشرقاوي", en: "Ekramy Elsharkawy",   alt: ["اكرامي الشرقاوي", "إكرامي عبدالسلام الشرقاوي", "Ikramy Elsharkawy", "Ekramy El-Sharkawy", "Ekramy Abdelsalam Elsharkawy", "Abdelsalam Al sharqawy"] },
-  { id: "hussam-hameed",    branch: "bawadi", ar: "حسام الدين حميد", en: "Hussam Alden Hameed", alt: ["حسام الدين محمد", "حسام حميد", "Hussam Aldin Hameed", "Hussam Aldin Mohammed", "Hussam Eldin Hamid", "Hossam Eldin Hamid", "Hossam Aldin Mohamed"] },
-  { id: "mohamed-wali",     branch: "bawadi", ar: "محمد والي",     en: "Mohamed Wali",        alt: ["محمد والى", "Mohammed Wali", "Mohamed Waly", "Mohamed Wally", "Mohammad Wali"] },
+  { id: "amin-mahmoud",     branch: "bawadi", ar: "أمين محمد علي محمود", en: "Amin Mohammed Ali Mahmoud", seha: "امين محمدعلي محمود", alt: ["أمين كيماوي", "امين كيماوي", "Amin Kemawi", "Amin Kimawi", "Amin Kemawy", "Amin Mohamed Ali Mahmoud"] },
+  { id: "ahmed-abulfadl",   branch: "bawadi", ar: "أحمد أبو الفضل", en: "Ahmed Abu Elfadl", seha: "عادل احمد الوداني", alt: ["أحمد إبراهيم أبو الفضل", "احمد ابو الفضل", "أحمد خالد إبراهيم", "احمد خالد ابراهيم", "Ahmed Abo Elfadl", "Ahmed Abouelfadl", "Ahmed Abo El Fadl", "Ahmed Khaled Ibrahim"] },
+  { id: "ikramy-sharkawy",  branch: "bawadi", ar: "إكرامي الشرقاوي", en: "Ekramy Elsharkawy", seha: "اكرامي عبدالسلام الشرقاوي",   alt: ["اكرامي الشرقاوي", "إكرامي عبدالسلام الشرقاوي", "Ikramy Elsharkawy", "Ekramy El-Sharkawy", "Ekramy Abdelsalam Elsharkawy", "Abdelsalam Al sharqawy"] },
+  { id: "hussam-hameed",    branch: "bawadi", ar: "حسام الدين محمد", en: "Hussam Alden Hameed", seha: "حسام الدين محمد محمد", alt: ["حسام الدين حميد", "حسام حميد", "Hussam Aldin Hameed", "Hussam Aldin Mohammed", "Hussam Eldin Hamid", "Hossam Eldin Hamid", "Hossam Aldin Mohamed"] },
+  { id: "mohamed-wali",     branch: "bawadi", ar: "محمد والي",     en: "Mohamed Wali", seha: "محمد محمد والي",        alt: ["محمد والى", "Mohammed Wali", "Mohamed Waly", "Mohamed Wally", "Mohammad Wali"] },
   // سابا الحرمين
-  { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara",       alt: ["Alia Alwaraa", "Aliaa Elwara", "علياء الوريث", "Aliya Alwareeth", "Alyaa Alwareeth"] },
-  { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },
+  { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara", seha: "عليا ابراهيم احمد الوريث",       alt: ["Alia Alwaraa", "Aliaa Elwara", "علياء الوريث", "Aliya Alwareeth", "Alyaa Alwareeth"] },
+  { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally", seha: "ايهاب محمد محمود المتولي",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },
   { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
-  { id: "fatma-ibrahim",     branch: "haramain", ar: "فاطمة إبراهيم",   en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمه ابراهيم", "Fatma Ibrahim Mohamed Ibrahim", "Fatima Ibrahim", "Fatmah Ibraheem", "Fatma Ebrahim", "Fatima Mohamed Ibrahim"] },
-  { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
-  { id: "sara-shoreiji",     branch: "haramain", ar: "سارة الجارحي",    en: "Sara Fouad Elgarhi",  alt: ["سارة الشوربجي", "ساره الشوربجي", "سارة فؤاد الشوربجي", "ساره فؤاد الشوربجى الجارحى", "Sarah El-Shourbagy", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara El Shorbagy", "Sara Fouad Elshorbagy", "سارة فؤاد الجارحي", "ساره فؤاد الجارحي", "سارة فؤاد", "Sara Elgarhi", "Sarah Elgarhi", "Sara El-Garhy", "Sara Elgarhy", "Sarah Fouad Elgarhy"] },
+  { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed", seha: "سحر محمد محمود علي",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
+  { id: "sara-shoreiji",     branch: "haramain", ar: "سارة الجارحي",    en: "Sara Fouad Elgarhi", seha: "ساره فؤاد الشوربجي الجارحي",  alt: ["سارة الشوربجي", "ساره الشوربجي", "سارة فؤاد الشوربجي", "ساره فؤاد الشوربجى الجارحى", "Sarah El-Shourbagy", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara El Shorbagy", "Sara Fouad Elshorbagy", "سارة فؤاد الجارحي", "ساره فؤاد الجارحي", "سارة فؤاد", "Sara Elgarhi", "Sarah Elgarhi", "Sara El-Garhy", "Sara Elgarhy", "Sarah Fouad Elgarhy"] },
 ];
 export const doctorById = id => DOCTORS.find(d => d.id === id);
 
