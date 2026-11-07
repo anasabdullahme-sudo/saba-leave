@@ -97,6 +97,8 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - move_doctor: doctor_id + dept — ينقل الطبيب لقسم ثاني.
 - remove_doctor: doctor_id (و start_date لو من يوم جاي).
 - alias: doctor_id + alias (اسم ثاني يكتبونه في القروب).
+- remove_alias: doctor_id + alias — يشيل اسم ثاني انحفظ غلط (مثل اسم طبيب ثاني انربط فيه).
+- لا توعد بشي ما تسويه الأفعال («ما راح أربط…»): لو فيه ربط غلط شيله بـ remove_alias.
 - pending_doctor: code + decision (approve/reject)، وتقدر تعدّل dept/days/start_time/end_time/room/fee قبل الإضافة.
 - option: code + n (رقم خيار من رسالة الخيارات).
 - resolve: code — يقفل سؤال/رسالة قروب منتظرة (ويحط ✅ على رسالتها في القروب بعد ما ينحفظ). حطه مع أفعال التصحيح، أو لحاله لو قال «تجاهلها».
@@ -107,7 +109,7 @@ doctor_id لازم من الجدول تحت.`;
 const SCHEMA = { type: "OBJECT", properties: {
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
     mode: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, start_date: { type: "STRING" }, end_date: { type: "STRING" }, return_date: { type: "STRING" },
@@ -126,6 +128,7 @@ async function callAI(system, contents) {
       const j = await res.json(), txt = (j?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("");
       const out = JSON.parse(txt || "{}");
       if (typeof out.reply !== "string") continue;
+      out.__model = model;
       return out;
     } catch (e) { A.log.warn({ model, err: String(e?.message || e) }, "Gemini الخاص"); }
   }
@@ -158,11 +161,18 @@ export async function handle(m, text, { forwarded = false } = {}) {
   if (contents.length && contents[contents.length - 1].role === "user") contents[contents.length - 1].parts[0].text += "\n" + user; else contents.push({ role: "user", parts: [{ text: user }] });
   const sock = A.getSock(), jid = m.key?.remoteJid;
   try { if (jid) await sock?.sendPresenceUpdate("composing", jid); } catch {}
-  const out = await callAI(system, contents);
+  let out = await callAI(system, contents);
   try { if (jid) sock?.sendPresenceUpdate("paused", jid); } catch {}
   if (!out) return false;                                        // الذكاء ما رد → group.js يكمل بالطريقة القديمة
   noteIn(user);
-  let actions = (Array.isArray(out.actions) ? out.actions : []).map(normA);
+  let actions = (Array.isArray(out.actions) ? out.actions : []).map(normA).map(a => fillDept(a, out.reply, text));
+  // فعل ناقص (حقول ما تعبّت) → نرجع للذكاء مرة وحدة يكمّله بدل ما نقول «ما طبّقت»
+  const miss = actions.map(a => [a, check(a)]).filter(([, w]) => w);
+  if (miss.length && !out.use_proposal) {
+    const fix = await callAI(system, [...contents, { role: "model", parts: [{ text: JSON.stringify({ reply: out.reply, actions: out.actions }) }] },
+      { role: "user", parts: [{ text: "[النظام] الأفعال هذي ناقصة وما تنفع:\n" + miss.map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nرجّع نفس الرد مع actions كاملة: كل فعل فيه حقوله المطلوبة بالضبط (status: doctor_id, kind, date, start_time/end_time أو at_time حسب النوع — move_doctor: doctor_id و dept باسم قسم من الجدول — add_doctor: name و dept …). لو فعلاً ناقصك معلومة من أنس، اسأله و actions فاضية." }] }]).catch(() => null);
+    if (fix) { const fa = (Array.isArray(fix.actions) ? fix.actions : []).map(normA).map(a => fillDept(a, fix.reply, text)); if (!fa.length || !fa.some(a => check(a))) { blog(user, out); out = fix; actions = fa; } }
+  }
   blog(user, out);
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
   let reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
@@ -187,7 +197,7 @@ const TENSE = [[/(^|\s)(عدّلت|عدلت)(?=\s|$)/g, "$1بعدّل"], [/(^|\s
 // آخر 10 ردود للذكاء (للمراجعة لو صار شي غلط) — بدون بيانات مراجعين
 const bl = [];
 function blog(user, out) {
-  bl.push({ at: Date.now(), user: String(user).slice(0, 400), reply: String(out.reply || "").slice(0, 400), actions: JSON.stringify(out.actions || []).slice(0, 1500), cf: !!out.confirm_first, up: !!out.use_proposal });
+  bl.push({ at: Date.now(), model: out.__model || "", user: String(user).slice(0, 400), reply: String(out.reply || "").slice(0, 400), actions: JSON.stringify(out.actions || []).slice(0, 1500), cf: !!out.confirm_first, up: !!out.use_proposal });
   while (bl.length > 10) bl.shift();
   A.db.doc("board/bawadi_brainlog").set({ items: bl, at: Date.now() }).catch(() => {});
 }
@@ -202,17 +212,25 @@ const toMin = s => {
 };
 // أسماء الحقول من الذكاء → الأسماء الداخلية (يقبل الاسم القديم احتياط)
 function normA(a) {
-  const o = { ...a };
+  const o = {}; for (const [k, v] of Object.entries(a || {})) if (v !== "" && v != null && !(Array.isArray(v) && !v.length)) o[k] = v;   // الحقول الفاضية اللي يعبّيها الذكاء بلا معنى
+  if (!o.date && o.start_date && ["status", "cancel_plan"].includes(o.type)) o.date = o.start_date;
   o.from = a.start_time ?? a.from ?? (a.kind === "starts_at" ? a.at_time : undefined);
   o.until = a.end_time ?? a.until;
   o.at = a.at_time ?? a.at;
   return o;
 }
+// القسم ناقص في نقل/إضافة → من رد الذكاء («لقسم الأطفال») أو من كلام أنس
+function fillDept(a, reply, user) {
+  if (!["move_doctor", "add_doctor"].includes(a.type) || A.findDep(a.dept)) return a;
+  const m = /قسم\s+([^\s.،,]+(?:\s+(?:و|والأذن|البولية|الطبيعي|العام|والولادة|والحنجرة)[^\s.،,]*)*)/.exec(reply || "");
+  const dep = (m && A.findDep(m[1])) || A.findDep(String(user || "").split("\n").pop());
+  return dep && !/أخرى/.test(dep.name) ? { ...a, dept: dep.name } : a;
+}
 const ISO = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 const docOf = id => A.docs().find(x => x.id === id);
 function check(a) {
   const d = a.doctor_id ? docOf(a.doctor_id) : null, t = A.nowR();
-  if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "move_doctor"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
+  if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "remove_alias", "move_doctor"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
   if (a.type === "status") {
     const date = ISO(a.date) ? a.date : t.iso;
     if (date < t.iso && !(date === A.isoPlus(t.iso, -1) && a.until_next_day)) return `التاريخ ${a.date} فات`;
@@ -243,6 +261,7 @@ function describe(a) {
     case "add_doctor": return `• إضافة د. ${a.name} — ${a.dept || "—"}${f != null && u != null ? " · " + H(f) + " – " + H(u) : ""}${a.days?.length ? " · " + a.days.map(i => WD[i]).join("،") : ""}`;
     case "move_doctor": return `• نقل ${n} لقسم ${a.dept}`;
     case "remove_doctor": return `• شيل ${n} من الجدول${ISO(a.start_date) ? " يوم " + dmy(a.start_date) : ""}`;
+    case "remove_alias": return `• ${n} — شلت الاسم الثاني «${a.alias}»`;
     case "alias": return `• ${n} — اسم ثاني «${a.alias}»`;
     case "pending_doctor": return `• الطبيب المنتظر #${a.code}: ${a.decision === "approve" ? "إضافة" : "رفض"}`;
     case "option": return `• #${a.code}: الخيار ${a.n}`;
@@ -420,6 +439,16 @@ async function run(a, t, pclar, pdocs) {
     });
     await sleep(800); const { x } = await readBoardDoc(); return { ok: (x?.aliases || []).some(y => A.norm(y) === A.norm(al)) };
   }
+  if (a.type === "remove_alias") {
+    const al = A.norm(String(a.alias || "").replace(/^(د|دكتور|دكتوره)\.?\s+/, "").trim()); if (!al) return { ok: false, why: "الاسم فاضي" };
+    await A.db.runTransaction(async tx => {
+      const ref = A.db.doc("board/bawadi"), cur = (await tx.get(ref)).data(); if (!cur) return;
+      for (const p of cur.departments) for (const x of p.doctors || []) if (x.id === id) x.aliases = (x.aliases || []).filter(y => A.norm(y) !== al);
+      cur.log = [{ at: Date.now(), by: BY, what: `شلت الاسم الثاني «${a.alias}» من د. ${A.shortName(d.name)}` }, ...(cur.log || [])].slice(0, 60); cur.updatedAt = Date.now(); cur.updatedBy = "البوت";
+      tx.set(ref, cur);
+    });
+    await sleep(800); const { x } = await readBoardDoc(); return { ok: !!x && !(x.aliases || []).some(y => A.norm(y) === al) };
+  }
   if (a.type === "option") {
     const code = String(a.code || "").replace("#", "").toUpperCase(), it = pclar.find(i => i.code === code), o = it?.opts?.[(a.n || 0) - 1];
     if (!o) return { ok: false, why: `ما لقيت الخيار ${a.n} في #${code}` };
@@ -477,6 +506,15 @@ export async function bootFixes() {
       if (ok || !src?.text) mark.push("fx0711am");
     }
   }
+  // 4) (2.10.2) أمينة الحلواني → قسم الأطفال، و«أمينه» تنشال من أسماء د. سحر (انربطت غلط من رسالة القروب)
+  if (!doneIds.has("fx0711am2")) {
+    const am = A.docs().find(x => x.id === "5r64m1l") || byName("الحلواني"), sa = A.docs().find(x => x.id === "nsvukis");
+    const acts = [];
+    if (am && !/أطفال/.test(am.dep)) acts.push({ type: "move_doctor", doctor_id: am.id, dept: "الأطفال" });
+    if (sa && (sa.aliases || []).some(y => /^امين/.test(A.norm(y)))) for (const y of sa.aliases.filter(y => /^امين/.test(A.norm(y)))) acts.push({ type: "remove_alias", doctor_id: sa.id, alias: y });
+    if (acts.length) { const out = await execute(acts, [], []); lines.push(`د. أمينة الحلواني / د. سحر محمد:\n${out.join("\n")}`); if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0711am2"); }
+    else mark.push("fx0711am2");
+  }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
-  if (lines.length) await A.dmAdmin(`🔧 تصحيحات اليوم (بعد التحديث 2.10.0):\n\n${lines.join("\n\n")}`);
+  if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
 }
