@@ -8,13 +8,14 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
+import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM } from "./ecg.js";
 import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.10.3";
+const VERSION = "2.11.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -53,7 +54,7 @@ async function connect() {
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", ({ messages, type }) => {
     // رسائل القروب اللي وصلت والبوت طافي (append) — نعالج الأحدث من 6 ساعات
-    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) handleGroupMessage(m).catch(() => {}); } return; }
+    if (type === "append") { for (const m of messages || []) { const ts = Number(m.messageTimestamp || 0) * 1000; if (m.key?.remoteJid?.endsWith("@g.us") && !m.key.fromMe && Date.now() - ts < 6 * 3600e3) groupRoute(m).catch(() => {}); } return; }
     if (type !== "notify") return;
     for (const m of messages || []) bufferIncoming(m);
   });
@@ -553,8 +554,9 @@ function bufferIncoming(m) {
   const capT = String((msg.documentMessage || msg.imageMessage || msg.videoMessage || msg.documentWithCaptionMessage?.message?.documentMessage)?.caption || "").trim();
   if (plainDm && isFile && !m._teamChecked) {
     m._teamChecked = true;
-    senderPhoneOf(m).then(ph => {
+    senderPhoneOf(m).then(async ph => {
       const who = teamOf(ph);
+      if (who && await ecgDM(m, who).catch(e => { log.warn({ err: String(e?.message || e) }, "ECG ملف"); return false; })) return;   // شيت ECG / تصدير دردشة ECG
       if (who === "majed") return saveTeamFile(m, who);                                  // ماجد: أي ملف يروح للموقع
       // أنس: رد (سحب) على رسالة أو «P7KQ …» = رد على استفسار مراجع → للمراجع، غير كذا نسأله يرفعه للموقع؟
       if (who === "anas" && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT)) return askAdminFile(m);
@@ -591,9 +593,13 @@ async function senderPhoneOf(m) {
   if (!pnJid && jid.endsWith("@lid")) { try { pnJid = (await sock.signalRepository?.lidMapping?.getPNForLID?.(jid)) || ""; } catch {} }
   return normPhone(String(pnJid).split(/[:@]/)[0]);
 }
+async function groupRoute(m) {
+  if (await isEcgGroup(m.key?.remoteJid).catch(() => false)) return ecgGroup(m);
+  return handleGroupMessage(m);
+}
 async function onIncoming(m) {
   const jid = m.key?.remoteJid || "";
-  if (!m.key?.fromMe && jid.endsWith("@g.us")) return handleGroupMessage(m);      // قروب الاستقبال (تحديثات الأطباء)
+  if (!m.key?.fromMe && jid.endsWith("@g.us")) return groupRoute(m);              // قروب ECG (صور التخطيط) أو قروب الاستقبال (تحديثات الأطباء)
   if (m.key?.fromMe || !jid || jid.endsWith("@g.us") || jid.includes("broadcast") || jid.endsWith("@newsletter")) return;
   const msg = m.message || {};
   // تعديل رسالة، حذف، تفاعل (إيموجي على رسالة)… مو رسالة جديدة → نتجاهلها
@@ -607,6 +613,8 @@ async function onIncoming(m) {
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   const senderPhone = await senderPhoneOf(m);
   const team = teamOf(senderPhone), admin = team === "anas" || isAdminPhone(senderPhone);
+  // رد أنس/ماجد على تنبيه «صورة ECG بدون رقم»
+  if ((team || admin) && text && !media && await ecgDM(m, team || "anas", text).catch(e => { log.warn({ err: String(e?.message || e) }, "ECG رد"); return false; })) return;
   // ماجد: ما ينعامل كمراجع أبداً — ملف = للموقع، كلام = نطلب الملف
   if (team === "majed") {
     if (media) await saveTeamFile(m, "majed");
@@ -1175,6 +1183,7 @@ async function main() {
   if (!globalThis.__patchTimer) globalThis.__patchTimer = setInterval(applyPatches, 20 * 60000);   // تعديلات بتاريخ (طبيب يباشر بكرة) تنطبق في يومها
   initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock,
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
+  initEcg({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, team: TEAM });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
