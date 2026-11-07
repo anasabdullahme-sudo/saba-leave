@@ -1043,7 +1043,7 @@
     if (ch.sabaReq) {
       req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
       if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
-      else { setMin(!pendingQ().length); render(); }                    // بعد «تم الرفع»: قائمة الطلبات التالية، أو تتصغّر لو ما فيه
+      else { setMin(false); render(); }                                 // (1.9.7) بعد «تم الرفع»: الأداة تظل مفتوحة على «▶ الطلب التالي» (زي 1.8.8) — ما تتصغّر
     }
     if (!TOP && ch.sabaReq) return;
   });
