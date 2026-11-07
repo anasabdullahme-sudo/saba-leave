@@ -340,8 +340,9 @@
       const f = firsts.has(ot[0]) ? (SK_COMMON.has(ot[0]) ? 1 : 3) : 0;
       const rare = hits.filter(t => !SK_COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
       const common = hits.filter(t => SK_COMMON.has(t) && t !== ot[0]).length;
-      if (f < 3 && !rare) return;
-      const sc = f + rare * 2 + common * 0.5;
+      const pair = ot.length >= 2 && lists.some(l => l[0] === ot[0] && l[1] === ot[1]);   // (1.9.6) «Ahmed Ibrahim» = أول اسمين بالترتيب (حتى لو شائعين)
+      if (f < 3 && !rare && !pair) return;
+      const sc = f + rare * 2 + common * 0.5 + (pair ? 1.5 : 0);
       if (sc > bestScore) { second = bestScore; best = idx; bestScore = sc; } else if (sc > second) second = sc;
     });
     return best != null && bestScore >= 3 && bestScore - second >= 1.5 ? best : null;   // أشد من المطابقة العادية (فرق أكبر عن ثاني أقرب اسم)
@@ -355,6 +356,9 @@
     const rare = [...new Set(names.flatMap(docTokens))].filter(t => t.length >= 4 && !DOC_COMMON.has(t));
     const toks = opts.map(o => docTokens(o));
     for (const t of rare) { const hits = toks.map((ot, i) => ot.includes(t) ? i : -1).filter(i => i >= 0); if (hits.length === 1) return hits[0]; }
+    // (1.9.6) اسم واحد بس («Dr. Hayam» / «د. هيام») والاسم الأول مو شائع → لو خيار واحد بس يبدأ فيه (بالهيكل عشان الإنجليزي) هو الطبيب
+    const singles = [...new Set(names.map(n => skTokens(n)).filter(l => l.length === 1 && !DOC_COMMON.has(l[0])).map(l => skel(l[0])))].filter(k => k.length >= 2 && !SK_COMMON.has(k));
+    for (const k of singles) { const hits = opts.map((o, i) => skel(skTokens(o)[0] || "") === k ? i : -1).filter(i => i >= 0); if (hits.length === 1) return hits[0]; }
     return null;
   }
   function bestDoctorOption0(names, opts) {
@@ -370,8 +374,9 @@
       const f = firsts.has(ot[0]) ? (DOC_COMMON.has(ot[0]) ? 1 : 3) : 0;            // الاسم الأول نفسه
       const rare = hits.filter(t => !DOC_COMMON.has(t) && t.length >= 3 && t !== ot[0]).length;
       const common = hits.filter(t => DOC_COMMON.has(t) && t !== ot[0]).length;
-      if (f < 3 && !rare) return;                                                   // ما فيه اسم أول مميز ولا اسم عائلة مميز = مو هو
-      const sc = f + rare * 2 + common * 0.5;
+      const pair = ot.length >= 2 && lists.some(l => l.length >= 2 && l[0] === ot[0] && l[1] === ot[1]);   // (1.9.6) «أحمد إبراهيم» = أول اسمين بالترتيب (حتى لو شائعين)
+      if (f < 3 && !rare && !pair) return;                                          // ما فيه اسم أول مميز ولا اسم عائلة مميز = مو هو
+      const sc = f + rare * 2 + common * 0.5 + (pair ? 1.5 : 0);
       if (sc > bestScore) { second = bestScore; best = idx; bestScore = sc; } else if (sc > second) second = sc;
     });
     return best != null && bestScore >= 2.5 && bestScore - second >= 1 ? best : null;
