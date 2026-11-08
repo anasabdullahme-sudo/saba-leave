@@ -544,6 +544,19 @@ export async function bootFixes() {
     lines.push(`الجدول (مدحت، نورة، أسماء صحة):\n${out.join("\n")}`);
     if (n && !out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0711seha");
   }
+  // 6) (2.12.2) د. هيام حلمي: ترخيصها صار تحت وطنك
+  if (!doneIds.has("fx0811hy")) {
+    await A.db.runTransaction(async tx => {
+      const bref = A.db.doc("board/bawadi"), cur = (await tx.get(bref)).data(); if (!cur) return;
+      for (const p of cur.departments) for (const x of p.doctors || []) if (x.id === "u4eikim") x.sehaBranch = "watanak";
+      cur.log = [{ at: Date.now(), by: BY, what: "د. هيام حلمي: فرع الترخيص وطنك" }, ...(cur.log || [])].slice(0, 60); cur.updatedAt = Date.now(); cur.updatedBy = "البوت";
+      tx.set(bref, cur);
+    });
+    await sleep(800);
+    const ok = ((await A.db.doc("board/bawadi").get()).data()?.departments || []).flatMap(p => p.doctors || []).some(x => x.id === "u4eikim" && x.sehaBranch === "watanak");
+    lines.push(ok ? "✅ د. هيام حلمي: فرع الترخيص صار وطنك (إجازاتها تروح لحساب وطنك في صحة)" : "❌ د. هيام حلمي: فرع الترخيص ما تغيّر");
+    if (ok) mark.push("fx0811hy");
+  }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
 }

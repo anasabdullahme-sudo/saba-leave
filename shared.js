@@ -83,6 +83,7 @@ export const DOCTORS = [
   { id: "wafaa-mohamed",    branch: "watanak", ar: "وفاء محمد",    en: "Wafaa Mohamed",       alt: ["Wafa Mohammed", "Wafaa Muhammad"] },
   { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen", seha: "الهام جمال الدين ابراهيم شاهين",       alt: ["Ilham Shahin", "Elham Shahin"] },
   { id: "amina-halawany",   branch: "watanak", ar: "أمينة الحلواني", en: "Amina Elhalawany", seha: "امينه صدقي الحلواني", alt: ["امينه الحلواني", "امينه صدقي الحلواني", "Amina Sedky Elhalawany", "Amina Halawani"] },
+  { id: "hayam-helmy",      branch: "watanak", ar: "هيام حلمي", en: "Hayam Helmy", seha: "هيام محمد حلمي", alt: ["هيام محمد حلمي", "Hayam Mohamed Helmy", "Hayam Hilmy"] },
   // سابا البوادي (أي طبيب غير مذكور يروح للبوادي تلقائياً — هنا بس عشان يتعرّف على الاسم العربي)
   { id: "amin-mahmoud",     branch: "bawadi", ar: "أمين محمد علي محمود", en: "Amin Mohammed Ali Mahmoud", seha: "امين محمدعلي محمود", alt: ["أمين كيماوي", "امين كيماوي", "Amin Kemawi", "Amin Kimawi", "Amin Kemawy", "Amin Mohamed Ali Mahmoud"] },
   { id: "ahmed-abulfadl",   branch: "bawadi", ar: "أحمد أبو الفضل", en: "Ahmed Abu Elfadl", seha: "عادل احمد الوداني", alt: ["أحمد إبراهيم أبو الفضل", "احمد ابو الفضل", "أحمد خالد إبراهيم", "احمد خالد ابراهيم", "Ahmed Abo Elfadl", "Ahmed Abouelfadl", "Ahmed Abo El Fadl", "Ahmed Khaled Ibrahim"] },
