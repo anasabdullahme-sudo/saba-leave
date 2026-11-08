@@ -3,6 +3,8 @@
 //  • إجازة متداخلة لنفس الطبيب → تتحدّث بالتواريخ الجديدة · موظف مو طبيب → «مو في جدول الأطباء»
 //  • «✅ انحفظ» بس بعد ما نقرا الجدول من القاعدة
 import { downloadMediaMessage } from "baileys";
+import { nameScore } from "./names.js";
+import { noteOut } from "./brain.js";
 
 let C = null;
 export function initHrVac(ctx) { C = ctx; }
@@ -42,6 +44,11 @@ ${list}`;
   return null;
 }
 
+// الذكاء ما طابق → نطابق بهيكل الاسم (Walaa Abdulsattar … = ولاء عبد الستار منصور) مع الاسم واسم صحة والأسماء الثانية، والكود يرجّح
+function matchDoc(it, docs) {
+  const sc = docs.map(d => [d, Math.max(...[d.name, d.sehaName, ...(d.aliases || [])].filter(Boolean).map(k => nameScore([it.name], k))) + (it.code && String(d.code) === String(it.code) ? 1.5 : 0)]).sort((a, b) => b[1] - a[1]);
+  return sc[0] && sc[0][1] >= 3 && sc[0][1] - (sc[1]?.[1] || 0) >= 1.5 ? sc[0][0] : null;
+}
 // يرجع true لو الصورة كانت طلب إجازة (انطبق أو لا)
 export async function onTeamImage(m, who) {
   if (!C?.gemini) return false;
@@ -54,9 +61,9 @@ export async function onTeamImage(m, who) {
   const jid = m.key.remoteJid, say = t => C.getSock().sendMessage(jid, { text: t }, { quoted: m }).catch(() => {});
   const ok = [], notDoc = [], bad = [];
   for (const it of o.items) {
-    const d = docs.find(x => x.id === it.doctor_id);
+    const d = docs.find(x => x.id === it.doctor_id) || matchDoc(it, docs);
     if (!ISO(it.start)) { bad.push(`${it.name}: ما قريت التاريخ`); continue; }
-    if (!d) { notDoc.push(`${it.name}${it.code ? ` (COD ${it.code})` : ""}`); continue; }
+    if (!d) { notDoc.push(`${it.name}${it.code ? ` (COD ${it.code})` : ""} — ${TYPE(it.type)} ${dm(it.start)} → ${dm(ISO(it.end) ? it.end : it.start)}`); continue; }
     ok.push({ d, start: it.start, end: ISO(it.end) && it.end >= it.start ? it.end : it.start, type: TYPE(it.type), code: String(it.code || "") });
   }
   const by = C.team[who]?.name || who;
@@ -85,6 +92,7 @@ export async function onTeamImage(m, who) {
   if (notDoc.length) lines.push(`ℹ️ مو في جدول الأطباء (ما حطيته): ${notDoc.join("، ")}`);
   if (bad.length) lines.push(`⚠️ ${bad.join("، ")}`);
   await say(lines.join("\n"));
+  if (who === "anas") try { noteOut(`[صورة إجازة من الموارد البشرية]\n${lines.join("\n")}`); } catch {}   // الذكاء في الخاص يعرف وش صار (لو قلت «هذي د. ولاء»)
   if (who !== "anas" && ok.length) { try { const [w] = await C.getSock().onWhatsApp("966" + C.team.anas?.phone); if (w?.exists) await C.getSock().sendMessage(w.jid, { text: `ℹ️ ${by} أرسل صورة إجازة من الموارد البشرية:\n${lines.join("\n")}` }); } catch {} }
   return true;
 }

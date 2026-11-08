@@ -98,6 +98,7 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - remove_doctor: doctor_id (و start_date لو من يوم جاي).
 - alias: doctor_id + alias (اسم ثاني يكتبونه في القروب).
 - remove_alias: doctor_id + alias — يشيل اسم ثاني انحفظ غلط (مثل اسم طبيب ثاني انربط فيه).
+- رسالة «صورة إجازة من الموارد البشرية» فيها «مو في جدول الأطباء» وأنس قال مين الطبيب → vacation بنفس التواريخ (start_date/end_date) + alias بالاسم الإنجليزي من الرسالة.
 - لا توعد بشي ما تسويه الأفعال («ما راح أربط…»): لو فيه ربط غلط شيله بـ remove_alias.
 - pending_doctor: code + decision (approve/reject)، وتقدر تعدّل dept/days/start_time/end_time/room/fee قبل الإضافة.
 - option: code + n (رقم خيار من رسالة الخيارات).
@@ -217,6 +218,7 @@ function normA(a) {
   o.from = a.start_time ?? a.from ?? (a.kind === "starts_at" ? a.at_time : undefined);
   o.until = a.end_time ?? a.until;
   o.at = a.at_time ?? a.at;
+  if ((o.type === "alias" || o.type === "remove_alias") && !o.alias && o.name) o.alias = o.name;
   return o;
 }
 // القسم ناقص في نقل/إضافة → من رد الذكاء («لقسم الأطفال») أو من كلام أنس
@@ -243,6 +245,7 @@ function check(a) {
   if (a.type === "end_vacation" && !ISO(a.return_date)) return "ناقص يوم المباشرة";
   if (a.type === "add_doctor" && !String(a.name || "").trim()) return "ناقص اسم الطبيب";
   if (a.type === "add_doctor" && !A.findDep(a.dept)) return `ناقص القسم${a.dept ? " («" + a.dept + "» مو من أقسام الجدول)" : ""} — وش قسمه؟`;
+  if ((a.type === "alias" || a.type === "remove_alias") && !String(a.alias || "").trim()) return "ناقص الاسم الثاني (alias)";
   if (a.type === "move_doctor" && !A.findDep(a.dept)) return `القسم «${a.dept || "—"}» مو موجود في الجدول`;
   return "";
 }
