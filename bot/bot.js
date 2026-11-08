@@ -8,6 +8,7 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
+import { initHrVac, onTeamImage as hrImage } from "./hrvac.js";
 import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM } from "./ecg.js";
 import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
@@ -15,7 +16,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.11.0";
+const VERSION = "2.12.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -557,6 +558,7 @@ function bufferIncoming(m) {
     senderPhoneOf(m).then(async ph => {
       const who = teamOf(ph);
       if (who && await ecgDM(m, who).catch(e => { log.warn({ err: String(e?.message || e) }, "ECG ملف"); return false; })) return;   // شيت ECG / تصدير دردشة ECG
+      if (who && msg.imageMessage && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT) && await hrImage(m, who).catch(e => { log.warn({ err: String(e?.message || e) }, "إجازة الموارد"); return false; })) return;   // صورة إجازة معتمدة → صفحة الأطباء
       if (who === "majed") return saveTeamFile(m, who);                                  // ماجد: أي ملف يروح للموقع
       // أنس: رد (سحب) على رسالة أو «P7KQ …» = رد على استفسار مراجع → للمراجع، غير كذا نسأله يرفعه للموقع؟
       if (who === "anas" && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT)) return askAdminFile(m);
@@ -1183,6 +1185,7 @@ async function main() {
   if (!globalThis.__patchTimer) globalThis.__patchTimer = setInterval(applyPatches, 20 * 60000);   // تعديلات بتاريخ (طبيب يباشر بكرة) تنطبق في يومها
   initRelay({ db, log, admin: process.env.ADMIN_PHONE || "", getSock: () => sock,
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
+  initHrVac({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, team: TEAM });
   initEcg({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, team: TEAM });
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
