@@ -173,13 +173,13 @@ export async function handle(m, text, { forwarded = false } = {}) {
   try { if (jid) sock?.sendPresenceUpdate("paused", jid); } catch {}
   if (!out) return false;                                        // الذكاء ما رد → group.js يكمل بالطريقة القديمة
   noteIn(user);
-  let actions = (Array.isArray(out.actions) ? out.actions : []).map(normA).map(a => fillDept(a, out.reply, text));
+  let actions = (Array.isArray(out.actions) ? out.actions : []).map(normA).map(a => fillDept(a, out.reply, text)).map(a => fillTimes(a, out.reply, text));
   // فعل ناقص (حقول ما تعبّت) → نرجع للذكاء مرة وحدة يكمّله بدل ما نقول «ما طبّقت»
   const miss = actions.map(a => [a, check(a)]).filter(([, w]) => w);
   if (miss.length && !out.use_proposal) {
     const fix = await callAI(system, [...contents, { role: "model", parts: [{ text: JSON.stringify({ reply: out.reply, actions: out.actions }) }] },
       { role: "user", parts: [{ text: "[النظام] الأفعال هذي ناقصة وما تنفع:\n" + miss.map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nرجّع نفس الرد مع actions كاملة: كل فعل فيه حقوله المطلوبة بالضبط (status: doctor_id, kind, date, start_time/end_time أو at_time حسب النوع — move_doctor: doctor_id و dept باسم قسم من الجدول — add_doctor: name و dept …). لو فعلاً ناقصك معلومة من أنس، اسأله و actions فاضية." }] }]).catch(() => null);
-    if (fix) { const fa = (Array.isArray(fix.actions) ? fix.actions : []).map(normA).map(a => fillDept(a, fix.reply, text)); if (!fa.length || !fa.some(a => check(a))) { blog(user, out); out = fix; actions = fa; } }
+    if (fix) { const fa = (Array.isArray(fix.actions) ? fix.actions : []).map(normA).map(a => fillDept(a, fix.reply, text)).map(a => fillTimes(a, fix.reply, text)); if (!fa.length || !fa.some(a => check(a))) { blog(user, out); out = fix; actions = fa; } }
   }
   blog(user, out);
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
@@ -229,6 +229,29 @@ function normA(a) {
   if ((o.type === "alias" || o.type === "remove_alias") && !o.alias && o.name) o.alias = o.name;
   return o;
 }
+// (2.13.1) الذكاء (خصوصاً flash-lite) يكتب الوقت في الرد وينسى end_time → ناخذ الوقتين من رده أو من كلام أنس
+const NEEDS_T = a => (a.type === "status" && a.kind === "starts_at") || (a.type === "schedule" && a.mode !== "set_days") || (a.type === "schedule" && a.mode === "set_days" && a.from) || a.type === "add_doctor";
+function timesIn(txt) {
+  const t = lat(txt), out = [];
+  for (const m of t.matchAll(/(?<![\d:])(\d{1,2})(?::(\d{2}))?\s*(صباحاً|صباحا|مساءً|مساء|الصبح|الظهر|العصر|الليل|ص|م|am|pm)?(?![\d:])/gi)) {
+    if (!m[2] && !m[3]) continue;                                           // رقم بدون : ولا ص/م (تاريخ/عدد) → نتجاهله
+    let h = +m[1]; if (h > 24) continue; const ap = m[3] || "";
+    if (/^(م|pm|مساء|العصر|الليل)/i.test(ap) && h < 12) h += 12; if (/^(ص|am|صباح|الصبح)/i.test(ap) && h === 12) h = 0; if (/الظهر/.test(ap) && h < 6) h += 12;
+    out.push(String(h % 24).padStart(2, "0") + ":" + (m[2] || "00"));
+  }
+  return [...new Set(out)];
+}
+function fillTimes(a, reply, user) {
+  if (!NEEDS_T(a) || (a.from && a.until)) return a;
+  for (const src of [reply, user]) {
+    const ts = timesIn(src || ""); if (ts.length < 2) continue;
+    const o = { ...a };
+    if (!o.from) o.from = ts[0];
+    if (!o.until) o.until = ts.find(x => x !== o.from) || ts[1];
+    return o;
+  }
+  return a;
+}
 // القسم ناقص في نقل/إضافة → من رد الذكاء («لقسم الأطفال») أو من كلام أنس
 function fillDept(a, reply, user) {
   if (!["move_doctor", "add_doctor"].includes(a.type) || A.findDep(a.dept)) return a;
@@ -248,7 +271,8 @@ function check(a) {
     if (a.kind === "starts_at" && toMin(a.from) == null) return `د. ${A.shortName(d.name)}: ناقص وقت البداية`;
     if (!["starts_at", "present", "leaves_at", "late", "stop", "free", "appointments_only", "busy", "absent_today", "clear"].includes(a.kind)) return `نوع حالة غريب (${a.kind})`;
   }
-  if (a.type === "schedule" && (toMin(a.from) == null || toMin(a.until) == null) && a.mode !== "set_days") return `د. ${A.shortName(d.name)}: ناقص وقت الدوام`;
+  if (a.type === "schedule" && a.mode === "set_days" && !(a.days || []).length) return `د. ${A.shortName(d.name)}: أي أيام؟ (set_days بدون أيام)`;
+  if (a.type === "schedule" && (toMin(a.from) == null || toMin(a.until) == null) && (a.mode !== "set_days" || a.from || a.until)) return `د. ${A.shortName(d.name)}: ناقص وقت الدوام (start_time و end_time)`;
   if (a.type === "vacation" && (!ISO(a.start_date) || !ISO(a.end_date))) return "ناقص تاريخ بداية/نهاية الإجازة";
   if (a.type === "end_vacation" && !ISO(a.return_date)) return "ناقص يوم المباشرة";
   if (a.type === "add_doctor" && !String(a.name || "").trim()) return "ناقص اسم الطبيب";
@@ -386,7 +410,8 @@ async function run(a, t, pclar, pdocs) {
     await sleep(1000); const { x } = await readBoardDoc(); if (!x) return { ok: false, why: "ما لقيته" };
     const J = v => JSON.stringify((v || []).map(y => [y.s, y.e]));
     if (sch.altOnly) return { ok: !!x.alt && days.every(i => x.alt.days.includes(i)) && J(x.alt.shifts) === J(shifts) || (J(x.shifts) === J(shifts) && !(x.alt?.days || []).some(i => days.includes(i))) };
-    return { ok: (!shifts || J(x.shifts) === J(shifts)) && (!days.length || JSON.stringify([...x.workdays].sort()) === JSON.stringify([...days].sort())) };
+    if (!shifts && !days.length) return { ok: false, why: "ما فيه شي يتغيّر" };
+    return { ok: (!shifts || J(x.shifts) === J(shifts)) && (!days.length || JSON.stringify([...x.workdays].sort()) === JSON.stringify([...days].sort())), why: `المحفوظ ${(x.shifts || []).map(y => A.hm(y.s) + "–" + A.hm(y.e)).join("، ")}` };
   }
   if (a.type === "info") {
     const sch = { days: [], shifts: null, room: a.room || "", ext: a.ext || "", fee: String(a.fee || "").replace(/\D/g, "") };
@@ -616,6 +641,12 @@ export async function bootFixes() {
         lines.push(`د. كريم شديد (انشال بالغلط):\n${out.join("\n")}`); if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0911kr");
       } else lines.push("❌ د. كريم شديد: ما لقيت نسخته — قل لي قسمه ودوامه وأرجّعه");
     }
+  }
+  // 8) (2.13.1) د. أمينة الحلواني: دوامها الثابت السبت–الخميس 12م–8م (طلبه أنس 9/11 والبوت قال انحفظ وما انحفظ)
+  if (!doneIds.has("fx0911am3")) {
+    const am = A.docs().find(x => x.id === "5r64m1l");
+    if (am) { const out = await execute([{ type: "schedule", doctor_id: am.id, mode: "set_days", days: [6, 0, 1, 2, 3, 4], from: "12:00", until: "20:00" }], [], []); lines.push(`د. أمينة الحلواني:\n${out.join("\n")}`); if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0911am3"); }
+    else mark.push("fx0911am3");
   }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
