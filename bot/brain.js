@@ -37,6 +37,7 @@ function doctorsBlock() {
   return A.docs().map(d => [d.id, A.shortName(d.name), (d.aliases || []).join("/") || "-", d.dep,
     "أيام: " + ((d.workdays || []).map(i => WD[i]).join("،") || "—"), "دوام: " + shiftTxt(d.shifts),
     d.alt?.days?.length ? `دوام ثاني ${d.alt.days.map(i => WD[i]).join("،")}: ${shiftTxt(d.alt.shifts)}` : "",
+    d.away && Object.keys(d.away).length ? "في فروع ثانية كل أسبوع: " + Object.entries(d.away).map(([w, b]) => `${WD[+w]} ${b}`).join("، ") : "",
     d.room ? "غرفة " + d.room : "", d.fee ? "كشفية " + d.fee : ""].filter(Boolean).join(" | ")).join("\n");
 }
 function vacBlock(iso) {
@@ -95,10 +96,13 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - end_vacation: return_date = يوم المباشرة.
 - add_doctor: name, dept (لازم قسم من أقسام الجدول — لو ما تعرفه اسأل قبل ما تضيف)، days, start_time, end_time, room, ext, fee.
 - move_doctor: doctor_id + dept — ينقل الطبيب لقسم ثاني.
-- remove_doctor: doctor_id (و start_date لو من يوم جاي).
+- remove_doctor: doctor_id (و start_date لو من يوم جاي) — يشيل الطبيب من الجدول كله نهائياً. بس لو أنس قال صراحة إنه ترك/ما عاد يداوم في البوادي. «شيله يوم الإثنين» مو حذف: هذا schedule (set_days) أو branch_day. والنظام دايم يسأله قبل الحذف.
+- restore_doctor: doctor_id — يرجّع طبيب انشال (من «أطباء انشالوا مؤخراً») لقسمه بدوامه.
+- branch_day: doctor_id + branch (اسم الفرع مثل الصفا، السليمانية) — الطبيب يكون في فرع ثاني: days = أيام الأسبوع (دائم كل أسبوع) أو date = YYYY-MM-DD (يوم واحد). clear = true يشيلها. لو أنس ما قال يوم واحد ولا دائم → اسأله.
 - alias: doctor_id + alias (اسم ثاني يكتبونه في القروب).
 - remove_alias: doctor_id + alias — يشيل اسم ثاني انحفظ غلط (مثل اسم طبيب ثاني انربط فيه).
 - رسالة «صورة إجازة من الموارد البشرية» فيها «مو في جدول الأطباء» وأنس قال مين الطبيب → vacation بنفس التواريخ (start_date/end_date) + alias بالاسم الإنجليزي من الرسالة.
+- طبيب مو في الجدول؟ شيك على «أطباء انشالوا مؤخراً» قبل ما تقول «مو موجود» — ولو انشال بالغلط قل له الصدق واقترح restore_doctor.
 - لا توعد بشي ما تسويه الأفعال («ما راح أربط…»): لو فيه ربط غلط شيله بـ remove_alias.
 - pending_doctor: code + decision (approve/reject)، وتقدر تعدّل dept/days/start_time/end_time/room/fee قبل الإضافة.
 - option: code + n (رقم خيار من رسالة الخيارات).
@@ -110,12 +114,12 @@ doctor_id لازم من الجدول تحت.`;
 const SCHEMA = { type: "OBJECT", properties: {
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
     mode: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, start_date: { type: "STRING" }, end_date: { type: "STRING" }, return_date: { type: "STRING" },
     name: { type: "STRING" }, dept: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" }, alias: { type: "STRING" },
-    code: { type: "STRING" }, decision: { type: "STRING" }, n: { type: "INTEGER" }, on: { type: "BOOLEAN" } }, required: ["type"] } } },
+    branch: { type: "STRING" }, clear: { type: "BOOLEAN" }, code: { type: "STRING" }, decision: { type: "STRING" }, n: { type: "INTEGER" }, on: { type: "BOOLEAN" } }, required: ["type"] } } },
   required: ["reply"] };
 
 async function callAI(system, contents) {
@@ -142,7 +146,8 @@ export async function handle(m, text, { forwarded = false } = {}) {
   const ci = m.message?.extendedTextMessage?.contextInfo || {};
   const q = ci.quotedMessage, quoted = (q?.conversation || q?.extendedTextMessage?.text || q?.imageMessage?.caption || "").trim();
   const t = A.nowR(), tomorrow = A.isoPlus(t.iso, 1);
-  const [planD, pdD, pcD] = await Promise.all([A.db.doc("board/bawadi_plan").get(), A.db.doc("bot/pending_doctors").get(), A.db.doc("bot/pending_clarify").get()]);
+  const [planD, pdD, pcD, rmD] = await Promise.all([A.db.doc("board/bawadi_plan").get(), A.db.doc("bot/pending_doctors").get(), A.db.doc("bot/pending_clarify").get(), A.db.doc("bot/removed_doctors").get()]);
+  const removed = (rmD.data()?.items || []).filter(x => Date.now() - x.at < 30 * 864e5);
   const plans = (planD.data()?.items || []).filter(i => i.date >= t.iso).sort((a, b) => a.date.localeCompare(b.date));
   const pdocs = (pdD.data()?.items || []).filter(i => Date.now() - i.at < 7 * 864e5);
   const pclar = (pcD.data()?.items || []).filter(i => Date.now() - i.at < 12 * 3600e3);
@@ -154,6 +159,8 @@ export async function handle(m, text, { forwarded = false } = {}) {
 \n## خطط محفوظة لأيام جاية (تنطبق أول يومها)\n${planBlock(plans)}
 \n## طلبات تنتظر أنس\n${pendingBlock(pdocs, pclar)}
 \n## آخر رسايل القروب (وش سوى البوت فيها)\n${groupBlock()}
+\n## أطباء انشالوا مؤخراً من الجدول (id | الاسم | القسم | متى | مين)\n${removed.map(x => `${x.doc.id} | ${A.shortName(x.doc.name)} | ${x.dep.name} | ${new Date(x.at).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })} | ${x.by}`).join("\n") || "—"}
+\n## أيام في فروع ثانية (يوم واحد)\n${(A.getBoard()?.awayDays || []).filter(x => x.date >= t.iso).map(x => `${A.shortName(docOf(x.doctorId)?.name || x.doctorId)}: ${x.date} في ${x.branch}`).join("\n") || "—"}
 \n## اقتراح ينتظر موافقته\n${proposal ? proposal.summary : "—"}`;
   const user = (forwarded ? "[رسالة محوّلة من قروب الاستقبال]\n" : "") + (quoted ? `[يرد على: «${quoted.slice(0, 600)}»]\n` : "") + text;
   const hist = chat.filter(x => Date.now() - x.at < 24 * 3600e3).slice(-16).map(x => ({ role: x.role, parts: [{ text: x.text }] }));
@@ -178,6 +185,7 @@ export async function handle(m, text, { forwarded = false } = {}) {
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
   let reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
   if (actions.length) for (const [a, b] of TENSE) reply = reply.replace(a, b);   // التنفيذ بعد الرد — ما نقول «عدّلت» قبل ما ينحفظ
+  if (actions.some(a => a.type === "remove_doctor") && !out.use_proposal) out.confirm_first = true;   // (2.13.0) الحذف دايم بتأكيد
   if (out.confirm_first && actions.length && !out.use_proposal) {
     const bad = actions.map(a => check(a)).filter(Boolean);
     if (bad.length) { await A.dmAdmin(`${reply}\n\n⚠️ ${bad.join("\n⚠️ ")}`); return true; }
@@ -232,7 +240,7 @@ const ISO = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 const docOf = id => A.docs().find(x => x.id === id);
 function check(a) {
   const d = a.doctor_id ? docOf(a.doctor_id) : null, t = A.nowR();
-  if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "remove_alias", "move_doctor"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
+  if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "remove_alias", "move_doctor", "branch_day"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
   if (a.type === "status") {
     const date = ISO(a.date) ? a.date : t.iso;
     if (date < t.iso && !(date === A.isoPlus(t.iso, -1) && a.until_next_day)) return `التاريخ ${a.date} فات`;
@@ -244,6 +252,9 @@ function check(a) {
   if (a.type === "vacation" && (!ISO(a.start_date) || !ISO(a.end_date))) return "ناقص تاريخ بداية/نهاية الإجازة";
   if (a.type === "end_vacation" && !ISO(a.return_date)) return "ناقص يوم المباشرة";
   if (a.type === "add_doctor" && !String(a.name || "").trim()) return "ناقص اسم الطبيب";
+  if (a.type === "branch_day" && !a.clear && !String(a.branch || "").trim()) return "ناقص اسم الفرع";
+  if (a.type === "branch_day" && !(a.days || []).length && !ISO(a.date)) return "يوم واحد (date) ولا كل أسبوع (days)؟";
+  if (a.type === "restore_doctor" && !a.doctor_id) return "ناقص الطبيب";
   if (a.type === "add_doctor" && !A.findDep(a.dept)) return `ناقص القسم${a.dept ? " («" + a.dept + "» مو من أقسام الجدول)" : ""} — وش قسمه؟`;
   if ((a.type === "alias" || a.type === "remove_alias") && !String(a.alias || "").trim()) return "ناقص الاسم الثاني (alias)";
   if (a.type === "move_doctor" && !A.findDep(a.dept)) return `القسم «${a.dept || "—"}» مو موجود في الجدول`;
@@ -263,7 +274,9 @@ function describe(a) {
     case "end_vacation": return `• ${n} — يباشر ${dayName(a.return_date)} ${dmy(a.return_date)}`;
     case "add_doctor": return `• إضافة د. ${a.name} — ${a.dept || "—"}${f != null && u != null ? " · " + H(f) + " – " + H(u) : ""}${a.days?.length ? " · " + a.days.map(i => WD[i]).join("،") : ""}`;
     case "move_doctor": return `• نقل ${n} لقسم ${a.dept}`;
-    case "remove_doctor": return `• شيل ${n} من الجدول${ISO(a.start_date) ? " يوم " + dmy(a.start_date) : ""}`;
+    case "restore_doctor": return `• رجّعت د. ${a.__name || a.doctor_id} للجدول`;
+    case "branch_day": return `• ${n} — ${a.clear ? "شلت «في فرع ثاني»" : "في فرع " + String(a.branch || "").replace(/^(فرع|سابا)\s+/, "")}${(a.days || []).length ? " كل " + a.days.map(i => WD[i]).join(" و") : ISO(a.date) ? ` يوم ${dayName(a.date)} ${dmy(a.date)}` : ""}`;
+    case "remove_doctor": return `• شيل ${n} من الجدول كله نهائياً${ISO(a.start_date) ? " يوم " + dmy(a.start_date) : ""}`;
     case "remove_alias": return `• ${n} — شلت الاسم الثاني «${a.alias}»`;
     case "alias": return `• ${n} — اسم ثاني «${a.alias}»`;
     case "pending_doctor": return `• الطبيب المنتظر #${a.code}: ${a.decision === "approve" ? "إضافة" : "رفض"}`;
@@ -284,9 +297,10 @@ async function execute(actions, pclar, pdocs) {
     const why = check(a);
     if (why) { out.push(`⚠️ ما طبّقت: ${describe(a).replace(/^• /, "")} — ${why}`); continue; }
     if (a.type === "resolve") { resolves.push(a); continue; }
-    let r; const desc = describe(a);                                             // قبل التنفيذ (بعد الحذف ما نلقى اسم الطبيب)
+    let r, desc = describe(a);                                             // قبل التنفيذ (بعد الحذف ما نلقى اسم الطبيب)
     try { r = await run(a, t, pclar, pdocs); } catch (e) { r = { ok: false, why: String(e?.message || e).slice(0, 140) }; }
     if (r?.skip) continue;
+    if (a.type === "restore_doctor") desc = describe(a);                       // الاسم يعرف بعد التنفيذ
     out.push(r?.ok ? `✅ انحفظ وتأكدت منه في الموقع: ${desc.replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${desc.replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
   }
   // نقفل الأسئلة المنتظرة ونحط ✅ في القروب — بس لو كل اللي قبلها انحفظ
@@ -424,6 +438,38 @@ async function run(a, t, pclar, pdocs) {
     await sleep(1000); const b = (await A.db.doc("board/bawadi").get()).data() || {};
     return { ok: (b.departments || []).some(p => p.id === dep.id && (p.doctors || []).some(x => x.id === id)) };
   }
+  if (a.type === "restore_doctor") {
+    const items = (await A.db.doc("bot/removed_doctors").get()).data()?.items || [], r = items.filter(x => x.doc?.id === a.doctor_id).pop();
+    if (!r) return { ok: false, why: "ما لقيته في الأطباء المشالين" };
+    a.__name = A.shortName(r.doc.name);
+    await A.db.runTransaction(async tx => {
+      const ref = A.db.doc("board/bawadi"), prev = A.db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data(); if (!cur) return;
+      const next = structuredClone(cur);
+      if (next.departments.flatMap(p => p.doctors || []).some(x => x.id === r.doc.id)) return;
+      let dep = next.departments.find(p => p.id === r.dep.id) || next.departments.find(p => p.name === r.dep.name);
+      if (!dep) { dep = { id: r.dep.id, name: r.dep.name, floor: r.dep.floor || "G", notes: "", doctors: [] }; next.departments.push(dep); }
+      (dep.doctors ||= []).push(r.doc);
+      next.log = [{ at: Date.now(), by: BY, what: `رجّع د. ${a.__name} للجدول` }, ...(cur.log || [])].slice(0, 60); next.updatedAt = Date.now(); next.updatedBy = "البوت";
+      tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "إرجاع طبيب" }); tx.set(ref, next);
+    });
+    await sleep(1000); const b = (await A.db.doc("board/bawadi").get()).data() || {};
+    return { ok: (b.departments || []).some(p => (p.doctors || []).some(x => x.id === r.doc.id)), note: "في " + r.dep.name };
+  }
+  if (a.type === "branch_day") {
+    const br = String(a.branch || "").replace(/^(فرع|سابا)\s+/, "").trim(), days = (a.days || []).filter(x => x >= 0 && x <= 6 && x !== 5);
+    await A.db.runTransaction(async tx => {
+      const ref = A.db.doc("board/bawadi"), cur = (await tx.get(ref)).data(); if (!cur) return;
+      const today = A.nowR().iso;
+      if (days.length) { for (const p of cur.departments) for (const x of p.doctors || []) if (x.id === id) { const aw = { ...(x.away || {}) }; for (const w of days) { if (a.clear) delete aw[w]; else aw[w] = br; } x.away = aw; } }
+      else { cur.awayDays = (cur.awayDays || []).filter(x => x.date >= today && !(x.doctorId === id && x.date === a.date)); if (!a.clear) cur.awayDays.push({ doctorId: id, date: a.date, branch: br, by: BY }); }
+      cur.log = [{ at: Date.now(), by: BY, what: `د. ${A.shortName(d.name)}: ${a.clear ? "شال" : "في فرع " + br} ${days.length ? days.map(i => WD[i]).join(" و") : a.date}` }, ...(cur.log || [])].slice(0, 60); cur.updatedAt = Date.now(); cur.updatedBy = "البوت";
+      tx.set(ref, cur);
+    });
+    await sleep(900); const { b, x } = await readBoardDoc(); if (!x) return { ok: false, why: "ما لقيت الطبيب" };
+    if (days.length) return { ok: days.every(w => a.clear ? !x.away?.[w] : x.away?.[w] === br) };
+    const has = (b.awayDays || []).some(y => y.doctorId === id && y.date === a.date && y.branch === br);
+    return { ok: a.clear ? !(b.awayDays || []).some(y => y.doctorId === id && y.date === a.date) : has };
+  }
   if (a.type === "remove_doctor") {
     if (ISO(a.start_date) && a.start_date > t.iso) {
       await A.db.doc("board/bawadi_plan").set({ items: A.FieldValue.arrayUnion({ id: A.uid(), date: a.start_date, doctorId: id, kind: "remove_doctor", by: BY }) }, { merge: true });
@@ -556,6 +602,20 @@ export async function bootFixes() {
     const ok = ((await A.db.doc("board/bawadi").get()).data()?.departments || []).flatMap(p => p.doctors || []).some(x => x.id === "u4eikim" && x.sehaBranch === "watanak");
     lines.push(ok ? "✅ د. هيام حلمي: فرع الترخيص صار وطنك (إجازاتها تروح لحساب وطنك في صحة)" : "❌ د. هيام حلمي: فرع الترخيص ما تغيّر");
     if (ok) mark.push("fx0811hy");
+  }
+  // 7) (2.13.0) د. كريم شديد انشال بالغلط 9/11 (كان المقصود «الإثنين في الصفا والثلاثاء في السليمانية») → يرجع من نسخة ما قبل الحذف
+  if (!doneIds.has("fx0911kr")) {
+    if (A.docs().some(x => x.id === "nlf1lpm" || /كريم شديد/.test(x.name))) { mark.push("fx0911kr"); lines.push("د. كريم شديد: موجود في الجدول ✓ (ما يحتاج إرجاع)"); }
+    else {
+      const prevB = (await A.db.doc("board/bawadi_prev").get()).data() || {};
+      let found = null; for (const p of prevB.departments || []) for (const x of p.doctors || []) if (x.id === "nlf1lpm") found = { dep: { id: p.id, name: p.name, floor: p.floor }, doc: x };
+      if (!found) { const rm = ((await A.db.doc("bot/removed_doctors").get()).data()?.items || []).find(x => x.doc?.id === "nlf1lpm"); if (rm) found = rm; }
+      if (found) {
+        await A.db.runTransaction(async tx => { const r = A.db.doc("bot/removed_doctors"), c = (await tx.get(r)).data() || {}; tx.set(r, { items: [...(c.items || []).filter(x => x.doc?.id !== "nlf1lpm"), { at: Date.now(), by: "إصلاح", ...found }] }); });
+        const out = await execute([{ type: "restore_doctor", doctor_id: "nlf1lpm" }], [], []);
+        lines.push(`د. كريم شديد (انشال بالغلط):\n${out.join("\n")}`); if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0911kr");
+      } else lines.push("❌ د. كريم شديد: ما لقيت نسخته — قل لي قسمه ودوامه وأرجّعه");
+    }
   }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);

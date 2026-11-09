@@ -285,7 +285,7 @@ td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { backend, arNum, DEMO, relayDoctorAlerts, autoUpdate } from "./shared.js?v=20261109a";
+import { backend, arNum, DEMO, relayDoctorAlerts, autoUpdate } from "./shared.js?v=20261109b";
 autoUpdate(() => [...document.querySelectorAll(".modal:not(#mLogin)")].some(m => !m.hidden));
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -324,13 +324,15 @@ function activeShift(d, t) {
   if (d.workdays.includes(y)) for (const s of shiftsFor(d, y)) if (s.e <= s.s && t.m < s.e) return s;   // شفت من أمس يعدّي نص الليل
   return null;
 }
-const startsSoon = (d, t) => d.workdays.includes(t.wd) && shiftsFor(d, t.wd).find(s => s.s > t.m && s.s - t.m <= 60);
+// (9/11) الطبيب في فرع ثاني: يوم واحد (board.awayDays) أو كل أسبوع (d.away = {يوم: فرع})
+const awayOf = (d, t) => (S.board?.awayDays || []).find(x => x.doctorId === d.id && x.date === t.iso)?.branch || d.away?.[t.wd] || "";
+const startsSoon = (d, t) => !awayOf(d, t) && d.workdays.includes(t.wd) && shiftsFor(d, t.wd).find(s => s.s > t.m && s.s - t.m <= 60);
 /* ---------- حالات اليوم من قروب الاستقبال ---------- */
 const stOf = d => { const t = S.today; return t && t.date === nowRiyadh().iso ? t.st?.[d.id] || null : null; };
 const dayEnd = (d, wd) => Math.max(0, ...shiftsFor(d, wd).map(s => s.e > s.s ? s.e : 1440));
 // متواجد الحين؟ (الجدول + تحديثات القروب)
 function liveOn(d, t) {
-  if (onVacation(d, t.iso)) return null;
+  if (onVacation(d, t.iso) || awayOf(d, t)) return null;
   const s = stOf(d), base = activeShift(d, t);
   if (!s) return base ? { end: base.e } : null;
   switch (s.kind) {
@@ -346,8 +348,9 @@ function liveOn(d, t) {
 }
 const recent = (s, mins) => Date.now() - (s.at || 0) < mins * 60000;
 function chip(d, t) {
-  const s = stOf(d); if (!s) return "";
   const c = (cls, txt) => ` <span class="tag ${cls}">${txt}</span>`;
+  const aw = awayOf(d, t); if (aw) return c("blue", `🏥 في فرع ${esc(aw)} اليوم`);
+  const s = stOf(d); if (!s) return "";
   switch (s.kind) {
     case "stop": return c("red", `⛔ وقف الاستقبال ${new Date(s.at).toLocaleTimeString("ar-SA", { timeZone: "Asia/Riyadh", hour: "numeric", minute: "2-digit" })}`);
     case "absent": return s.off ? c("gray", "خلص دوامه اليوم") : c("red", "غائب اليوم");
@@ -426,13 +429,15 @@ function render() {
   // الإجازات: الحالية والقادمة
   const vacs = (b.vacations || []).filter(v => !v.end || v.end >= t.iso).sort((a, c) => a.start.localeCompare(c.start));
   const absent = docs.filter(d => stOf(d)?.kind === "absent");
-  $("#vacN").textContent = vacs.filter(v => v.start <= t.iso).length + absent.length;
+  const away = docs.filter(d => !onVacation(d, t.iso) && awayOf(d, t)).filter(match);
+  $("#vacN").textContent = vacs.filter(v => v.start <= t.iso).length + absent.length + away.length;
   const dmy = s => s ? s.split("-").reverse().join("/") : "";
   $("#vacList").innerHTML = vacs.map(v => { const cur = v.start <= t.iso, d = docs.find(x => x.id === v.doctorId);
     return `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(v.name)}</div><div class="meta">${d ? esc(d.dep.name) + " · " : ""}${esc(v.type)} · من ${dmy(v.start)}${v.end ? " إلى " + dmy(v.end) : " (الرجوع ما تحدد)"}</div></div>
       <span class="tag ${cur ? "amber" : "blue"}">${cur ? "في إجازة" : "قادمة"}</span>${S.edit ? `<button class="x" data-delvac="${esc(v.id)}" aria-label="حذف">✕</button>` : ""}</div>`; }).join("")
     || "";
-  $("#vacList").innerHTML = absent.map(d => `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(d.name)}</div><div class="meta">${esc(d.dep.name)} · من القروب</div></div><span class="tag red">غائب اليوم</span></div>`).join("") + $("#vacList").innerHTML || '<div class="empty">ما فيه إجازات حالياً.</div>';
+  $("#vacList").innerHTML = away.map(d => `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(d.name)}</div><div class="meta">${esc(d.dep.name)} · اليوم في فرع ${esc(awayOf(d, t))}</div></div><span class="tag blue">فرع ثاني</span></div>`).join("")
+    + absent.map(d => `<div class="vac"><div style="flex:1"><div class="nm">د. ${esc(d.name)}</div><div class="meta">${esc(d.dep.name)} · من القروب</div></div><span class="tag red">غائب اليوم</span></div>`).join("") + $("#vacList").innerHTML || '<div class="empty">ما فيه إجازات حالياً.</div>';
   // التغطية
   const cov = b.coverage || [];
   $("#covPanel").hidden = true;          // التغطية مخفية (البيانات محفوظة)
@@ -457,7 +462,7 @@ function render() {
       ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && liveOn(d, t), ch = chip(d, t);
         return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : ch || (on ? ' <span class="tag green">متواجد</span>' : "")}${vac ? "" : soonVac(d, t)}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
         <td data-l="${S.by === "floor" ? "القسم" : "الدور"}">${esc(S.by === "floor" ? d.dep.name : floorName(d.fl))}</td>
-        <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}</td>
+        <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}${d.away && Object.keys(d.away).length ? `<span class="sub">${WEEK.filter(i => d.away[i]).map(i => `${WD[i]}: فرع ${esc(d.away[i])}`).join(" · ")}</span>` : ""}</td>
         <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
         ${S.edit ? `<td class="edit-col"><button class="mini" data-doc="${esc(d.id)}">تعديل</button></td>` : ""}</tr>`; }).join("")}
       </tbody></table></section>`;

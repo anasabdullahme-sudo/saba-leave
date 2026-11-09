@@ -806,17 +806,19 @@ async function askRemove(d, e, ctx) {
   await dmAdmin(`👋 د. ${shortName(d.name)} بيروح من الفرع؟  #${code}\nمن رسالة ${ctx.by}: «${ctx.text.slice(0, 200)}»\n\nأشيله من الجدول؟ اسحب هذي الرسالة ورد «نعم» أو «لا».`);
 }
 async function removeDoctor(id, by) {
-  let name = "";
+  let name = "", removed = null;
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi"), prev = db.doc("board/bawadi_prev"), cur = (await tx.get(ref)).data(); if (!cur) return;
     const next = structuredClone(cur);
-    for (const p of next.departments) { const i = (p.doctors || []).findIndex(x => x.id === id); if (i >= 0) { name = shortName(p.doctors[i].name); p.doctors.splice(i, 1); } }
+    for (const p of next.departments) { const i = (p.doctors || []).findIndex(x => x.id === id); if (i >= 0) { name = shortName(p.doctors[i].name); removed = { at: Date.now(), by, dep: { id: p.id, name: p.name, floor: p.floor || "G" }, doc: p.doctors[i] }; p.doctors.splice(i, 1); } }
     if (!name) return;
     next.departments = next.departments.filter(p => (p.doctors || []).length || p.notes);
     next.log = [{ at: Date.now(), by, what: `شال د. ${name}` }, ...(cur.log || [])].slice(0, 60);
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
     tx.set(prev, { ...cur, savedAt: Date.now(), replacedBy: "حذف طبيب" }); tx.set(ref, next);
   });
+  // (2.13.0) نحفظ الطبيب المشال (بقسمه ودوامه) عشان نقدر نرجّعه بالضبط
+  if (removed) await db.runTransaction(async tx => { const r = db.doc("bot/removed_doctors"), c = (await tx.get(r)).data() || {}; tx.set(r, { items: [...(c.items || []).filter(x => x.doc?.id !== removed.doc.id), removed].slice(-15) }); }).catch(() => {});
   return name;
 }
 
