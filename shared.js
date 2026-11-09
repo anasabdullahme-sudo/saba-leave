@@ -68,14 +68,14 @@ export const holdName = id => (HOLD_REASONS.find(r => r.id === id) || {}).ar || 
 /* ---------- الأطباء المرخّصين في فروع أخرى (عربي + إنجليزي + صيغ بديلة) ---------- */
 export const DOCTORS = [
   // عيادات تالا الجبل
-  { id: "rasha-waziri",     branch: "tala", ar: "رشا الوزيري",     en: "Rasha Al-Waziri", seha: "رشا الوزيرى على",     alt: ["Rasha Elwaziry", "Rasha Waziry"] },
+  { id: "rasha-waziri",     branch: "tala", ar: "رشا الوزيري",     en: "Rasha Al-Waziri", seha: "رشا الوزيرى على",     alt: ["Rasha Elwaziry", "Rasha Waziry", "Rasha Alwazeery"] },
   { id: "nashwa-saqqa",     branch: "tala", ar: "نشوى السقا",      en: "Nashwa Al-Saqqa", seha: "نشوى عبد الكافي السقا",     alt: ["نشوى عبدالكافي السقا", "Nashwa Sakka", "Nachwa Sakka", "Nashwa Elsakka"] },
   { id: "ahmed-kashaf",     branch: "tala", ar: "أحمد كشاف",       en: "Ahmed Kashaf", seha: "احمد اسماعيل كشاف",        alt: ["Ahmad Kashaf", "Ahmed Kashef"] },
   { id: "walaa-mansour",    branch: "tala", ar: "ولاء منصور",      en: "Walaa Mansour", seha: "ولاء عبد الستار منصور",       alt: ["Wala Mansour", "Walaa Mansor"] },
   { id: "manal-dowidar",    branch: "tala", ar: "منال دويدار",     en: "Manal Dowidar", seha: "منال نعيم دويدار",       alt: ["Manal Dewidar", "Manal Doweidar"] },
   { id: "khaled-allam",     branch: "tala", ar: "خالد علام",       en: "Khaled Allam", seha: "خالد سعد علام",        alt: ["Khalid Allam", "Khaled Alam"] },
   { id: "rami-kilany",      branch: "tala", ar: "رامي الكيلاني",   en: "Rami El-Kilany", seha: "رامى زين العابدين الكيلانى",      alt: ["Ramy Elkilany", "Rami Al-Kilani", "Ramy Kilany"] },
-  { id: "hussein-hamid",    branch: "tala", ar: "حسين عبدالحميد",  en: "Hussein Abdelhamid", seha: "حسين عبد الحميد حسن",  alt: ["Hussein Abdel Hamid", "Hussain Abdulhameed", "Hosein Abdelhamid"] },
+  { id: "hussein-hamid",    branch: "tala", ar: "حسين عبدالحميد",  en: "Hussein Abdelhamid", seha: "حسين عبد الحميد حسن",  alt: ["حسين عبد الحميد حسن", "حسن عبدالحميد حسن", "Hussein Abdel Hamid", "Hussain Abdulhameed", "Hosein Abdelhamid"] },
   { id: "wejdan-bajubaa",   branch: "tala", ar: "وجدان باجبع",     en: "Wejdan Bajubaa", seha: "وجدان ناصر باجبع",      alt: ["Wijdan Bajabaa", "Wejdan Bajaba"] },
   { id: "karim-shedid",     branch: "tala", ar: "كريم شديد",       en: "Karim Shedid", seha: "كريم احمد شديد",      alt: ["كريم احمد شديد", "Kareem Shadid", "Karim Ahmed Shedid"] },
   { id: "mohamed-younis",   branch: "tala", ar: "محمد خالد يونس",  en: "Mohamed Khaled Younis", seha: "محمد خالد يونس", alt: ["Mohammed Khaled Younes", "Mohamed Khaled Yunis"] },
@@ -91,7 +91,7 @@ export const DOCTORS = [
   { id: "hussam-hameed",    branch: "bawadi", ar: "حسام الدين محمد", en: "Hussam Alden Hameed", seha: "حسام الدين محمد محمد", alt: ["حسام الدين حميد", "حسام حميد", "Hussam Aldin Hameed", "Hussam Aldin Mohammed", "Hussam Eldin Hamid", "Hossam Eldin Hamid", "Hossam Aldin Mohamed"] },
   { id: "mohamed-wali",     branch: "bawadi", ar: "محمد والي",     en: "Mohamed Wali", seha: "محمد محمد والي",        alt: ["محمد والى", "Mohammed Wali", "Mohamed Waly", "Mohamed Wally", "Mohammad Wali"] },
   // سابا الحرمين
-  { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara", seha: "عليا ابراهيم احمد الوريث",       alt: ["Alia Alwaraa", "Aliaa Elwara", "علياء الوريث", "Aliya Alwareeth", "Alyaa Alwareeth"] },
+  { id: "alyaa-wara",       branch: "haramain", ar: "علياء الورع",    en: "Alyaa Al-Wara", seha: "عليا ابراهيم احمد الوريث",       alt: ["عليا ابراهيم احمد الوريث", "عليا الوريث", "Alia Alwaraa", "Aliaa Elwara", "علياء الوريث", "Aliya Alwareeth", "Alyaa Alwareeth"] },
   { id: "ehab-metwally",    branch: "haramain", ar: "إيهاب المتولي",  en: "Ehab El-Metwally", seha: "ايهاب محمد محمود المتولي",    alt: ["Ihab Metwally", "Ehab Elmetwaly", "Ehab Al-Mutawalli"] },
   { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
   { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed", seha: "سحر محمد محمود علي",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
@@ -162,7 +162,11 @@ function lev(a, b) {
     m[i][j] = Math.min(m[i-1][j] + 1, m[i][j-1] + 1, m[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
   return m[a.length][b.length];
 }
-const tokEq = (x, y) => x === y || (x.length > 3 && y.length > 3 && lev(x, y) <= 1) || (x.length > 5 && y.length > 5 && lev(x, y) <= 2);
+// (9/11) الإنجليزي يتكتب بأكثر من طريقة: Alwazeery = Al-Waziri = Elwaziry → نقارن «هيكل» الحروف الساكنة (بدون al/el وحروف العلة)
+const SK_SKIP = new Set(["mohamed", "mohammed", "muhammad", "mohammad", "mahmoud", "mahmood", "ahmed", "ahmad", "ali", "aly", "abdullah", "abdallah", "hassan", "hussein", "hosein", "ibrahim", "khaled", "khalid", "omar", "amr", "mostafa", "mustafa", "saleh", "said", "sayed", "elsayed"]);   // أسماء شائعة: ما نطابقها بالهيكل (mahmoud ≠ mohammed)
+const latSk = t => /^[a-z]+$/.test(t) && !SK_SKIP.has(t) ? (t.length >= 6 ? t.replace(/^(al|el)/, "") : t).replace(/[aeiouyw]/g, "").replace(/(.)\1+/g, "$1") : "";
+const tokEq = (x, y) => x === y || (x.length > 3 && y.length > 3 && lev(x, y) <= 1) || (x.length > 5 && y.length > 5 && lev(x, y) <= 2)
+  || (() => { const a = latSk(x), b = latSk(y); return a.length >= 2 && a === b && x.replace(/^(al|el)(?=.{4})/, "")[0] === y.replace(/^(al|el)(?=.{4})/, "")[0]; })();
 
 /** يرجّع { doctor, branch } — الطبيب null إذا ما انعرف (الفرع = البوادي) */
 export function matchDoctor(input) {
