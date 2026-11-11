@@ -467,7 +467,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261109b";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261111a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -636,8 +636,9 @@ function renderCounts() {
 /* ---------- القوائم ---------- */
 const match = x => {
   if (!S.q) return true;
-  const q = S.q.toLowerCase();
-  return [x.patientName, x.patientNameEn, x.idNumber, x.phone, x.ref, x.companionName, x.companionId, x.doctorName, x.stampDoctor].some(v => String(v || "").toLowerCase().includes(q));
+  const nz = v => String(v || "").toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");   // (11/11) اثير = أثير
+  const q = nz(S.q);
+  return [x.patientName, x.patientNameEn, x.idNumber, x.phone, x.ref, x.companionName, x.companionId, x.doctorName, x.stampDoctor].some(v => nz(v).includes(q));
 };
 function dates(x) {
   if (x.type === "attendance") return x.visitDate ? `حضور ${x.visitDate}` : "";
@@ -867,7 +868,7 @@ function renderGlobal() {
   $("#gres").innerHTML = `<h3>🔎 نتائج البحث في كل الفروع <small>${list.length ? list.length + " طلب" + (here < list.length ? ` — ${list.length - here} في فروع/أنواع ثانية` : "") : ""}</small></h3>`
     + (list.length ? list.map(x => `<button class="gi" data-gid="${esc(x.id)}"><b>${esc(x.patientName)}</b><span class="st ${x.status}">${STATUS_AR[x.status] || ""}</span>
       <span class="mt"><span>${esc(branchName(x.branch))}</span><span>${esc(typeName(x.type))}</span><span class="id">${esc(x.idNumber)}</span><span>${esc(x.ref || "")}</span><span>${esc(dates(x))}</span>${x.status === "done" && x.doneAt ? `<span>رُفع ${esc(timeAgo(x.doneAt))}${x.doneBy ? " — " + esc(x.doneBy) : ""}</span>` : ""}</span></button>`).join("")
-      : `<div class="empty" style="padding:10px 0"><b>ما فيه طلب بهالبحث</b>للطلبات القديمة اكتب رقم الهوية أو الجوال أو رقم الطلب كامل</div>`);
+      : `<div class="empty" style="padding:10px 0"><b>ما فيه طلب بهالبحث</b>للمرفوع القديم اكتب رقم الهوية أو الجوال أو رقم الطلب كامل، أو بداية الاسم</div>`);
 }
 $("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const all = $("#gres").querySelectorAll("[data-gid]"); if (all.length === 1) all[0].click(); } });   // نتيجة وحدة → Enter يفتحها
 $("#gres").addEventListener("click", e => {

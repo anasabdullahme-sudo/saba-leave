@@ -806,10 +806,15 @@ async function liveBackend(role) {
       const tries = [];
       if (/^[12]\d{9}$/.test(t)) tries.push(["idNumber", t], ["companionId", t]);
       else if (/^0?5\d{8}$/.test(t)) tries.push(["phone", normPhone(t)]);
-      else if (/^(SB-?)?[A-Z0-9]{5}$/.test(t) && /\d/.test(t)) tries.push(["ref", t.startsWith("SB") ? "SB-" + t.replace(/^SB-?/, "") : "SB-" + t]);
-      if (!tries.length) return [];
+      else if (/^SB-?[A-Z0-9]{5}$/.test(t) || (/^[A-Z0-9]{5}$/.test(t) && /\d/.test(t))) tries.push(["ref", "SB-" + t.replace(/^SB-?/, "")]);   // (11/11) رقم طلب كله حروف (SB-MJWXY) بعد
       const out = new Map();
       for (const [f, v] of tries) { const sn = await FS.getDocs(FS.query(col, FS.where(f, "==", v), FS.limit(25))); sn.docs.forEach(d => out.set(d.id, toObj(d))); }
+      // (11/11) بالاسم في كل الفروع (بداية الاسم — قاعدة البيانات ما تبحث وسط الكلام): أثير سطام → أثير سطام التبيتي
+      const nm = String(q || "").trim().replace(/\s+/g, " ");
+      if (!tries.length && nm.length >= 4 && !/\d/.test(nm)) {
+        const vars = [...new Set([nm, nm.replace(/^[أإآ]/, "ا"), nm.replace(/^ا/, "أ")])].slice(0, 2);
+        for (const v of vars) { const sn = await FS.getDocs(FS.query(col, FS.where("patientName", ">=", v), FS.where("patientName", "<=", v + "\uf8ff"), FS.limit(20))); sn.docs.forEach(d => out.set(d.id, toObj(d))); }
+      }
       return [...out.values()];
     },
     async countDoneToday(branch, type) {
