@@ -460,6 +460,7 @@ ${list}`}
 - document_kind: "sick_leave" for a sick leave report with "Accompanied By" empty, "companion_leave" if it is a companion leave or "Accompanied By" is filled, "attendance" for an attendance/visit certificate (مشهد حضور/مراجعة), "other" otherwise — IMPORTANT: a drug prescription (Drug Prescription / وصفة طبية / وصفة علاجية, a list of medicines with dosage), lab or radiology results, an invoice/receipt, an appointment card, a referral, or any medical report that does NOT grant leave days is "other", even if it shows the patient and doctor details.
 - For companion leave: companion_name / companion_id / companion_dob belong to the companion; patient_* to the sick patient.
 - For attendance: visit_date = the visit date; copy the printed visit date exactly into start_printed_en / start_printed_ar too (each printed copy separately).
+- Attendance template ("Visit Notice / مشهد مراجعة"): a table العيادة | الطبيب/ة | تاريخ الزيارة, e.g. "2026-11-12 17:11:45". visit_time = the TIME printed with the visit date, as 24-hour "HH:MM" exactly as printed (e.g. "17:11"); "" if no time is printed. The doctor is the name under الطبيب/ة.
 - quality: "good", "blurry" (text hard to read), "cropped" (key fields cut off), or "not_document".
 - date_altered: "yes" if the leave dates or days (Starting from / leave days / end date / visit date) look handwritten, written or corrected with a pen, crossed out, overwritten, scratched, covered with correction fluid, or otherwise manually changed on top of the printed text; "no" if they are cleanly printed.
 - date_alter_note: when date_altered is "yes", a short Arabic note of what you saw (e.g. "تاريخ البداية مكتوب بالقلم فوق المطبوع")، else "".
@@ -489,7 +490,7 @@ function blockPage() {
 
 /* ------------- نسخة التجربة داخل Claude (قاعدة بيانات + قراءة بـ Claude) ------------- */
 const AI_KEYS = ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
-  "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
+  "leave_start","leave_start_raw","leave_days","leave_end","visit_date","visit_time","reason","accompanied_by",
   "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note","start_printed_en","start_printed_ar","age_printed"];
 async function artifactBackend() {
   const [db, sample, assets, user] = await Promise.all(["db", "sample", "assets", "user"].map(n => window.claude.use(n).catch(() => null)));
@@ -617,7 +618,7 @@ async function liveBackend(role) {
     const S = AI.Schema;
     const props = {};
     ["patient_name","patient_name_ar","patient_name_en","patient_file_no","id_number","nationality","gender","dob","dob_raw","mobile",
-     "leave_start","leave_start_raw","leave_days","leave_end","visit_date","reason","accompanied_by",
+     "leave_start","leave_start_raw","leave_days","leave_end","visit_date","visit_time","reason","accompanied_by",
      "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note","start_printed_en","start_printed_ar","age_printed"].forEach(k => props[k] = S.string());
     props.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] });
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
@@ -629,7 +630,7 @@ async function liveBackend(role) {
 
   // نفس الإعداد بس خانات أقل ومرتّبة (الهوية والاسم والتاريخ أول) — للقراءة أول بأول
   const LEAN_KEYS = ["id_number", "patient_name_ar", "patient_name_en", "dob", "start_printed_en", "start_printed_ar", "leave_days", "leave_start", "leave_end", "age_printed", "mobile",
-    "patient_file_no", "nationality", "gender", "doctor_name", "stamp_doctor_name", "document_kind", "quality", "doc_title", "date_altered", "date_alter_note", "reason", "visit_date",
+    "patient_file_no", "nationality", "gender", "doctor_name", "stamp_doctor_name", "document_kind", "quality", "doc_title", "date_altered", "date_alter_note", "reason", "visit_date", "visit_time",
     "companion_name", "companion_id", "companion_dob", "relationship", "accompanied_by"];
   let leanCfg = null;
   async function getLeanModel(name, think = false) {
@@ -657,7 +658,7 @@ async function liveBackend(role) {
       await getModel();
       const S = AIref.Schema;
       const LEAN = ["id_number", "patient_name_ar", "patient_name_en", "dob", "start_printed_en", "start_printed_ar", "leave_days", "leave_start", "leave_end", "age_printed", "mobile",
-        "patient_file_no", "nationality", "gender", "doctor_name", "stamp_doctor_name", "document_kind", "quality", "doc_title", "date_altered", "reason", "visit_date",
+        "patient_file_no", "nationality", "gender", "doctor_name", "stamp_doctor_name", "document_kind", "quality", "doc_title", "date_altered", "reason", "visit_date", "visit_time",
         "companion_name", "companion_id", "companion_dob", "relationship", "accompanied_by"];
       const lp = {}; LEAN.forEach(k => lp[k] = S.string());
       lp.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] }); lp.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });

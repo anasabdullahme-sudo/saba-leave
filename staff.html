@@ -92,7 +92,19 @@ main{max-width:1320px;margin:0 auto;padding:30px 22px 60px}
 
 /* ---------- lanes ---------- */
 .lane-switch{display:none}
-.lanes{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:18px;margin-top:28px;align-items:start}
+.lanes{display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:14px;margin-top:28px;align-items:start}
+.l-fix .lane-h{background:#FFF7EA}.count.fixc{background:#E07B12;color:#fff}
+.chip.dfx{background:#FFE8CC;color:#8A4B00;font-weight:700}
+.dfx-box{background:#FFF7EA;border:2px solid #EF9F27;border-radius:14px;padding:12px;margin-bottom:12px;font-size:14px;line-height:1.7;color:#633806}
+.dfx-box>b{display:block;font-size:15px}
+.dfx-r{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.dfx-r div{background:#fff;border:1px solid #F5C97A;border-radius:10px;padding:6px 8px;text-align:center}
+.dfx-r small{display:block;color:#854F0B;font-size:12px}.dfx-r b{direction:ltr;display:block;font-size:15px;color:#412402}
+.dfx-r .pat{border-color:#E07B12;border-width:2px}
+.dfx-b{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.dfx-b button{all:unset;cursor:pointer;padding:7px 12px;border-radius:9px;font-weight:700;font-size:13.5px;border:1.5px solid #EF9F27;background:#fff;color:#8A4B00}
+.dfx-b button.main{background:#E07B12;border-color:#E07B12;color:#fff}
+.dfx-box .tiny{font-size:12.5px;color:#854F0B;margin-top:6px}
 .lane{background:rgba(255,255,255,.75);border:1px solid var(--line);border-radius:22px;overflow:hidden}
 .lane-h{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);background:var(--white)}
 .lane-h h2{font-size:17px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:10px}
@@ -254,6 +266,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
   .drawer{grid-template-columns:1fr;grid-template-rows:42vh 1fr}
   .viewer{order:1}.panel{order:2;border-left:0}
 }
+@media (max-width:1180px){ .lanes{grid-template-columns:1fr 1fr} }
 @media (max-width:820px){
   .types{flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;padding:10px 4px 4px;margin-top:12px;scrollbar-width:none}
   .ty{flex:none;height:44px;padding:0 14px;font-size:14.5px}
@@ -261,7 +274,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
   .lane-switch button{height:40px;padding:0 16px;border-radius:99px;border:1px solid var(--line);background:var(--white);font-weight:600;color:var(--muted)}
   .lane-switch button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
   .lanes{grid-template-columns:1fr;margin-top:14px}
-  .lanes[data-show=pending] .lane:not(.l-pending),.lanes[data-show=held] .lane:not(.l-held),.lanes[data-show=done] .lane:not(.l-done){display:none}
+  .lanes[data-show=pending] .lane:not(.l-pending),.lanes[data-show=fix] .lane:not(.l-fix),.lanes[data-show=held] .lane:not(.l-held),.lanes[data-show=done] .lane:not(.l-done){display:none}
   .list{max-height:none}
   .br{padding:0 13px;font-size:14px}
   .who{display:none}
@@ -317,12 +330,16 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <div class="types" id="types"></div>
       <div class="tools"><label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" placeholder="ابحث بالاسم، رقم الهوية، الجوال أو رقم الطلب" aria-label="بحث"></label></div>
     </div>
-    <div class="lane-switch"><button class="on" data-lane="pending">في الانتظار</button><button data-lane="held">معلّق</button><button data-lane="done">تم الرفع</button></div>
+    <div class="lane-switch"><button class="on" data-lane="pending">في الانتظار</button><button data-lane="fix">تعديل تاريخ</button><button data-lane="held">معلّق</button><button data-lane="done">تم الرفع</button></div>
     <section class="gres" id="gres" hidden></section>
     <div class="lanes" id="lanes" data-show="pending">
       <section class="lane l-pending">
         <div class="lane-h"><h2>في الانتظار <span class="count red" id="cPending">0</span></h2><span>الأقدم أولاً</span></div>
         <div class="list" id="lPending"></div>
+      </section>
+      <section class="lane l-fix">
+        <div class="lane-h"><h2>تعديل تاريخ <span class="count fixc" id="cFix">0</span></h2><span>أكّد التاريخ من الصورة</span></div>
+        <div class="list" id="lFix"></div>
       </section>
       <section class="lane l-held">
         <div class="lane-h"><h2>معلّق <span class="count amber" id="cHeld">0</span></h2><span>يحتاج متابعة</span></div>
@@ -467,7 +484,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261111a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261112a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -572,6 +589,7 @@ function start() {
     archiveExactDupes(list);
     syncLocks(list); lostMine(ids); syncSehaReqs();
     renderCounts(); renderPending(); renderHeld(); postQueue();
+    if (S.wantOpen && liveReq(S.wantOpen)) { const w = S.wantOpen; S.wantOpen = null; setTimeout(() => openFromTool(w), 300); }
     if (doneMsgQueue) handleSehaDone(doneMsgQueue);
     if (S.openId) {
       const x = list.find(r => r.id === S.openId);
@@ -640,8 +658,12 @@ const match = x => {
   const q = nz(S.q);
   return [x.patientName, x.patientNameEn, x.idNumber, x.phone, x.ref, x.companionName, x.companionId, x.doctorName, x.stampDoctor].some(v => nz(v).includes(q));
 };
+function fixTxt(x) {
+  const [d1, d2, t] = String(x.dateFix || "").split("|");
+  return x.type === "attendance" ? d1 + (t ? " " + t12(t) : "") : d1 === d2 || !d2 ? d1 : `${d1} ← ${d2}`;
+}
 function dates(x) {
-  if (x.type === "attendance") return x.visitDate ? `حضور ${x.visitDate}` : "";
+  if (x.type === "attendance") return x.visitDate ? `حضور ${x.visitDate}${x.entryTime || x.exitTime ? ` ${t12(x.entryTime) || "؟"}–${t12(x.exitTime) || "؟"}` : ""}` : "";
   if (!x.leaveStart) return "";
   return x.leaveEnd && x.leaveEnd !== x.leaveStart ? `${x.leaveStart} ← ${x.leaveEnd}` : x.leaveStart;
 }
@@ -681,6 +703,16 @@ async function ensureDevice() {
 // القفل: myLocks = الطلبات المقفولة على هالجهاز. أي حركة (هنا أو في صحة) تجدد القفل (كل 40 ثانية بالكثير)
 const myLocks = new Map();   // id → { act: آخر حركة, renew: آخر تجديد, sent: وقت إرسال القفل }
 const liveReq = id => S.pending.find(r => r.id === id) || S.held.find(r => r.id === id);
+// (1.9.8) من الأداة «افتح الطلب للتأكيد» (أو الرابط staff.html#open=ID): نفتح الطلب نفسه في اللوحة
+function openFromTool(id) {
+  const x = S.pending && liveReq(id);
+  if (!x) { if (!S.pending || S.firstLoad) { S.wantOpen = id; return; } return toast("هالطلب ما عاد في الانتظار"); }
+  select(x.branch, x.type);
+  document.querySelector(`.lane-switch button[data-lane="${isFix(x) ? "fix" : x.status === "held" ? "held" : "pending"}"]`)?.click();
+  openDrawer(x.id);
+  try { window.focus(); } catch {}
+}
+{ const h = /^#open=([A-Za-z0-9]{20})$/.exec(location.hash); if (h) { S.wantOpen = h[1]; history.replaceState(null, "", location.pathname + location.search); } }
 const lostSent = new Set();                                 // بلّغنا الأداة إن القفل راح → لما يرجع نبلّغها
 const lockMsg = (id, extra) => { if (extra.ok) { if (!lostSent.delete(id)) return; } else lostSent.add(id); window.postMessage({ type: "SABA_LOCK", id, ...extra }, location.origin); };   // للأداة في صحة
 async function lockReq(id, why = "") {
@@ -783,7 +815,7 @@ setInterval(() => {
   renderPending(); postQueue(); if (S.openId) renderLockState(liveReq(S.openId));
 }, 5000);
 function rowHTML(x, mode) {
-  const done = mode === "done", held = mode === "held";
+  const done = mode === "done", held = mode === "held", fixm = mode === "fix";
   const dupe = mode === "pending" && S.pending.filter(y => y.idNumber === x.idNumber && y.type === x.type && (y.leaveStart || y.visitDate) === (x.leaveStart || x.visitDate)).length > 1;
   const late = mode === "pending" && Date.now() - x.createdAt > 30 * 60000;
   const dupeOther = mode !== "done" && [...S.pending, ...S.held].some(y => y.id !== x.id && y.idNumber === x.idNumber && y.type !== x.type && Math.abs((y.createdAt || 0) - (x.createdAt || 0)) < 48 * 3600e3);
@@ -792,10 +824,11 @@ function rowHTML(x, mode) {
   const waBtn = `<button class="quick wa" data-wa="${esc(x.id)}" title="واتساب للمراجع">💬</button>`;
   const actions = done ? `<div class="quick-row"><span class="age">${esc(x.doneBy || "")}</span>${waBtn}</div>`
     : held ? `<div class="quick-row">${waBtn}<button class="quick ghost" data-unhold="${esc(x.id)}">إرجاع</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`
+    : fixm ? `<div class="quick-row">${waBtn}<button class="quick" data-open="${esc(x.id)}">أكّد التاريخ</button></div>`
     : `<div class="quick-row">${waBtn}<button class="quick ghost" data-hold="${esc(x.id)}">تعليق</button><button class="quick" data-quick="${esc(x.id)}">${CHECK}تم الرفع</button></div>`;
   return `<div class="row ${done ? "done-row" : ""} ${S.fresh.has(x.id) ? "new" : ""} ${S.openId === x.id ? "sel" : ""}" data-id="${esc(x.id)}" role="button" tabindex="0">
     <div>
-      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">🔒 مع ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq" title="${esc(x.inquiryText || "")}">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}${x.inquiryText && !/^SB-?\w{5}$/i.test(x.inquiryText.trim()) ? `: «${esc(x.inquiryText.slice(0, 50))}${x.inquiryText.length > 50 ? "…" : ""}»` : ""}</span>` : ""}${held && x.fixToken ? (S.answered?.has(x.id) ? '<span class="chip fix">✓ المريض عدّل — يتطبّق…</span>' : '<span class="chip fix">بانتظار تعديل المريض</span>') : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${!done && x.docKind === "other" ? '<span class="chip dup">⚠ مو ورقة إجازة</span>' : ""}${x.dateFlag && !x.dateChecked && !done ? `<span class="chip dup" title="${esc(x.dateFlag)}">⚠ تأكد من التاريخ</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip warn" title="الختم يختلف عن الاسم المطبوع — المعتمد طبيب الختم">الختم: د. ${esc(rd?.ar || x.stampDoctor)} · المطبوع: ${esc(x.doctorName)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
+      <div class="nm">${esc(x.patientName)}${held ? `<span class="chip hold">${esc(holdName(x.holdReason))}</span>` : ""}${!done && openByOther(x) ? `<span class="chip open">🔒 مع ${esc(openByOther(x))}</span>` : ""}${dupe ? '<span class="chip dup">مكرر</span>' : ""}${dupeOther ? '<span class="chip dup">مكرر بنوع ثاني</span>' : ""}${!done && x.inquiryAt ? `<span class="chip inq" title="${esc(x.inquiryText || "")}">📩 المراجع يستفسر ${esc(timeAgo(x.inquiryAt))}${x.inquiryCount > 1 ? ` (${x.inquiryCount} مرات)` : ""}${x.inquiryText && !/^SB-?\w{5}$/i.test(x.inquiryText.trim()) ? `: «${esc(x.inquiryText.slice(0, 50))}${x.inquiryText.length > 50 ? "…" : ""}»` : ""}</span>` : ""}${held && x.fixToken ? (S.answered?.has(x.id) ? '<span class="chip fix">✓ المريض عدّل — يتطبّق…</span>' : '<span class="chip fix">بانتظار تعديل المريض</span>') : ""}${!held && x.patientNote ? `<span class="chip fix">ملاحظة المريض: ${esc(x.patientNote)}</span>` : ""}${!done && x.docKind === "other" ? '<span class="chip dup">⚠ مو ورقة إجازة</span>' : ""}${isFix(x) ? `<span class="chip dfx" title="${esc(x.dateFlag || "")}">🙋 المراجع كتب: ${esc(fixTxt(x))}</span>` : x.dateFlag && !x.dateChecked && !done ? `<span class="chip dup" title="${esc(x.dateFlag)}">⚠ تأكد من التاريخ</span>` : ""}${unknownDoc && mode === "pending" ? '<span class="chip warn">طبيب غير مدرج</span>' : ""}${byStamp ? `<span class="chip warn" title="الختم يختلف عن الاسم المطبوع — المعتمد طبيب الختم">الختم: د. ${esc(rd?.ar || x.stampDoctor)} · المطبوع: ${esc(x.doctorName)}</span>` : ""}${x.type === "companion" ? `<span class="chip">مرافق: ${esc(x.companionName)}</span>` : ""}</div>
       <div class="meta"><span class="id">${esc(x.idNumber)}</span><span>${esc(rd && byStamp ? rd.ar : shownDoctor(x))}</span><span>${esc(dates(x))}</span></div>
       ${held && x.holdNote ? `<div class="hold-note">${esc(x.holdNote)}</div>` : ""}
     </div>
@@ -805,9 +838,19 @@ function rowHTML(x, mode) {
     </div>
   </div>`;
 }
+// «تعديل تاريخ»: المراجع كتب تاريخ غير المقروء — الطلب ما ينرفع (ولا من الأداة) لين الموظف يتأكد من الصورة
+const isFix = x => !!x && x.status !== "held" && x.status !== "done" && !!x.dateFix && !x.dateChecked;
+const t12 = v => { const m = /^(\d{2}):(\d{2})$/.exec(v || ""); if (!m) return ""; const h = +m[1]; return `${h % 12 || 12}:${m[2]} ${h < 12 ? "ص" : "م"}`; };
+function renderFix() {
+  const list = S.pending.filter(x => isFix(x) && x.branch === S.branch && x.type === S.type && match(x)).sort((a, b) => a.createdAt - b.createdAt);
+  $("#cFix").textContent = list.length;
+  $("#lFix").innerHTML = list.length ? list.map(x => rowHTML(x, "fix")).join("")
+    : `<div class="empty"><b>ما فيه طلبات تعديل تاريخ</b>لو المراجع قال التاريخ غلط، الطلب يطلع هنا لين تتأكد منه</div>`;
+}
 function renderPending() {
+  renderFix();
   // اللي يستفسر عنه المراجع يطلع فوق (تذكير)، والباقي بالأقدم أولاً
-  const list = S.pending.filter(x => x.branch === S.branch && x.type === S.type && match(x))
+  const list = S.pending.filter(x => !isFix(x) && x.branch === S.branch && x.type === S.type && match(x))
     .sort((a, b) => (b.inquiryAt ? 1 : 0) - (a.inquiryAt ? 1 : 0) || (a.inquiryAt && b.inquiryAt ? b.inquiryAt - a.inquiryAt : 0) || a.createdAt - b.createdAt);
   $("#cPending").textContent = list.length;
   $("#lPending").innerHTML = list.length ? list.map(x => rowHTML(x, "pending")).join("")
@@ -875,7 +918,7 @@ $("#gres").addEventListener("click", e => {
   const b = e.target.closest("[data-gid]"); if (!b) return;
   const x = [...S.pending, ...S.held, ...S.done, ...gServer].find(r => r.id === b.dataset.gid); if (!x) return;
   S.pin = x.status === "done" ? x : null;                                    // المرفوع القديم: يثبت في قائمة «تم الرفع» عشان يفتح
-  const lane = x.status === "done" ? "done" : x.status === "held" ? "held" : "pending";
+  const lane = x.status === "done" ? "done" : x.status === "held" ? "held" : isFix(x) ? "fix" : "pending";
   select(x.branch, x.type);
   if (S.pin && !S.done.some(r => r.id === x.id)) { S.done = [x, ...S.done]; renderDone(); }
   document.querySelector(`.lane-switch button[data-lane="${lane}"]`)?.click();
@@ -890,7 +933,9 @@ $("#lanes").addEventListener("click", e => {
   const w = e.target.closest("[data-wa]");
   if (w) { e.stopPropagation(); return openWa(w.dataset.wa); }
   const q = e.target.closest("[data-quick]");
-  if (q) { e.stopPropagation(); return markDone(q.dataset.quick); }
+  if (q) { e.stopPropagation(); if (isFix(liveReq(q.dataset.quick))) return toast("أكّد التاريخ أول — المراجع قال إنه غلط"); return markDone(q.dataset.quick); }
+  const op = e.target.closest("[data-open]");
+  if (op) { e.stopPropagation(); return openDrawer(op.dataset.open); }
   const h = e.target.closest("[data-hold]");
   if (h) { e.stopPropagation(); return openDrawer(h.dataset.hold, true); }
   const u = e.target.closest("[data-unhold]");
@@ -1190,7 +1235,7 @@ const FIELDS = x => [
   x.gender && ["gender", "الجنس"],
   ["phone", "الجوال", true],
   [x.type === "attendance" ? "بيانات الحضور" : "بيانات الإجازة"],
-  ...(x.type === "attendance" ? [["visitDate", "تاريخ الحضور", true]] : [["leaveStart", "بداية الإجازة", true], ["leaveEnd", "نهاية الإجازة", true], x.leaveDays && ["leaveDays", "عدد الأيام", true]]),
+  ...(x.type === "attendance" ? [["visitDate", "تاريخ الحضور", true], ["entryTime", "وقت الدخول", true], ["exitTime", "وقت الخروج", true]] : [["leaveStart", "بداية الإجازة", true], ["leaveEnd", "نهاية الإجازة", true], x.leaveDays && ["leaveDays", "عدد الأيام", true]]),
   x.reason && ["reason", "السبب"],
   ...(docInfo(x).byStamp ? [["stampDoctor", "الطبيب المعالج (حسب الختم)"], ["doctorName", "الاسم المطبوع (مختلف عن الختم)"]]
     : [["doctorName", "الطبيب المعالج"], x.stampDoctor && ["stampDoctor", "ختم الطبيب"]]),
@@ -1211,10 +1256,42 @@ async function openDrawer(id, holdNow) {
     const [k, label, ltr, ro] = f;
     if (k === "@type") return `<div class="fr"><label>${label}</label><select data-k="type">${TYPES.map(t => `<option value="${t.id}" ${t.id === x.type ? "selected" : ""}>${t.ar}</option>`).join("")}</select><span></span></div>`;
     if (k === "@branch") return `<div class="fr"><label>${label}</label><select data-k="branch">${BRANCHES.map(b => `<option value="${b.id}" ${b.id === x.branch ? "selected" : ""}>${b.ar}</option>`).join("")}</select><span></span></div>`;
-    return `<div class="fr"><label>${label}</label><input data-k="${k}" value="${esc(x[k])}" ${ltr ? 'class="ltr"' : ""} ${ro ? "readonly" : ""} ${DATE_KEYS.includes(k) ? 'data-date="1" inputmode="numeric" maxlength="10"' : ""}><button class="cp" data-cp="${k}" title="نسخ" aria-label="نسخ ${label}">${COPY}</button></div>`;
+    return `<div class="fr"><label>${label}</label><input data-k="${k}" value="${esc(x[k])}" ${ltr ? 'class="ltr"' : ""} ${ro ? "readonly" : ""} ${DATE_KEYS.includes(k) ? 'data-date="1" inputmode="numeric" maxlength="10"' : ""} ${/Time$/.test(k) ? 'type="time"' : ""}><button class="cp" data-cp="${k}" title="نسخ" aria-label="نسخ ${label}">${COPY}</button></div>`;
   }).join("");
   $("#dFields").querySelectorAll("input[data-date]").forEach(i => { i.addEventListener("input", () => { i.value = fmtDateInput(i.value); }); attachDatePicker(i); });
-  if (x.dateFlag) {                                                       // تنبيه التاريخ: قلم/شطب في التقرير، أو المريض كتبه، أو ما يطابق
+  if (isFix(x)) {                                                         // «تعديل تاريخ»: المقروء ↔ اللي كتبه المراجع — الموظف يختار بعد ما يشوف الصورة
+    const att = x.type === "attendance", [d1, d2, tt] = String(x.dateFix).split("|");
+    const span = (a, b) => { const ms = d => Date.parse(String(d).split("/").reverse().join("-") + "T12:00:00Z"); const n = Math.round((ms(b) - ms(a)) / 864e5) + 1; return n > 0 ? n : 1; };
+    const nd = n => n === 1 ? "يوم واحد" : n === 2 ? "يومين" : n <= 10 ? n + " أيام" : n + " يوم";
+    const read = att ? `${x.visitDate || "—"}${x.entryTime ? " · " + t12(x.entryTime) : ""}` : `${x.leaveStart || "—"}${x.leaveEnd && x.leaveEnd !== x.leaveStart ? " ← " + x.leaveEnd : ""} (${nd(span(x.leaveStart, x.leaveEnd || x.leaveStart))})`;
+    const pat = att ? `${d1}${tt ? " · " + t12(tt) : ""}` : `${d1}${d2 && d2 !== d1 ? " ← " + d2 : ""} (${nd(span(d1, d2 || d1))})`;
+    const note = (/«([^»]+)»/.exec(x.dateFlag || "") || [])[1] || "";
+    const w = document.createElement("div"); w.className = "dfx-box";
+    w.innerHTML = `<b>🙋 المراجع يقول التاريخ غلط — شوف صورة التقرير واختر الصح</b>
+      <div class="dfx-r"><div><small>المقروء من التقرير</small><b>${esc(read)}</b></div><div class="pat"><small>اللي كتبه المراجع</small><b>${esc(pat)}</b></div></div>
+      ${note ? `<div>ملاحظته: «${esc(note)}»</div>` : ""}
+      <div class="dfx-b"><button type="button" class="main" data-dfx="pat">اعتمد تاريخ المراجع</button><button type="button" data-dfx="read">اعتمد اللي في الخانات</button></div>
+      <div class="tiny">لو الاثنين غلط: عدّل التاريخ في الخانات تحت، وبعدين اضغط «اعتمد اللي في الخانات». بعد التأكيد يرجع الطلب لقائمة الانتظار وينفتح في الأداة.</div>`;
+    $("#dFields").prepend(w);
+    ["leaveStart", "leaveEnd", "visitDate", "entryTime"].forEach(k => $("#dFields").querySelector(`input[data-k="${k}"]`)?.classList.add("warn-in"));
+    w.addEventListener("click", async e => {
+      const b = e.target.closest("[data-dfx]"); if (!b || lockedAway()) return;
+      const who = (myLabel?.() || myName() || "تم") + " " + new Date().toLocaleTimeString("ar-SA", { hour: "numeric", minute: "2-digit" });
+      const cur = k => $("#dFields").querySelector(`input[data-k="${k}"]`)?.value.trim() || x[k] || "";
+      let patch;
+      if (b.dataset.dfx === "pat") patch = att ? { visitDate: d1, ...(tt ? { entryTime: tt } : {}) } : { leaveStart: d1, leaveEnd: d2 || d1, leaveDays: String(span(d1, d2 || d1)) };
+      else patch = att ? { visitDate: cur("visitDate"), entryTime: cur("entryTime") } : { leaveStart: cur("leaveStart"), leaveEnd: cur("leaveEnd") };
+      patch.dateChecked = `${b.dataset.dfx === "pat" ? "اعتمد تاريخ المراجع" : "اعتمد المقروء"}: ${att ? patch.visitDate : patch.leaveStart + (patch.leaveEnd && patch.leaveEnd !== patch.leaveStart ? " ← " + patch.leaveEnd : "")} — ${who}`.slice(0, 200);
+      b.disabled = true;
+      try {
+        await api.update(x.id, patch);
+        [S.pending, S.held].forEach(l => { const r = l.find(y => y.id === x.id); if (r) Object.assign(r, patch); });
+        toast("✓ تأكّد التاريخ — الطلب رجع للانتظار وانفتح في الأداة");
+        renderCounts(); renderPending(); renderHeld(); postQueue(); syncSehaReqs?.();
+        openDrawer(x.id);
+      } catch (err) { console.error(err); b.disabled = false; toast("ما قدرت أحفظ — تأكد من الاتصال"); }
+    });
+  } else if (x.dateFlag) {                                                // تنبيه التاريخ: قلم/شطب في التقرير، أو المريض كتبه، أو ما يطابق
     const w = document.createElement("div"); w.className = "date-warn" + (x.dateChecked ? " ok" : "");
     w.innerHTML = x.dateChecked ? `✓ تأكدتوا من التاريخ${x.dateChecked !== true ? " — " + esc(String(x.dateChecked)) : ""}` : `<b>⚠ تأكد من تاريخ الإجازة من صورة التقرير قبل الرفع</b><div>${esc(x.dateFlag)}</div><button type="button" class="btn-ok">تأكدت ✓</button>`;
     $("#dFields").prepend(w);
@@ -1269,7 +1346,7 @@ function closeDrawer() {
 }
 $("#dClose").onclick = closeDrawer; $("#scrim").onclick = closeDrawer;
 const lockedAway = () => { const x = S.openId && liveReq(S.openId); const o = x && openByOther(x); if (o) { chime(); toast(`🔒 هالطلب عند ${o} — ما تقدر تشتغل عليه لين يخلص أو ينفك (5 دقايق بدون حركة)`); } return !!o; };
-$("#dDone").onclick = () => S.openId && !lockedAway() && markDone(S.openId);
+$("#dDone").onclick = () => { if (!S.openId || lockedAway()) return; if (isFix(liveReq(S.openId))) return toast("أكّد التاريخ أول (المربع البرتقالي فوق)"); markDone(S.openId); };
 // أي حركة داخل الطلب المفتوح = يجدد القفل
 ["pointerdown", "keydown", "input", "wheel"].forEach(ev => $("#drawer").addEventListener(ev, () => { if (S.openId && liveReq(S.openId) && !openByOther(liveReq(S.openId))) touchReq(S.openId); }, { passive: true }));
 addEventListener("keydown", e => {
@@ -1667,6 +1744,8 @@ function sehaPayload(x) {
     doctorName: shownDoctor(x) || "", stampDoctor: pick("stampDoctor"),   // الختم يختلف؟ الأداة تختار طبيب الختم في صحة reason: pick("reason"), nationality: pick("nationality"), gender: pick("gender"),
     submitDate: x.createdAt ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(x.createdAt)) : "",   // يوم إرسال المراجع ← تاريخ الدخول/الخروج في صحة
     dateFlag: x.dateFlag && !x.dateChecked ? String(x.dateFlag).slice(0, 220) : "",   // تنبيه التاريخ (المراجع يقول غلط / شطب بالقلم…) — يطلع في الأداة بعد
+    dateLock: isFix(x), dateFix: isFix(x) ? fixTxt(x) : "",                            // (1.9.8) الأداة ما تعبّي لين الموظف يأكد التاريخ
+    entryTime: pick("entryTime"), exitTime: pick("exitTime"),                         // مشهد الحضور: وقت الدخول/الخروج (24 ساعة) — الأداة تعبّيها 12 ساعة
     sentAt: Date.now(),
   };
 }
@@ -1701,6 +1780,7 @@ $("#sehaDrawer").addEventListener("click", e => {
   const x = S.pending.find(r => r.id === S.openId) || S.held.find(r => r.id === S.openId); if (!x) return;
   e.preventDefault();
   if (lockedAway()) return;
+  if (isFix(x)) return toast("أكّد التاريخ أول (المربع البرتقالي فوق) — بعدها افتح صحة");
   sehaWarned = null; (S.sentSeha ||= new Set()).add(x.id); claimReq(x.id).then(r => { if (r.by) { S.sentSeha.delete(x.id); renderLockState(liveReq(x.id) || x, r); } });
   const payload = sehaPayload(x);
   window.postMessage({ type: "SABA_SEHA_FILL", payload }, location.origin);
@@ -1719,7 +1799,8 @@ addEventListener("message", async e => {
   if (e.source !== window || !e.data || typeof e.data !== "object") return;
   const m = e.data;
   if (m.type === "SABA_EXT_READY") { extVersion = m.version || "1"; extReadyAt = Date.now(); renderExtHint(); renderExtLink(); postQueue(); }
-  if (m.type === "SABA_QUEUE_REQ") postQueue();                                    // الأداة رجع لها الموظف وتبي القائمة الحين
+  if (m.type === "SABA_QUEUE_REQ") postQueue();
+  if (m.type === "SABA_OPEN_REQ" && m.id) openFromTool(m.id);                       // (1.9.8) الأداة: «افتح الطلب للتأكيد»                                    // الأداة رجع لها الموظف وتبي القائمة الحين
   if (m.type === "SABA_CHECK" && m.id) {                                           // الأداة بتفتح طلب: نتأكد من قاعدة البيانات نفسها إنه ما انرفع
     let res;
     if (api.lock) {                                                                // (1.9.2) القفل نفسه يقرا الطلب من السيرفر: انرفع؟ انحذف؟ عند غيرك؟ — قراءة وحدة بدل ثنتين

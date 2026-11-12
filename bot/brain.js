@@ -84,6 +84,8 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - لا تخترع أوقات أو أيام أو أرقام ما انقالت. الأوقات بصيغة 24 ساعة HH:MM. في العيادة 1–7 بدون ص/م غالباً مساءً، و8–11 حسب دوام الطبيب.
 - الدوام اللي يعدّي نص الليل (مثل 5 العصر لين 9 الصبح): date = يوم البداية، start_time = 17:00، end_time = 09:00، و until_next_day = true. لا تحطه على اليوم اللي بعده.
 - بعد 12 بالليل ولين 5 الفجر، «بكرة» و«الليلة» ممكن تعني يومين — لو ما وضّح اسأل باسم اليوم.
+- status و cancel_plan لازم فيها date دايم (YYYY-MM-DD). رسالة فيها «دوام يوم الجمعة» أو «بكرة» → date = ذاك اليوم بالضبط، مو اليوم. التواريخ مكتوبة تحت عند «الحين» و«الأيام الجاية».
+- لا تكرر نفس الفعل مرتين. ولو نفس الدوام محفوظ أصلاً في الخطط (من القروب) قل «موجود من قبل» وبدون أفعال.
 - لا تضيف طبيب ما انذكر في القروب أو ما طلبه أنس صراحة.
 
 الأفعال (type):
@@ -153,6 +155,7 @@ export async function handle(m, text, { forwarded = false } = {}) {
   const pclar = (pcD.data()?.items || []).filter(i => Date.now() - i.at < 12 * 3600e3);
   const night = t.m < 300 ? `\nملاحظة: الساعة الحين بعد 12 بالليل — «اليوم» بدأ للتو (${dayName(t.iso)})، واللي قبله ${dayName(A.isoPlus(t.iso, -1))}.` : "";
   const system = RULES + `\n\nالحين: ${dayName(t.iso)} ${t.iso} الساعة ${hh(t.m)} (بكرة ${dayName(tomorrow)} ${tomorrow}).${night}
+الأيام الجاية: ${[2, 3, 4, 5, 6].map(i => dayName(A.isoPlus(t.iso, i)) + " " + A.isoPlus(t.iso, i)).join("، ")}
 \n## جدول أطباء البوادي (id | الاسم | أسماء ثانية | القسم | الأيام | الدوام | …)\n${doctorsBlock()}
 \n## الإجازات (الحالية والجاية)\n${vacBlock(t.iso)}
 \n## حالات اليوم ${t.iso} (على الموقع والأداة الحين)\n${todayBlock(t.iso)}
@@ -173,13 +176,14 @@ export async function handle(m, text, { forwarded = false } = {}) {
   try { if (jid) sock?.sendPresenceUpdate("paused", jid); } catch {}
   if (!out) return false;                                        // الذكاء ما رد → group.js يكمل بالطريقة القديمة
   noteIn(user);
-  let actions = (Array.isArray(out.actions) ? out.actions : []).map(normA).map(a => fillDept(a, out.reply, text)).map(a => fillTimes(a, out.reply, text));
+  const prep = (o, txt) => uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map(a => fillTimes(a, o.reply, txt)).map(a => fillDate(a, o.reply, txt)));
+  let actions = prep(out, text);
   // فعل ناقص (حقول ما تعبّت) → نرجع للذكاء مرة وحدة يكمّله بدل ما نقول «ما طبّقت»
   const miss = actions.map(a => [a, check(a)]).filter(([, w]) => w);
   if (miss.length && !out.use_proposal) {
     const fix = await callAI(system, [...contents, { role: "model", parts: [{ text: JSON.stringify({ reply: out.reply, actions: out.actions }) }] },
       { role: "user", parts: [{ text: "[النظام] الأفعال هذي ناقصة وما تنفع:\n" + miss.map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nرجّع نفس الرد مع actions كاملة: كل فعل فيه حقوله المطلوبة بالضبط (status: doctor_id, kind, date, start_time/end_time أو at_time حسب النوع — move_doctor: doctor_id و dept باسم قسم من الجدول — add_doctor: name و dept …). لو فعلاً ناقصك معلومة من أنس، اسأله و actions فاضية." }] }]).catch(() => null);
-    if (fix) { const fa = (Array.isArray(fix.actions) ? fix.actions : []).map(normA).map(a => fillDept(a, fix.reply, text)).map(a => fillTimes(a, fix.reply, text)); if (!fa.length || !fa.some(a => check(a))) { blog(user, out); out = fix; actions = fa; } }
+    if (fix) { const fa = prep(fix, text); if (!fa.length || !fa.some(a => check(a))) { blog(user, out); out = fix; actions = fa; } }
   }
   blog(user, out);
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
@@ -260,8 +264,38 @@ function fillDept(a, reply, user) {
   return dep && !/أخرى/.test(dep.name) ? { ...a, dept: dep.name } : a;
 }
 const ISO = s => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+// (2.13.2) التاريخ: الذكاء ينسى date → كان ينحفظ على اليوم (دوام الجمعة انحفظ الخميس 12/11). الحين ناخذ اليوم من كلام أنس أو من الرد،
+// ولو الرد يقول «بكرة/الجمعة» والفعل على يوم ثاني → نوقفه ونرجع للذكاء
+const WDN = [/الاحد/, /(^|\s)(ال)?اثنين/, /(^|\s)(ال)?ثلاثا/, /(^|\s)(ال)?اربعا/, /(^|\s)(ال)?خميس/, /(^|\s)(ال)?جمعه/, /(^|\s)(ال)?سبت/];
+function daysIn(txt) {
+  const t = A.nowR(), out = new Set();
+  let s = String(txt || "").replace(/[ً-ْ]/g, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي");
+  s = s.replace(/(صباح|فجر|الصبح|ص)\s*(يوم\s+)?(ال)?(احد|اثنين|ثلاثاء?|اربعاء?|خميس|جمعه|سبت)/g, " ");   // نهاية دوام يعدّي الليل — مو يوم الدوام
+  if (/بعد\s*(بكره|بكرا|غدا|باكر)/.test(s)) { out.add(A.isoPlus(t.iso, 2)); s = s.replace(/بعد\s*(بكره|بكرا|غدا|باكر)/g, " "); }
+  if (/(^|[^\p{L}])(بكره|بكرا|غدا|باكر)(?![\p{L}])/u.test(s)) out.add(A.isoPlus(t.iso, 1));
+  if (/(^|[^\p{L}])(اليوم|الليله)(?![\p{L}])/u.test(s)) out.add(t.iso);
+  WDN.forEach((re, wd) => { if (re.test(s)) out.add(A.isoPlus(t.iso, (wd - t.wd + 7) % 7)); });
+  return out;
+}
+function fillDate(a, reply, user) {
+  if (!["status", "cancel_plan"].includes(a.type)) return a;
+  const U = daysIn(user), R = daysIn(reply), o = { ...a };
+  if (!ISO(o.date)) {
+    const pick = U.size === 1 ? U : U.size ? null : R.size === 1 ? R : R.size ? null : new Set([A.nowR().iso]);
+    if (pick) o.date = [...pick][0]; else o.__bad = "أي يوم بالضبط؟ (date ناقص)";
+    return o;
+  }
+  const t = A.nowR();
+  if (o.until_next_day && o.date === A.isoPlus(t.iso, -1)) return o;               // دوام أمس اللي يعدّي الليل
+  const one = U.size === 1 ? U : R.size === 1 && !U.size ? R : null;
+  if (one && !one.has(o.date)) o.__bad = `التاريخ ${o.date} ما يطابق اليوم المذكور (${[...one][0]})`;
+  return o;
+}
+// نفس الفعل مرتين (د. مجدي انكتب مرتين 12/11) → مرة وحدة
+function uniq(list) { const seen = new Set(); return list.filter(a => { const k = JSON.stringify(a); if (seen.has(k)) return false; seen.add(k); return true; }); }
 const docOf = id => A.docs().find(x => x.id === id);
 function check(a) {
+  if (a.__bad) return a.__bad;
   const d = a.doctor_id ? docOf(a.doctor_id) : null, t = A.nowR();
   if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "remove_alias", "move_doctor", "branch_day"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
   if (a.type === "status") {
@@ -374,6 +408,8 @@ async function run(a, t, pclar, pdocs) {
       ev.date = date;
       if (ev.at_min != null) ev.at_time = A.hhmm(ev.at_min);
       if (ev.until_min != null) ev.until_time = A.hhmm(ev.until_min);
+      const same = i => i.doctorId === id && i.date === date && i.kind === a.kind && (ev.at_min == null || i.at_min === ev.at_min) && (ev.until_min == null || i.until_min === ev.until_min);
+      if ((await readPlan()).some(same)) return { ok: true, note: "كان محفوظ من قبل" };
       // نفس الطبيب ونفس اليوم: الجديد يحل محل القديم (ما تتطبّق خطتين)
       await A.db.runTransaction(async tx => { const ref = A.db.doc("board/bawadi_plan"), c = (await tx.get(ref)).data() || {}; tx.set(ref, { ...c, items: (c.items || []).filter(i => !(i.doctorId === id && i.date === date && i.kind !== "set_schedule" && i.kind !== "remove_doctor")), at: Date.now() }); });
     }

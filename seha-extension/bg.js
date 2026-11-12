@@ -35,6 +35,7 @@ chrome.runtime.onMessage.addListener((m, sender) => {
   // (1.9.2) تبويب لوحة الموظفين: كروم ما يطفيه لتوفير الذاكرة (كان يطفيه والقائمة تقدم)
   if (m?.type === "SABA_BOARD_HERE" && sender?.tab?.id) chrome.tabs.update(sender.tab.id, { autoDiscardable: false }).catch(() => {});
   if (m?.type === "SABA_NEED_BOARD") ensureBoard();
+  if (m?.type === "SABA_OPEN_REQ" && m.id) openReqOnBoard(m.id);
 });
 // أداة صحة ما وصلتها قائمة واللوحة مو مفتوحة أبداً → نفتحها مثبّتة بالخلفية (مرة كل دقيقتين بالكثير)
 const BOARD_URL = "https://anasabdullahme-sudo.github.io/saba-leave/staff.html";
@@ -49,6 +50,17 @@ async function ensureBoard() {
   } catch { /* */ }
 }
 
+// (1.9.8) «افتح الطلب للتأكيد» من الأداة: نروح لتبويب اللوحة ونفتح الطلب فيه (أو نفتح اللوحة على الطلب)
+async function openReqOnBoard(id) {
+  try {
+    const tabs = (await chrome.tabs.query({ url: "https://anasabdullahme-sudo.github.io/saba-leave/staff*" })).filter(t => !t.discarded);
+    if (!tabs.length) return void chrome.tabs.create({ url: BOARD_URL + "#open=" + encodeURIComponent(id) });
+    const t = tabs.find(x => x.active) || tabs[0];
+    await chrome.tabs.update(t.id, { active: true });
+    try { await chrome.windows.update(t.windowId, { focused: true }); } catch {}
+    await chrome.storage.local.set({ sabaOpenReq: { id, at: Date.now() } });
+  } catch { /* */ }
+}
 /* ---------- تنبيهات الأطباء بدون ما تكون صفحة سابا مفتوحة ----------
    كل 30 ثانية (وقت الدوام بس) نشيك حالات اليوم؛ أي حدث جديد يطلع تنبيه صغير في التبويب اللي قدامك،
    ولو كروم مو قدامك (برنامج ثاني فاتح) يطلع إشعار ويندوز */

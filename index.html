@@ -108,6 +108,13 @@ main{max-width:1120px;margin:0 auto;padding:12px 20px 64px}
 .scan-card .sc-r{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:#2B5677}
 .scan-card .sc-r b{font-variant-numeric:tabular-nums;background:#fff;border-radius:99px;padding:1px 10px;color:#0082D4}
 .scan-card .sc-bar{height:6px;border-radius:99px;background:#fff;overflow:hidden}.scan-card .sc-bar i{display:block;height:100%;width:5%;background:#00A6E2;transition:width .4s}
+.scan-card[hidden],.status[hidden]{display:none}
+/* بعد ما يخلص المسح: أخضر = انقرت، برتقالي = ناقص/ما انقرت */
+.scan-card.done{background:#E8F7EF;border-color:#8FD8B5}.scan-card.done .sc-t{color:#0A6B47}.scan-card.done .sc-r{color:#1F6E4D}
+.scan-card.done .sc-r b{background:var(--ok);color:#fff}.scan-card.done .sc-bar i{width:100%!important;background:var(--ok)}
+.scan-card.warn{background:#FFF4E5;border-color:#F3C178}.scan-card.warn .sc-t,.scan-card.warn .sc-r{color:#8A4B00}
+.scan-card.warn .sc-r b{background:#E9A23B;color:#fff}.scan-card.warn .sc-bar i{width:100%!important;background:#E9A23B}
+.scan-card.done .sc-r span,.scan-card.warn .sc-r span{line-height:1.6;padding-left:8px}
 .loading .f{position:relative}.loading .f::after{content:"يتعبّى تلقائياً…";position:absolute;inset-inline-start:14px;bottom:13px;font-size:13px;color:#7FA3BD;pointer-events:none}
 .status{display:flex;align-items:center;gap:10px;padding:14px 18px 0;font-size:15px;color:var(--muted);min-height:38px}
 .status .dot{width:10px;height:10px;border-radius:50%;background:var(--sky);box-shadow:0 0 0 0 rgba(0,166,226,.6);animation:pulse 1.4s infinite}
@@ -130,7 +137,7 @@ form{padding:18px}
 .f input:focus{outline:none;border-color:var(--sky);box-shadow:0 0 0 4px rgba(0,166,226,.15)}
 .f input.ltr{direction:ltr;text-align:right}
 .f.ai input{background:#F1FAFE}
-.f.lock input{background:#EEF3F7;color:#3D5A73;cursor:not-allowed}
+.f.lock input{background:#EEF3F7;color:#3D5A73;cursor:not-allowed;pointer-events:none}
 .f.lock span em{opacity:1;background:#E6EDF3;color:#3D5A73}
 .f.bad input{border-color:var(--red);box-shadow:0 0 0 4px rgba(229,56,59,.1)}
 .f input[data-date]{padding-left:54px}
@@ -153,11 +160,22 @@ form{padding:18px}
 .dc-d b{font-size:20px;color:#412402;direction:ltr}.dc-d small{font-size:12.5px;color:#854F0B}
 .dc-ar{color:#854F0B;font-size:20px}.dc-n{text-align:center;font-weight:700;color:#633806}
 .dc-h{font-size:13.5px;color:#854F0B;margin-top:8px;line-height:1.6}
-.fixdate{display:block;margin:12px auto 0;background:none;border:1px solid var(--line);border-radius:10px;padding:9px 14px;font:inherit;font-size:13.5px;color:var(--muted);cursor:pointer}
-#fixDateBox{margin-top:10px;border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
-#fixDateBox[hidden]{display:none}
-#fixDateBox input{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
-#fixDateBox .grid2{gap:8px}.fxerr{color:var(--red);font-size:13px}
+.fxerr{color:var(--red);font-size:13.5px;margin-top:8px}
+/* «تعديل» داخل المربع الأصفر: المراجع يكتب التاريخ الصحيح (بالتقويم أو بالكتابة) ويرسل بزر خاص */
+.dc-t{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dc-e{all:unset;cursor:pointer;flex:none;font-size:14px;font-weight:700;color:#8A4B00;background:#fff;border:1.5px solid #EF9F27;border-radius:10px;padding:5px 12px}
+.dc-l{display:block;margin-top:12px;font-size:14px;font-weight:600;color:#633806}
+.dc-in{position:relative;margin-top:6px}
+.dc-in input,.dc-l>input{width:100%;height:48px;margin-top:6px;border:1.5px solid #F5C97A;border-radius:12px;padding:0 12px;font:inherit;font-size:16.5px;background:#fff;color:var(--ink)}
+.dc-in input{margin-top:0;padding-left:54px;direction:ltr;text-align:right}
+.dc-in .dp{left:6px;top:6px}
+.stp{display:flex;align-items:center;gap:10px;margin-top:6px}
+.stp button{all:unset;cursor:pointer;width:46px;height:46px;border-radius:12px;background:#fff;border:1.5px solid #F5C97A;display:grid;place-items:center;font-size:24px;font-weight:700;color:#8A4B00}
+.stp b{min-width:70px;text-align:center;font-size:20px;color:#412402}
+.dc-end{margin-top:8px;font-size:14px;color:#854F0B}
+.fixsend{background:#E07B12!important;color:#fff!important;box-shadow:0 8px 20px rgba(224,123,18,.25)!important}
+.submit[hidden]{display:none!important}
+.f input[type=time]{-webkit-appearance:none;appearance:none;display:flex;align-items:center;text-align:right;direction:ltr}
 .fine{font-size:13px;color:var(--muted);text-align:center;margin-top:12px;line-height:1.7}
 .note{margin:14px 18px 0;padding:12px 14px;border-radius:12px;background:#FFF7E8;color:#7A5200;font-size:14px;line-height:1.6;display:none}
 .note.on{display:block}
@@ -330,7 +348,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261111a";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261112a";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -549,6 +567,7 @@ async function onPhoto(file) {
   const useAI = api.aiEnabled !== false;
   renderForm(); setLoading(useAI); $("#note").classList.remove("on"); $("#aiErr")?.remove();
   setStatus(useAI ? "نقرأ بياناتك من الصورة…" : "عبّ بياناتك كما هي في التقرير", useAI ? "" : "ok");
+  $("#status").hidden = useAI; $("#scanCard").hidden = true;                // وقت المسح: البطاقة بس (بدون السطر الصغير)
   if (!document.querySelector("#sReview.on")) go("sReview");
 
   // القراءة أول (تاخذ النت كله)، ورفع الصورة يبدأ بعدها — المراجع يراجع بياناته والصورة تترفع
@@ -566,7 +585,8 @@ async function onPhoto(file) {
   if (!useAI) { startUpload(); $("#form [name]")?.focus({ preventScroll: true }); return; }
   const upLater = setTimeout(startUpload, 9000);                     // القراءة طوّلت؟ نبدأ الرفع ما ننتظر
   const card = $("#scanCard"), tScan = performance.now();
-  card.hidden = false; $("#scanStep").textContent = "نقرأ الصورة…"; $("#scanSec").textContent = "0"; $("#scanBar").style.width = "5%";
+  card.hidden = false; card.className = "scan-card"; card.querySelector(".sc-t").textContent = "⏳ لا تكتب شي — نعبّي بياناتك من الصورة تلقائياً";
+  $("#scanStep").textContent = "نقرأ الصورة…"; $("#scanSec").textContent = "0"; $("#scanBar").style.width = "5%";
   const tick = setInterval(() => {
     const t = (performance.now() - tScan) / 1000;
     $("#scanSec").textContent = Math.floor(t) + " ث";
@@ -575,7 +595,7 @@ async function onPhoto(file) {
   }, 250);
   const STEP = { id_number: "✓ رقم الهوية", patient_name_ar: "✓ الاسم", dob: "✓ تاريخ الميلاد", start_printed_en: "✓ تاريخ الإجازة", mobile: "✓ الجوال", doctor_name: "✓ الطبيب" };
   const onProgress = seen => { const got = Object.keys(STEP).filter(k => seen[k]); state._gotId = !!seen.id_number; if (got.length) $("#scanStep").textContent = "قرينا: " + got.map(k => STEP[k].slice(2)).join("، ") + "…"; };
-  const endScan = () => { clearInterval(tick); clearTimeout(upLater); if (state.blob === myBlob) { card.hidden = true; state._gotId = false; } startUpload(); };
+  const endScan = () => { clearInterval(tick); clearTimeout(upLater); if (state.blob === myBlob) state._gotId = false; startUpload(); };
   try {
     const r = await Promise.race([api.extract(blob, state.type, onProgress), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
     endScan();
@@ -604,6 +624,7 @@ async function onPhoto(file) {
       $("#note").innerHTML = `<b>هذي مو ورقة إجازة</b> (مثل وصفة العلاج أو التحاليل). صوّر <b>تقرير الإجازة المرضية</b> (أو المشهد) اللي عليه ختم الطبيب، من زر «إعادة التصوير».`;
       $("#note").style.cssText = "background:#FDECEC;color:#B4232A"; $("#note").classList.add("on");
       setStatus("هذي مو ورقة إجازة — صوّر التقرير الصحيح", "warn");
+      card.hidden = true; $("#status").hidden = false;
       return;
     }
     $("#note").style.cssText = "";
@@ -611,12 +632,15 @@ async function onPhoto(file) {
       const msg = { blurry: "الصورة غير واضحة. يُفضّل تعيد التصوير بإضاءة أفضل.", cropped: "جزء من الورقة خارج الصورة. صوّرها كاملة.", not_document: "ما قدرنا نتعرف على تقرير طبي في الصورة. تأكد إنك صوّرت التقرير الصحيح." }[r.quality];
       $("#note").textContent = msg; $("#note").classList.add("on");
     }
-    setStatus("قرأنا البيانات. راجعها قبل الإرسال", "ok");
+    // البطاقة تصير خضراء (انقرت كلها) أو برتقالية (فيه خانات فاضية) — وقت الخروج دايم يكتبه المراجع
+    const empty = [...$("#form").querySelectorAll("input[required]:not([name=exitTime])")].some(i => !i.value.trim());
+    scanDone(empty ? "part" : "ok");
   } catch (e) {
     console.warn("AI", e);
     endScan();
     if (state.blob !== myBlob) return;
     setStatus("ما قدرنا نقرأ الصورة تلقائياً — عبّ البيانات يدوياً", "warn");
+    scanDone("fail");
     const why = String(e?.code || "") + " " + String(e?.message || e || "").slice(0, 220);
     let d = $("#aiErr"); if (!d) { d = document.createElement("div"); d.id = "aiErr"; d.style.cssText = "direction:ltr;text-align:left;font-size:11px;color:#8a9bb0;padding:4px 18px 0;word-break:break-all"; $("#status").after(d); }
     d.textContent = why.trim();
@@ -624,12 +648,19 @@ async function onPhoto(file) {
     if (state.blob === myBlob) setLoading(false);
   }
 }
+function scanDone(kind) {
+  const c = $("#scanCard"); c.hidden = false; c.className = "scan-card " + (kind === "ok" ? "done" : "warn");
+  const [t, s, b] = kind === "ok" ? ["✅ تم أخذ بياناتك من الصورة", "راجع الخانات تحت، وعدّل أي شي غلط، وبعدين اضغط «إرسال»", "✓"]
+    : kind === "part" ? ["⚠️ ما قدرنا نقرا الصورة كاملة", "عبّي الخانات الفاضية بنفسك، وراجع الباقي قبل الإرسال", "!"]
+    : ["⚠️ ما قدرنا نقرا الصورة", "عبّي بياناتك بنفسك كما هي في التقرير، وراجعها قبل الإرسال", "!"];
+  c.querySelector(".sc-t").textContent = t; $("#scanStep").textContent = s; $("#scanSec").textContent = b; $("#scanBar").style.width = "100%";
+}
 function setLoading(on) { $("#form").classList.toggle("loading", on); $("#shot").classList.toggle("scanning", on); }
 function setStatus(t, kind = "") { $("#status").className = "status " + kind; $("#statusTxt").textContent = t; }
 
 /* ---------- النموذج ---------- */
 const F = (k, label, o = {}) => `<label class="f" data-k="${k}"><span><i class="lb">${label}${o.req ? ' <b>*</b>' : ""}</i><em>من الصورة</em></span>
-  <input name="${k}" ${o.ltr ? 'class="ltr"' : ""} ${o.mode ? `inputmode="${o.mode}"` : ""} ${o.ph ? `placeholder="${o.ph}"` : ""} ${o.max ? `maxlength="${o.max}"` : ""} ${o.date ? 'data-date="1"' : ""} ${o.req ? "required" : ""}>
+  <input name="${k}" ${o.type ? `type="${o.type}"` : ""} ${o.ltr ? 'class="ltr"' : ""} ${o.mode ? `inputmode="${o.mode}"` : ""} ${o.ph ? `placeholder="${o.ph}"` : ""} ${o.max ? `maxlength="${o.max}"` : ""} ${o.date ? 'data-date="1"' : ""} ${o.req ? "required" : ""}>
   <div class="err">${o.err || "هذه الخانة مطلوبة"}</div></label>`;
 
 function renderForm() {
@@ -644,26 +675,21 @@ function renderForm() {
   }
   h += F("patientName", "اسم المريض", { req: true });
   h += `<div class="grid2">${F("idNumber", "رقم الهوية / الإقامة", { req: true, mode: "numeric", max: 10, ltr: true, err: "رقم الهوية 10 أرقام ويبدأ بـ 1 أو 2" })}${F("dob", "تاريخ الميلاد", { ...date, req: true })}</div>`;
-  if (t === "attendance") h += F("visitDate", "تاريخ الحضور", { ...date, req: true });
+  if (t === "attendance") {
+    h += F("visitDate", "تاريخ الحضور", { ...date, req: true });
+    // وقت الدخول من الورقة (تاريخ الزيارة)، ووقت الخروج يحطه المراجع — تقويم الوقت في الجوال (ساعة/دقيقة/ص-م)
+    h += `<div class="grid2">${F("entryTime", "وقت الدخول", { type: "time", req: true, err: "اختر وقت الدخول" })}${F("exitTime", "وقت الخروج", { type: "time", req: true, err: "اختر وقت خروجك من العيادة (بعد وقت الدخول)" })}</div>`;
+  }
   else h += `<div class="grid2">${F("leaveStart", "بداية الإجازة", { ...date, req: true })}${F("leaveEnd", "نهاية الإجازة", { ...date, err: "النهاية لازم تكون بعد البداية أو نفس اليوم (يوم/شهر/سنة)" })}</div>`;
   h += F("doctorName", "اسم الطبيب المعالج", { req: true, ph: "كما هو مكتوب في التقرير" });
   h += F("phone", "رقم الجوال", { req: true, mode: "tel", ph: "05xxxxxxxx", max: 14, ltr: true, err: "اكتب رقم جوال سعودي صحيح يبدأ بـ 05" });
   h += `<div id="dateCheck"></div>
         <button class="btn btn-primary submit big" id="btnSend" type="submit">إرسال الطلب</button>
-        <button type="button" class="fixdate" id="btnFixDate">إرسال مع طلب تعديل التاريخ</button>
-        <div id="fixDateBox" hidden>
-          <b>وش التاريخ الصحيح؟</b>
-          ${t === "attendance" ? `<input id="fxD1" data-fx placeholder="يوم الحضور: يوم/شهر/سنة" inputmode="numeric" maxlength="10">`
-            : `<div class="grid2"><input id="fxD1" data-fx placeholder="من: يوم/شهر/سنة" inputmode="numeric" maxlength="10"><input id="fxD2" data-fx placeholder="إلى: يوم/شهر/سنة" inputmode="numeric" maxlength="10"></div>`}
-          <input id="fxDNote" placeholder="ملاحظة (اختياري)" maxlength="80">
-          <div id="fxDErr" class="fxerr" hidden></div>
-          <button type="button" class="btn btn-primary" id="btnFixSend">أرسل مع طلب التعديل</button>
-        </div>
+        <button class="btn btn-primary submit big fixsend" id="btnFixSend" type="button" hidden>إرسال مع تعديل التاريخ</button>
         <p class="fine">بإرسالك الطلب توافق على استخدام بياناتك لرفع الإجازة على منصة صحة فقط.</p>`;
   $("#form").innerHTML = h;
   $("#form").querySelectorAll("input[data-date]").forEach(i => { i.addEventListener("input", () => { i.value = fmtDateInput(i.value); }); attachDatePicker(i); });
-  $("#form").querySelectorAll("input[data-fx]").forEach(i => i.addEventListener("input", () => { i.value = fmtDateInput(i.value); $("#fxDErr").hidden = true; }));
-  state.fixDate = null;
+  state.fixDate = null; state.editDate = false;
   $("#form").querySelectorAll("input[name=idNumber],input[name=companionId]").forEach(i => i.addEventListener("input", () => { i.value = latinDigits(i.value).replace(/\D/g, ""); }));
   $("#form").querySelectorAll("input").forEach(i => i.addEventListener("input", () => { i.closest(".f")?.classList.remove("bad", "ai"); }));
 }
@@ -681,6 +707,7 @@ function fillFromAI(r) {
   setField("leaveStart", start);
   setField("leaveEnd", isoToDmy(r.leave_end) || addDaysDmy(start, days));
   setField("visitDate", isoToDmy(r.visit_date || r.leave_start));
+  setField("entryTime", hhmm(r.visit_time));
   lockDates();
   showDateCheck();
   setField("doctorName", r.doctor_name);
@@ -691,41 +718,76 @@ function fillFromAI(r) {
   setField("relationship", r.relationship);
 }
 
-// «تأكد من تاريخ إجازتك»: التاريخ كبير وواضح فوق زر الإرسال (لكل الطلبات) — لو المسح قرأه غلط يضغط «إرسال مع طلب تعديل التاريخ»
+// «تأكد من تاريخ إجازتك»: التاريخ كبير وواضح فوق زر الإرسال (لكل الطلبات)
+// لو المسح قرأه غلط: «تعديل» داخل المربع → يكتب الصح (تقويم أو كتابة) → زر «إرسال مع تعديل التاريخ» بدل زر الإرسال،
+// والطلب يروح للموظف «تعديل تاريخ» وما ينرفع من الأداة لين الموظف يتأكد من الصورة
 const WD_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+const MON_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const dmyMs = d => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ""); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1]) : NaN; };
+const dayTxt = t => { const x = new Date(t); return `${WD_AR[x.getUTCDay()]} ${x.getUTCDate()} ${MON_AR[x.getUTCMonth()]}`; };
+const nDays = n => n === 1 ? "يوم واحد" : n === 2 ? "يومين" : n <= 10 ? n + " أيام" : n + " يوم";
+function hhmm(v) { const m = /(\d{1,2})\s*:\s*(\d{2})/.exec(latinDigits(String(v || ""))); return m && +m[1] < 24 && +m[2] < 60 ? m[1].padStart(2, "0") + ":" + m[2] : ""; }
+const t12 = v => { const m = /^(\d{2}):(\d{2})$/.exec(v || ""); if (!m) return ""; const h = +m[1]; return `${h % 12 || 12}:${m[2]} ${h < 12 ? "ص" : "م"}`; };
+const fv = k => latinDigits($(`#form [name="${k}"]`)?.value || "").trim();
+const datesLocked = () => !!$("#form .f.lock");
 function showDateCheck() {
-  const box = $("#dateCheck"); if (!box) return;
-  const v = k => latinDigits($(`#form [name="${k}"]`)?.value || "").trim();
-  const att = state.type === "attendance", a = att ? v("visitDate") : v("leaveStart"), b = att ? a : (v("leaveEnd") || a);
+  const box = $("#dateCheck"); if (!box || state.editDate) return;
+  const att = state.type === "attendance", a = att ? fv("visitDate") : fv("leaveStart"), b = att ? a : (fv("leaveEnd") || a);
   const ta = dmyMs(a), tb = dmyMs(b);
   if (isNaN(ta) || isNaN(tb) || tb < ta) { box.innerHTML = ""; return; }
-  const n = Math.round((tb - ta) / 864e5) + 1;
-  const MON = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-  const cell = (lbl, d, t) => { const x = new Date(t); return `<div class="dc-d"><small>${lbl}</small><b>${d}</b><small>${WD_AR[x.getUTCDay()]} ${x.getUTCDate()} ${MON[x.getUTCMonth()]}</small></div>`; };
-  box.innerHTML = `<div class="dc"><div class="dc-t">⚠ تأكد من ${att ? "تاريخ الحضور" : "تاريخ إجازتك"}</div>
+  const n = Math.round((tb - ta) / 864e5) + 1, en = fv("entryTime"), ex = fv("exitTime");
+  const cell = (lbl, d, t) => `<div class="dc-d"><small>${lbl}</small><b>${d}</b><small>${dayTxt(t)}</small></div>`;
+  const lk = datesLocked();
+  box.innerHTML = `<div class="dc"><div class="dc-t"><span>⚠ تأكد من ${att ? "تاريخ الحضور" : "تاريخ إجازتك"}</span>${lk ? '<button type="button" class="dc-e" id="dcEdit">✎ تعديل</button>' : ""}</div>
     <div class="dc-r">${att ? cell("يوم الحضور", a, ta) : n === 1 ? cell("يوم الإجازة", a, ta) : cell("من", a, ta) + `<span class="dc-ar">←</span>` + cell("إلى", b, tb)}</div>
-    ${att ? "" : `<div class="dc-n">${n === 1 ? "يوم واحد" : n === 2 ? "يومين" : n <= 10 ? n + " أيام" : n + " يوم"}</div>`}
-    <div class="dc-h">لو التاريخ ما يطابق اللي في التقرير، اضغط «إرسال مع طلب تعديل التاريخ».</div></div>`;
+    ${att ? (en || ex ? `<div class="dc-n">من ${t12(en) || "؟"} إلى ${t12(ex) || "؟"}</div>` : "") : `<div class="dc-n">${nDays(n)}</div>`}
+    <div class="dc-h">${lk ? "لو التاريخ ما يطابق اللي في التقرير، اضغط «تعديل» واكتب الصحيح." : "لو التاريخ غلط، عدّله من الخانات فوق."}</div></div>`;
 }
-$("#form").addEventListener("input", e => { if (DATE_FIELDS.includes(e.target.name)) showDateCheck(); });
-$("#form").addEventListener("change", e => { if (DATE_FIELDS.includes(e.target.name)) showDateCheck(); });
+function openDateEdit() {
+  const att = state.type === "attendance", a = att ? fv("visitDate") : fv("leaveStart"), b = att ? a : (fv("leaveEnd") || a);
+  const n0 = Math.max(1, Math.round((dmyMs(b) - dmyMs(a)) / 864e5) + 1 || 1);
+  state.editDate = true; state.editOrig = { a, b, t: fv("entryTime") };
+  $("#dateCheck").innerHTML = `<div class="dc"><div class="dc-t"><span>✎ اكتب التاريخ الصحيح من التقرير</span><button type="button" class="dc-e" id="dcCancel">إلغاء</button></div>
+    <div class="dc-l">${att ? "يوم الحضور" : "يوم بداية الإجازة"}<div class="dc-in"><input id="edD1" inputmode="numeric" maxlength="10" placeholder="اكتب أو اختر من التقويم" value="${a}"></div></div>
+    ${att ? `<label class="dc-l">وقت الدخول<input id="edT" type="time" value="${state.editOrig.t}"></label>`
+      : `<div class="dc-l">عدد أيام الإجازة<div class="stp"><button type="button" data-st="1" aria-label="زيادة">+</button><b id="edN" data-n="${n0}">${nDays(n0)}</b><button type="button" data-st="-1" aria-label="نقص">−</button></div></div><div class="dc-end" id="edEnd"></div>`}
+    <label class="dc-l">ملاحظة (اختياري)<input id="edNote" maxlength="80" placeholder="مثال: التاريخ في الورقة 13 مو 12"></label>
+    <div id="fxDErr" class="fxerr" hidden></div></div>`;
+  const d1 = $("#edD1");
+  d1.addEventListener("input", () => { d1.value = fmtDateInput(d1.value); $("#fxDErr").hidden = true; editEnd(); });
+  attachDatePicker(d1);
+  editEnd();
+  $("#btnSend").hidden = true; $("#btnFixSend").hidden = false;
+  setTimeout(() => $("#dateCheck").scrollIntoView({ block: "center", behavior: "smooth" }), 50);
+}
+function editEnd() {
+  const e = $("#edEnd"); if (!e) return;
+  const d1 = latinDigits($("#edD1").value).trim(), n = +$("#edN").dataset.n, end = validDmy(d1) ? addDaysDmy(d1, n) : "";
+  e.textContent = end ? `آخر يوم إجازة: ${dayTxt(dmyMs(end))} (${end})` : "";
+}
+function closeDateEdit() { state.editDate = false; $("#btnSend").hidden = false; $("#btnFixSend").hidden = true; showDateCheck(); }
+$("#form").addEventListener("input", e => { if (DATE_FIELDS.includes(e.target.name) || /Time$/.test(e.target.name || "")) showDateCheck(); });
+$("#form").addEventListener("change", e => { if (DATE_FIELDS.includes(e.target.name) || /Time$/.test(e.target.name || "")) showDateCheck(); });
 $("#form").addEventListener("click", e => {
-  if (e.target.id === "btnFixDate") { const bx = $("#fixDateBox"); bx.hidden = !bx.hidden; if (!bx.hidden) setTimeout(() => { bx.scrollIntoView({ block: "center", behavior: "smooth" }); $("#fxD1")?.focus(); }, 50); }
-  if (e.target.id === "btnFixSend") {
-    const d1 = latinDigits($("#fxD1")?.value || "").trim(), d2 = latinDigits($("#fxD2")?.value || "").trim(), note = ($("#fxDNote")?.value || "").trim();
-    const err = t => { const x = $("#fxDErr"); x.textContent = t; x.hidden = false; };
-    if (!d1 && !d2 && note.length < 3) return err("اكتب التاريخ الصحيح أو ملاحظة");
-    if ((d1 && !validDmy(d1)) || (d2 && !validDmy(d2))) return err("اكتب التاريخ كذا: يوم/شهر/سنة (مثال 03/11/2026)");
-    if (d1 && d2 && dmyMs(d2) < dmyMs(d1)) return err("النهاية لازم تكون بعد البداية أو نفس اليوم");
-    state.fixDate = { d1, d2, note };
+  const id = e.target.closest("button")?.id, st = e.target.closest("[data-st]");
+  if (id === "dcEdit") return openDateEdit();
+  if (id === "dcCancel") return closeDateEdit();
+  if (st) { const b = $("#edN"), n = Math.min(60, Math.max(1, +b.dataset.n + +st.dataset.st)); b.dataset.n = n; b.textContent = nDays(n); $("#fxDErr").hidden = true; return editEnd(); }
+  if (id === "btnFixSend") {
+    const att = state.type === "attendance", o = state.editOrig || {};
+    const d1 = latinDigits($("#edD1")?.value || "").trim(), note = ($("#edNote")?.value || "").trim(), t = att ? hhmm($("#edT")?.value) : "";
+    const d2 = att ? d1 : addDaysDmy(d1, +($("#edN")?.dataset.n || 1));
+    const err = x => { const el = $("#fxDErr"); el.textContent = x; el.hidden = false; el.scrollIntoView({ block: "center", behavior: "smooth" }); };
+    if (!validDmy(d1)) return err("اكتب التاريخ كذا: يوم/شهر/سنة (مثال 03/11/2026) أو اختره من التقويم");
+    if (d1 === o.a && d2 === o.b && (!att || t === o.t) && !note) return err("ما غيّرت شي. لو التاريخ صحيح اضغط «إلغاء» وأرسل عادي");
+    state.fixDate = { d1, d2, t, note };
     $("#form").requestSubmit();
   }
 });
-// تواريخ الإجازة اللي انقرت من التقرير تنقفل — المريض ما يعدّلها أبداً (الموظف يتأكد منها من الصورة)
+// تواريخ الإجازة (ووقت الدخول) اللي انقرت من التقرير تنقفل — المريض يعدّلها من «تعديل» بس (والموظف يتأكد منها من الصورة)
 const DATE_FIELDS = ["leaveStart", "leaveEnd", "visitDate"];
 function lockDates() {
-  for (const k of DATE_FIELDS) {
+  for (const k of [...DATE_FIELDS, "entryTime"]) {
     const i = $(`#form [name="${k}"]`); if (!i || !i.value) continue;
     const c = i.cloneNode(true); c.readOnly = true; c.tabIndex = -1; c.removeAttribute("required");   // نسخة بدون التقويم والكتابة
     i.replaceWith(c);
@@ -756,6 +818,7 @@ function dateFlagFor(fd, ai) {
 $("#form").addEventListener("submit", async e => {
   e.preventDefault();
   if (state.sending) return;                     // يمنع الإرسال المكرر (ضغطتين أو Enter)
+  if (state.editDate && !state.fixDate) return $("#btnFixSend").click();   // وضع «تعديل التاريخ»: Enter = زر «إرسال مع تعديل التاريخ»
   if (state.notLeave) { $("#note").scrollIntoView({ block: "center", behavior: "smooth" }); return toast("هذي مو ورقة إجازة — صوّر تقرير الإجازة من «إعادة التصوير»", 4000); }
   const fd = Object.fromEntries(new FormData($("#form")));
   const bad = [];
@@ -766,11 +829,12 @@ $("#form").addEventListener("submit", async e => {
     if (ok && val && i.dataset.date) ok = markDate(i, k, val) && validDmy(val);
     if (ok && k === "phone") ok = validPhone(val);
     if (ok && k === "leaveEnd" && val && fd.leaveStart && dmyKey(val) < dmyKey(fd.leaveStart)) ok = false;
+    if (ok && k === "exitTime" && val && fd.entryTime && val <= fd.entryTime) ok = false;   // الخروج بعد الدخول
     i.closest(".f").classList.toggle("bad", !ok); if (!ok) bad.push(i);
   }
   if (bad.length) { bad[0].focus(); bad[0].scrollIntoView({ block: "center", behavior: "smooth" }); return toast("في خانات تحتاج تصحيح"); }
 
-  const btn = $("#btnSend"); btn.disabled = true; btn.textContent = "جاري الإرسال…"; state.sending = true;
+  const btn = state.fixDate ? $("#btnFixSend") : $("#btnSend"), btnTxt = btn.textContent; btn.disabled = true; btn.textContent = "جاري الإرسال…"; state.sending = true;
   let slow;
   try {
     // نفس الطلب بالضبط (نفس الهوية والميلاد وتواريخ الإجازة) وصلنا من قبل؟ → ما نرسله مرة ثانية
@@ -788,7 +852,7 @@ $("#form").addEventListener("submit", async e => {
     const clean = (s, mx = 120) => String(s || "").trim().slice(0, mx);   // نفس حدود قواعد الحماية — ما يفشل الإرسال بسبب نص طويل من القراءة
     slow = setTimeout(() => { btn.textContent = "النت ضعيف… لا تقفل الصفحة"; }, 12000);
     const fx = state.fixDate;
-    const fxTxt = fx ? `🙋 المراجع يقول التاريخ غلط${fx.d1 || fx.d2 ? ` — كتب: ${state.type === "attendance" ? fx.d1 : `${fx.d1 || "؟"} ← ${fx.d2 || "؟"}`}` : ""}${fx.note ? ` · «${fx.note}»` : ""}` : "";
+    const fxTxt = fx ? `🙋 المراجع يقول التاريخ غلط — كتب: ${state.type === "attendance" ? fx.d1 + (fx.t ? " " + fx.t : "") : fx.d1 === fx.d2 ? fx.d1 : `${fx.d1} ← ${fx.d2}`}${fx.note ? ` · «${fx.note}»` : ""}` : "";
     const flag = [fxTxt, dateFlagFor(fd, ai)].filter(Boolean).join(" · ").slice(0, 200);
     const create = withFlag => api.createRequest({
       ref, type: state.type,
@@ -802,10 +866,12 @@ $("#form").addEventListener("submit", async e => {
       fileNo: clean(ai.patient_file_no, 30), nationality: clean(ai.nationality, 60), gender: clean(ai.gender, 20), reason: clean(ai.reason, 300),
       stampDoctor: clean(ai.stamp_doctor_name), docKind: clean(ai.document_kind, 30),
       ...(withFlag && flag ? { dateFlag: flag } : {}),
+      ...(withFlag && fx ? { dateFix: [fx.d1, fx.d2, fx.t || ""].join("|") } : {}),          // تاريخ المراجع — الطلب ينتظر تأكيد الموظف («تعديل تاريخ»)
+      ...(withFlag && state.type === "attendance" ? { entryTime: hhmm(fd.entryTime), exitTime: hhmm(fd.exitTime) } : {}),
       ...(withFlag && state.scanInfo ? { scanInfo: (state.scanInfo + (state.upSec ? ` · رفع الصورة ${state.upSec}ث` : "")).slice(0, 120) } : {}),
     }, key);
     // لو قواعد قاعدة البيانات لسا ما تحدّثت (ما تعرف dateFlag) → نرسل بدونه بدل ما يفشل الطلب
-    await withRetry(() => create(true).catch(e => { if ((flag || state.scanInfo) && e?.code === "permission-denied") return create(false); throw e; }));
+    await withRetry(() => create(true).catch(e => { if ((flag || state.scanInfo || fx || state.type === "attendance") && e?.code === "permission-denied") return create(false); throw e; }));
     clearTimeout(slow);
     $("#refTxt").textContent = ref;
     rememberMe(latinDigits(fd.idNumber), normPhone(fd.phone));
@@ -814,7 +880,7 @@ $("#form").addEventListener("submit", async e => {
     if (err?.code === "duplicate") return showDuplicate();
     console.error(err);
     showFail(err, "#note");
-  } finally { state.sending = false; state.fixDate = null; clearTimeout(slow); btn.disabled = false; btn.textContent = "إرسال الطلب"; }
+  } finally { state.sending = false; state.fixDate = null; clearTimeout(slow); btn.disabled = false; btn.textContent = btnTxt; }
 });
 
 $("#btnCopyRef").onclick = async () => {

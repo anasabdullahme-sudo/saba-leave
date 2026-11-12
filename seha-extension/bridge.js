@@ -44,6 +44,7 @@
 
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && Object.keys(ch).some(k => (k === "sabaDone" || k.startsWith("sabaDone_")) && ch[k].newValue)) forwardDone(); });
   chrome.storage.onChanged.addListener((ch, area) => { if (area === "local" && ch.sabaWantQueue?.newValue && isBoard() && alive()) post({ type: "SABA_QUEUE_REQ" }); });   // الأداة تطلب قائمة جديدة
+  chrome.storage.onChanged.addListener((ch, area) => { const o = area === "local" && ch.sabaOpenReq?.newValue; if (o?.id && isBoard() && alive() && Date.now() - (o.at || 0) < 15000) post({ type: "SABA_OPEN_REQ", id: o.id }); });   // (1.9.8) الأداة: افتح هالطلب للتأكيد
   chrome.storage.onChanged.addListener((ch, area) => { const c = area === "local" && ch.sabaCheck?.newValue; if (c && isBoard() && alive()) post({ type: "SABA_CHECK", id: c.id, at: c.at }); });   // الأداة تسأل: انرفع؟
   // صفحة موظفين قديمة (قبل التحديث التلقائي) → نحدّثها لحالها لما تكون فاضية (ما فيه طلب مفتوح ولا كتابة) — مرة كل 10 دقايق بالكثير
   setTimeout(function oldBoard() {

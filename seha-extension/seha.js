@@ -89,6 +89,8 @@
     { key: "exitDate",    re: /تاريخ الخروج هجري/, val: r => fmtDate(toHijriDmy(entryOf(r))), hijri: true },
     { key: "visitDate",   re: /^تاريخ المراجعه ميلادي|تاريخ (الزياره|الحضور)/, val: G("visitDate"), skipIf: onlyAtt },
     { key: "visitDate",   re: /^تاريخ المراجعه هجري/, val: H("visitDate"), hijri: true, skipIf: onlyAtt },
+    // (1.9.8) مشهد الحضور: نوع الزيارة = عيادات (الموظف يغيّرها لو احتاج)
+    { key: "visitType",   re: /^نوع الزياره/, selectOnly: true, val: () => "عيادات", skipIf: onlyAtt },
     // الخطوة 2 — التوصيات
     { key: "leaveDays",   re: /منحه اجازه( مرضيه)? لمده|(مده|عدد ايام) الاجازه|عدد الايام/, skipIf: notAtt },
     { key: "leaveStart",  re: /^من تاريخ ميلادي|(تاريخ )?(بدايه|بدء) الاجازه/, val: G("leaveStart"), skipIf: notAtt },
@@ -115,7 +117,7 @@
   ];
   const FIELD_LABELS = {
     idNumber: "رقم الهوية", fileNo: "رقم الملف", dob: "تاريخ الميلاد", patientName: "اسم المريض", patientNameEn: "الاسم بالإنجليزي", phone: "الجوال",
-    leaveStart: "بداية الإجازة", entryDate: "تاريخ الدخول", exitDate: "تاريخ الخروج", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
+    leaveStart: "بداية الإجازة", entryDate: "تاريخ الدخول", visitType: "نوع الزيارة", entryTime: "وقت الدخول", exitTime: "وقت الخروج", exitDate: "تاريخ الخروج", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
     companionName: "اسم المرافق", companionId: "هوية المرافق", companionDob: "ميلاد المرافق", relationship: "صلة القرابة",
     doctorName: "الطبيب", doctorAr: "الطبيب المرخّص", stampDoctor: "ختم الطبيب", reason: "السبب", nationality: "الجنسية", gender: "الجنس", ref: "رقم طلب سابا",
   };
@@ -245,7 +247,7 @@
   }
   // ---------- مراقبة تحديثات صحة: خانة إلزامية جديدة ما نعرفها → تنبيه ----------
   // أول 3 أيام نتعلّم الخانات الموجودة بهدوء، وبعدها أي خانة إلزامية جديدة تطلع تنبيه (مرة وحدة لكل خانة)
-  const HANDLED = [/نوع الاجازه/, /نوع الهويه/, /الطبيب|الممارس/, /الجنس|الجنسيه|التشخيص|الملاحظات|سبب/];
+  const HANDLED = [/نوع الاجازه/, /نوع الهويه/, /الطبيب|الممارس/, /الجنس|الجنسيه|التشخيص|الملاحظات|سبب/, /وقت (الدخول|الخروج)|فتره الانتظار/];
   let healthAt = 0;
   async function healthCheck() {
     if (Date.now() - healthAt < 15000) return; healthAt = Date.now();
@@ -267,7 +269,7 @@
   const isSearchPage = t => /بحث عن اجازه مرضيه|نتائج البحث/.test(t);
   const isFormPage = t => !isSearchPage(t) && (/نوع الاجازه/.test(t) || /معلومات مقدم طلب|التوصيات/.test(t));
   function fill(req, { explicit = false } = {}) {
-    if (!req || !isFormPage(norm(deepText()))) return {};
+    if (!req || req.dateLock || !isFormPage(norm(deepText()))) return {};
     const report = {};
     // 1) نوع الإجازة
     const typeText = TYPE_LABEL[req.type];
@@ -290,8 +292,61 @@
     // 4) الطبيب المعالج
     const d = pickDoctor(req, explicit);
     if (d) report.doctorAr = d;
+    if (req.type === "attendance") fillTimes(req, explicit);                        // (1.9.8) وقت الدخول/الخروج (نافذة الساعة)
     lastReport = { ...lastReport, ...report };
     return report;
+  }
+
+  // ---------- (1.9.8) وقت الدخول/الخروج في مشهد الحضور ----------
+  // خانة صحة «08:59 PM» ما تقبل الكتابة فيها مباشرة: نضغطها فتطلع نافذة (ساعة | دقيقة | AM/PM) → نكتب الساعة ثم الدقيقة ونضبط AM/PM
+  const to12 = v => { const m = /^(\d{2}):(\d{2})$/.exec(v || ""); if (!m) return ""; const h = +m[1]; return `${String(h % 12 || 12).padStart(2, "0")}:${m[2]} ${h < 12 ? "AM" : "PM"}`; };
+  const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+  const timeTried = new Map(), timeWrote = new WeakMap();
+  let timeBusy = false;
+  async function fillTimes(req, explicit) {
+    if (timeBusy) return; timeBusy = true;
+    try {
+      for (const [key, re] of [["entryTime", /^وقت الدخول/], ["exitTime", /^وقت الخروج/]]) {
+        const want = to12(req[key]); if (!want) continue;
+        const lab = labelCandidates().find(x => re.test(x.t)), c = lab && controlFor(lab.el); if (!c || c.disabled) continue;
+        const has = String(c.value || "").replace(/\s+/g, " ").trim().toUpperCase();
+        if (has === want) { lastReport[key] = "ok"; continue; }
+        const mine = timeWrote.get(c);
+        if (mine && has && has !== mine && !explicit) continue;                    // الموظف غيّره بيده — ما نلمسه
+        const tk = req.id + "|" + key + "|" + want;
+        if (!explicit && (timeTried.get(tk) || 0) >= 2) continue;                  // جرّبنا مرتين — الباقي على الموظف
+        timeTried.set(tk, (timeTried.get(tk) || 0) + 1);
+        const ok = await setTimePicker(c, req[key], lab.el);
+        timeWrote.set(c, String(c.value || "").replace(/\s+/g, " ").trim().toUpperCase());
+        lastReport[key] = ok ? "ok" : "check";
+      }
+    } catch { /* */ } finally { timeBusy = false; try { updateDots(); } catch {} }
+  }
+  async function setTimePicker(c, v, labEl) {
+    const [H, M] = v.split(":").map(Number), hh = String(H % 12 || 12), mm = String(M).padStart(2, "0"), pm = H >= 12;
+    const before = new Set(deepAll("input").filter(visible));
+    realClick(c); try { c.focus(); } catch {}
+    let pop = [];
+    for (let i = 0; i < 8 && pop.length < 2; i++) {
+      await sleepMs(150);
+      pop = deepAll("input").filter(x => x !== c && visible(x) && !before.has(x) && !x.closest("#saba-seha-host"));
+      if (pop.length < 2) { const box = deepAll("ngb-timepicker, .ngb-tp, [class*=timepicker], [class*=time-picker], [class*=timePicker]").find(visible); if (box) pop = [...box.querySelectorAll("input")].filter(visible); }
+    }
+    if (pop.length < 2) return false;
+    pop.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);   // بالترتيب على الشاشة: ساعة | دقيقة
+    const typeIn = (el, val) => { try { el.focus(); el.select?.(); } catch {} setValue(el, val); };
+    typeIn(pop[0], hh); await sleepMs(120); typeIn(pop[1], mm); await sleepMs(120);
+    // AM/PM: زر بجنب الدقايق — نضغطه لو مو على المطلوب
+    const r1 = pop[1].getBoundingClientRect();
+    const mer = deepAll("button, span, div, a, input").filter(el => visible(el) && !el.closest("#saba-seha-host") && /^(AM|PM)$/i.test(String(el.tagName === "INPUT" ? el.value : ownText(el) || el.textContent).trim()))
+      .sort((a, b) => { const d = el => { const r = el.getBoundingClientRect(); return Math.hypot(r.left - r1.left, r.top - r1.top); }; return d(a) - d(b); })[0];
+    if (mer) { const cur = /PM/i.test(String(mer.tagName === "INPUT" ? mer.value : mer.textContent)); if (cur !== pm) { realClick(mer); await sleepMs(150); } }
+    try { pop[1].dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); } catch {}
+    await sleepMs(150);
+    ["mousedown", "mouseup", "click"].forEach(t => document.body.dispatchEvent(new MouseEvent(t, { bubbles: true, view: window })));   // نقفل النافذة (ضغطة برا)
+    await sleepMs(250);
+    const got = String(c.value || "").replace(/\s+/g, " ").trim().toUpperCase();
+    return got === to12(v);
   }
 
   // ---------- الطبيب المعالج ----------
@@ -714,6 +769,11 @@
   function openReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
   // قبل ما نفتح طلب من القائمة: نسأل صفحة الموظفين تتأكد من قاعدة البيانات إنه ما انرفع (من جهاز ثاني) — عشان ما ينرفع مرتين
   let checking = null;
+  // (1.9.8) «افتح الطلب للتأكيد»: نفتح الطلب نفسه في لوحة سابا (التبويب المفتوح، أو تبويب جديد)
+  function openOnBoard(id) {
+    try { chrome.runtime.sendMessage({ type: "SABA_OPEN_REQ", id }); toastLocal("فتحت الطلب في لوحة سابا — أكّد التاريخ وارجع هنا"); }
+    catch { toastLocal("حدّث الصفحة (F5) وجرّب"); }
+  }
   function useReq(q) {
     if (checking) return;
     const at = Date.now(); checking = { id: q.id, at }; toastLocal("⏳ أتأكد إن الطلب ما انرفع…");
@@ -735,7 +795,7 @@
     chrome.storage.local.set({ sabaCheck: { id: q.id, at } });
   }
   const TYPE_AR = { sick: "إجازة مرضية", companion: "إجازة مرافق", attendance: "مشهد حضور" };
-  const LTR = new Set(["fileNo", "idNumber", "companionId", "dob", "companionDob", "phone", "leaveStart", "leaveEnd", "visitDate", "ref", "leaveDays", "patientNameEn"]);
+  const LTR = new Set(["fileNo", "idNumber", "companionId", "dob", "companionDob", "phone", "leaveStart", "leaveEnd", "visitDate", "ref", "leaveDays", "patientNameEn", "entryTime", "exitTime"]);
 
   function diagText() {
     const labs = labelCandidates().filter(x => x.t.length < 45).slice(0, 90);
@@ -773,13 +833,13 @@
       const cur = norm(currentAccountText()), pend = pendingQ();
       const here = q => q.account && cur && cur.includes(norm(q.account.key));
       pend.sort((a, b) => (!!a.lockedBy - !!b.lockedBy) || (here(b) - here(a)));     // اللي عند موظف ثاني تنزل تحت
-      const free = pend.filter(q => !q.lockedBy);
+      const free = pend.filter(q => !q.lockedBy && !q.dateLock);
       const hh = queueAt ? new Date(queueAt).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" }) : "";
       const sameId = q => q.idNumber && queue.some(o => o.id !== q.id && o.idNumber === q.idNumber && !isHidden(o.id));
       b.innerHTML = `${dupHtml()}${queueStale() && queueAt ? (wantAt && Date.now() - wantAt < 2500 ? `<div class="note" style="background:#EAF6FC;color:#0B4A87">⏳ يحدّث القائمة…</div>` : `<div class="note" style="background:#FFF4E5;color:#8A4B00;font-weight:600">⏳ القائمة مو محدّثة (آخر تحديث ${hh}) — الأداة تتأكد من كل طلب قبل ما تفتحه</div>`) : ""}<div class="note" style="background:#EAF6FC;color:#0B4A87">⏸ متوقفة — ما تعبّي ولا تبدّل العيادة لين تختار طلب</div>
         ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
-        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}${q.dateFlag ? ` <i class="lkb" style="background:#FDECEC;color:#9B1C1C">${/🙋/.test(q.dateFlag) ? "🙋 تعديل تاريخ" : "⚠ تاريخ"}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
+        <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}${q.dateLock ? ` <i class="lkb" style="background:#FFE8CC;color:#8A4B00">🔒 تعديل تاريخ — أكّده في اللوحة</i>` : q.dateFlag ? ` <i class="lkb" style="background:#FDECEC;color:#9B1C1C">${/🙋/.test(q.dateFlag) ? "🙋 تعديل تاريخ" : "⚠ تاريخ"}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
           || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
         ${queueStale() && !queueAt ? "" : queueStale() ? "" : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
@@ -787,6 +847,7 @@
       root.querySelectorAll(".qi").forEach(el => el.onclick = () => {
         const q = queue.find(x => x.id === el.dataset.id); if (!q) return;
         if (q.lockedBy) return toastLocal(`🔒 هالمراجع عند ${q.lockedBy} — ينفك لحاله لو ما اشتغل عليه 5 دقايق`);   // (1.9.2) قفل: ما يفتحه إلا واحد
+        if (q.dateLock) return openOnBoard(q.id);                                     // (1.9.8) تعديل تاريخ: يتأكد في اللوحة أول
         useReq(q);
       });
       bindDup(); bindPaste(); return;
@@ -798,7 +859,7 @@
       : acc.state === "picker" ? `اختر الحساب المحدد: <b>${esc(req.account.group)}</b> ← ${esc(req.account.role)}`
       : `الحساب المطلوب: <b>${esc(req.account.group)}</b> ← ${esc(req.account.role)}`;
     const keys = ["idNumber", "dob", "patientName", "phone",
-      ...(req.type === "attendance" ? ["visitDate"] : ["leaveStart", "leaveEnd", "leaveDays"]),
+      ...(req.type === "attendance" ? ["visitDate", "entryTime", "exitTime"] : ["leaveStart", "leaveEnd", "leaveDays"]),
       ...(req.type === "companion" ? ["companionName", "companionId", "companionDob", "relationship"] : []),
       "fileNo", "doctorAr", "doctorName", "stampDoctor", "ref"].filter(k => req[k]);
     const okN = keys.filter(k => lastReport[k] === "ok").length;
@@ -818,9 +879,10 @@
         ${reqImg?.id === req.id ? `<button class="lnk" id="viewImg2">📄 صورة التقرير — كبّرها</button>` : `<div class="tiny">صورة التقرير تطلع هنا لما تكون لوحة سابا مفتوحة</div>`}</div>
       </div>
       ${alertHtml}
-      ${req.dateFlag ? `<div class="acc wrong" style="font-weight:600;background:#FDECEC;color:#9B1C1C;border-color:#F5B5B5">${/🙋/.test(req.dateFlag) ? "🙋 <b>المراجع يقول التاريخ غلط</b>" : "⚠ <b>انتبه للتاريخ</b>"}<br><span style="font-weight:500">${esc(req.dateFlag.replace(/^🙋 المراجع يقول التاريخ غلط( — )?/, ""))}</span><br><span style="font-weight:400;font-size:12px">تأكد من التاريخ من صورة التقرير قبل الرفع</span></div>` : ""}
+      ${req.dateLock ? `<div class="acc wrong" style="font-weight:600;background:#FFF4E5;color:#8A4B00;border-color:#F3C178">🔒 <b>المراجع قال التاريخ غلط</b>${req.dateFix ? ` — كتب: <span class="ltr">${esc(req.dateFix)}</span>` : ""}<br><span style="font-weight:500">ما تقدر تعبّي لين تأكّد التاريخ من صورة التقرير في لوحة سابا.</span></div>` : ""}
+      ${req.dateFlag && !req.dateLock ? `<div class="acc wrong" style="font-weight:600;background:#FDECEC;color:#9B1C1C;border-color:#F5B5B5">${/🙋/.test(req.dateFlag) ? "🙋 <b>المراجع يقول التاريخ غلط</b>" : "⚠ <b>انتبه للتاريخ</b>"}<br><span style="font-weight:500">${esc(req.dateFlag.replace(/^🙋 المراجع يقول التاريخ غلط( — )?/, ""))}</span><br><span style="font-weight:400;font-size:12px">تأكد من التاريخ من صورة التقرير قبل الرفع</span></div>` : ""}
       <div class="acc ${acc.state}">${accTxt}</div>
-      <div class="row"><button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button></div>
+      <div class="row">${req.dateLock ? `<button class="btn pri" id="toBoard" style="background:#E07B12">افتح الطلب للتأكيد</button>` : `<button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button>`}</div>
       <div class="links"><label class="tg" style="font-size:12px"><input type="checkbox" id="auto" ${auto ? "checked" : ""}> تعبئة تلقائية</label><button class="lnk" id="closeReq" title="ترجع لقائمة الطلبات بدون رفع">إغلاق الطلب</button><button class="lnk" id="diag">تقرير فني</button></div>
       ${fixOpen ? `<div class="fxbox" id="fxbox"><b style="font-size:13px">نوع الطلب الصحيح</b>
           <div class="chips" id="fxTypes">${["sick", "companion", "attendance"].map(t => `<label><input type="radio" name="fxt" value="${t}" ${t === fxType ? "checked" : ""}>${TYPE_AR[t]}</label>`).join("")}</div>
@@ -830,7 +892,7 @@
           <textarea id="fxNote" maxlength="200" placeholder="ملاحظة للمريض (اختياري)">${esc(fxNoteVal)}</textarea>
           <div class="row"><button class="btn fx" id="fxSend" style="background:#5B3CC4;color:#fff">أرسل للمريض</button><button class="btn sec" id="fxCancel">إلغاء</button></div></div>` : ""}
       <details class="data" id="data" ${showFields ? "open" : ""}><summary>البيانات (${keys.length})${okN ? ` — ✓ ${okN} تعبّت` : ""}</summary>
-      <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div></details>
+      <div class="fl">${keys.map(k => `<div class="f"><span class="s ${lastReport[k] || ""}" data-s="${k}"></span><span class="k">${FIELD_LABELS[k] || k}</span><span class="v ${LTR.has(k) ? "ltr" : ""}" title="${esc(req[k])}">${esc(/Time$/.test(k) ? to12(req[k]) : req[k])}</span><button class="cp" data-k="${k}" title="نسخ">${COPY}</button></div>`).join("")}</div></details>
       <div class="tiny">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     const foot = $("#foot"); foot.hidden = false;
@@ -862,7 +924,8 @@
         chrome.storage.local.set({ sabaHidden: hideId(r0.id) }, () => chrome.storage.local.remove("sabaReq"));
       };
     }
-    $("#fill").onclick = async () => {
+    const tb = $("#toBoard"); if (tb) tb.onclick = () => openOnBoard(req.id);
+    if ($("#fill")) $("#fill").onclick = async () => {
       if (isSearchPage(norm(deepText()))) { openAddForm(true); return; }
       const r = fill(req, { explicit: true });
       const fr = await askFrames("sabaFillCmd", "sabaRep_");
@@ -871,7 +934,7 @@
       toastLocal(n ? `تعبّت ${n} خانة` : "ما لقيت خانات — اضغط «نسخ تقرير فني» وأرسله");
     };
     $("#auto").onchange = e => { auto = e.target.checked; chrome.storage.local.set({ sabaAuto: auto }); };
-    $("#goForm").onclick = () => openAddForm(true);
+    if ($("#goForm")) $("#goForm").onclick = () => openAddForm(true);
     $("#diag").onclick = async () => {
       const fr = await askFrames("sabaDiagCmd", "sabaDiag_");
       const frames = [...document.querySelectorAll("iframe, frame")].map(f => { const r = f.getBoundingClientRect(); return `iframe src=${String(f.src).slice(0, 140)} id=${f.id} @${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`; });
@@ -961,7 +1024,10 @@
   const textEls = t => {
     const all = deepAll("a, button, span, li, div, p")
       .filter(el => !el.closest("#saba-seha-host") && el.childElementCount <= 2 && norm(el.textContent) === norm(t));
-    return all.filter(el => !all.some(o => o !== el && el.contains(o)));   // الأعمق فقط
+    const out = all.filter(el => !all.some(o => o !== el && el.contains(o)));   // الأعمق فقط
+    if (out.length) return out;
+    // (1.9.8) احتياط: العنوان داخل عنصر فيه أيقونات كثيرة (ما كان يلقاه و«افتح النموذج» ما يسوي شي)
+    return deepAll("a, button, span, li, div, p, [role=menuitem], [role=button]").filter(el => !el.closest("#saba-seha-host") && norm(ownText(el)) === norm(t));
   };
   const clickable = el => el.closest("a, button, [role=button], [role=menuitem]") || el;
   const evAt = el => { const r = el.getBoundingClientRect(); return { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }; };
@@ -973,9 +1039,11 @@
     [["pointerenter", PointerEvent], ["mouseenter", MouseEvent]].forEach(([t, C]) => n.dispatchEvent(new C(t, { ...o, bubbles: false }))); } };
   let navBusy = false, navRef = "", navTries = 0, navNext = 0, navUntil = Date.now() + 120000;
   async function openAddForm(force) {
-    if (!TOP || navBusy || !req) return;
+    if (!TOP || !req || req.dateLock) return;
+    if (navBusy) { if (force) toastLocal("لحظة… أفتح النموذج"); return; }
     const t = norm(deepText());
-    if (isFormPage(t)) return;                                                   // النموذج مفتوح
+    if (isFormPage(t)) { if (force) toastLocal("النموذج مفتوح ✓"); return; }     // النموذج مفتوح
+    if (force) { navTries = 0; navNext = 0; }
     if (/حسابات صحه طبي|تسجيل الدخول/.test(t) && !/مرحبا بك/.test(t)) return;   // لسى ما دخل / يختار الحساب
     if (accountState(req).state === "wrong") { if (auto || force) await switchAccount(force); return; }   // الحساب غلط → نبدّله أول
     if (navRef !== req.ref) { navRef = req.ref; navTries = 0; navNext = 0; }
