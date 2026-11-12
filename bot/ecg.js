@@ -4,6 +4,9 @@
 //  • أنس أو ماجد يرسل شيت الإدارة (xlsx) → zip فيه صور E.C.G. (رقم الملف مكتوب عليها واسمها برقمه) + نفس الشيت وعمود Statue معبّى → للاثنين
 //  • الحذف: بعد شيت شهر خلص بيوم، تنحذف صور ذاك الشهر. شيت نص الشهر ما يحذف شي
 //  • ملف «تصدير الدردشة» (zip) من أنس/ماجد → يستورد صور الشهر الحالي
+// (2.15.0) أسطر البانوراما في نفس الشيت → جهاز الأشعة (برنامج SabaPano) يسأل البوت كل 10 دقايق (/pano/poll)، ياخذ صور
+//  البانوراما من بيانات rainbow ويرجّعها (/pano/result) → نكتب رقم الملف عليها ونسمّيها برقمه، وملف واحد فيه ECG + بانوراما + الشيت.
+//  جهاز الأشعة ما رد خلال 12 دقيقة؟ الـ ECG يروح على طول، والبانوراما تلحق لحالها (الطلب محفوظ: bot/pano_job + الشيت في التخزين)
 import { getStorage } from "firebase-admin/storage";
 import { downloadMediaMessage } from "baileys";
 import { Jimp, loadFont, measureText } from "jimp";
@@ -35,6 +38,7 @@ export function initEcg(ctx) {
   C = ctx;
   C.db.doc("bot/ecg_conf").get().then(d => { conf = { jid: "", purge: [], ...(d.data() || {}) }; ecgJid = conf.jid || ""; }).catch(() => {});
   loadMonth(monthOf(Date.now())).catch(() => {});
+  C.db.doc("bot/pano_job").get().then(d => { if (d.exists && d.data()?.id) pjob = d.data(); }).catch(() => {});
   setInterval(() => resolvePending().catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: أرقام الصور")), 30e3);
   setInterval(() => purgeDue().catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: الحذف")), 30 * 60e3);
 }
@@ -172,10 +176,12 @@ export async function onTeamDM(m, who, text = "") {
   if (doc && (/\.xlsx?$/i.test(name) || /spreadsheet|excel/i.test(mime))) {
     let buf; try { buf = await (C.download || downloadMediaMessage)({ ...m, message: g }, "buffer", {}, { logger: C.log, reuploadRequest: C.getSock().updateMediaMessage }); } catch { return false; }
     const sheet = await readSheet(buf).catch(() => null);
-    if (!sheet || !sheet.rows.length) return false;                  // مو شيت ECG → يكمل مثل أي ملف
-    await say(`⏳ وصل الشيت — ${sheet.rows.length} سطر E.C.G. أجهّز الصور…`);
-    try { await processSheet(sheet, name || "sheet.xlsx", who); }
-    catch (e) { C.log.error({ err: String(e?.stack || e) }, "ECG: الشيت"); await say("❌ ما قدرت أجهّز الصور: " + String(e?.message || e).slice(0, 120)); }
+    if (!sheet || (!sheet.rows.length && !sheet.prows.length)) return false;   // مو شيت ECG/بانوراما → يكمل مثل أي ملف
+    const pOn = Date.now() - agent.at < 15 * 60e3;
+    await say(`⏳ وصل الشيت — ${[sheet.rows.length && `${sheet.rows.length} سطر E.C.G.`, sheet.prows.length && `${sheet.prows.length} سطر بانوراما`].filter(Boolean).join(" و ")}. أجهّز الصور…` +
+      (sheet.prows.length ? (pOn ? "\n🦷 البانوراما من جهاز الأشعة — توصل خلال 10 دقايق تقريباً." : "\n🦷 جهاز الأشعة ما سأل من شوي (مطفي؟) — البانوراما ترسل لحالها أول ما يشتغل.") : ""));
+    // ما ننتظرها هنا (ممكن 12 دقيقة لجهاز الأشعة) — باقي رسايل البوت تكمل عادي
+    processSheet(sheet, name || "sheet.xlsx", who).catch(async e => { C.log.error({ err: String(e?.stack || e) }, "ECG: الشيت"); await say("❌ ما قدرت أجهّز الصور: " + String(e?.message || e).slice(0, 120)); });
     return true;
   }
   if (doc && (/\.zip$/i.test(name) || /zip/i.test(mime)) && /whatsapp|chat|دردشة|ecg/i.test(name)) {
@@ -204,6 +210,7 @@ export async function onTeamDM(m, who, text = "") {
 
 /* ---------- الشيت ---------- */
 const ECG_RE = /e\s*\.?\s*c\s*\.?\s*g|electro\s*cardio|تخطيط/i;
+const PANO_RE = /pano|o\s*\.?\s*p\s*\.?\s*g\b|orthopan|بانورا/i;
 async function readSheet(buf) {
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
   const ws = wb.worksheets[0]; if (!ws) return null;
@@ -220,15 +227,15 @@ async function readSheet(buf) {
   }
   if (!hr || !dc) return null;
   if (!sc) { sc = ws.getRow(hr).cellCount + 1; ws.getRow(hr).getCell(sc).value = "Statue"; }
-  const rows = [];
+  const rows = [], prows = [];
   for (let r = hr + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r), desc = String(row.getCell(dc).text || "");
-    if (!ECG_RE.test(desc)) continue;
+    const kind = ECG_RE.test(desc) ? "ecg" : PANO_RE.test(desc) ? "pano" : ""; if (!kind) continue;
     const num = fileNums(String(row.getCell(fc).text || row.getCell(fc).value || ""))[0];
     if (!num) continue;
-    rows.push({ r, num, at: cellTime(row.getCell(tc)) });
+    (kind === "ecg" ? rows : prows).push({ r, num, at: cellTime(row.getCell(tc)) });
   }
-  return { wb, ws, rows, sc };
+  return { wb, ws, rows, prows, sc };
 }
 function cellTime(c) {
   const v = c?.value;
@@ -247,38 +254,160 @@ async function stamp(buf, text) {
   img.print({ font, x: pad, y: Math.round(pad / 2), text });
   return img.getBuffer("image/jpeg", { quality: 90 });
 }
-async function processSheet({ wb, ws, rows, sc }, fileName, who) {
-  const now = Date.now(), first = Math.min(...rows.map(r => r.at || now));
-  // الشهور: من أول فاتورة لين الحين (الصور اللي تتأخر تنحسب على شهر إرسالها)
-  for (let d = ridh(first), y = d.getUTCFullYear(), mo = d.getUTCMonth(); ; mo++) { const mk = monthOf(Date.UTC(y, mo, 15)); if (mk > monthOf(now)) break; await loadMonth(mk); }
-  const imgs = allLoaded().map(x => x.it).filter(x => x.num && x.kind !== "invoice" && x.kind !== "other");
-  // كل سطر ← الصورة الأقرب لتاريخ فاتورته (الأقرب أول، وصورة وحدة لكل سطر)
-  const pairs = [];
-  rows.forEach((r, ri) => imgs.filter(x => x.num === r.num).forEach(x => pairs.push({ ri, x, d: r.at ? Math.abs(x.at - r.at) : 0 })));
-  pairs.sort((a, b) => a.d - b.d);
-  const used = new Set(), got = new Map();
-  for (const p of pairs) if (!got.has(p.ri) && !used.has(p.x.id)) { got.set(p.ri, p.x); used.add(p.x.id); }
-  const per = {}; rows.forEach(r => per[r.num] = (per[r.num] || 0) + 1);
-  const seq = {}, zip = new JSZip(), miss = [];
-  for (let ri = 0; ri < rows.length; ri++) {
-    const r = rows[ri], x = got.get(ri), cell = ws.getRow(r.r).getCell(sc);
-    if (!x) { cell.value = "لا توجد صورة"; miss.push(r.num); continue; }
+async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
+  const now = Date.now(), base = fileName.replace(/\.xlsx?$/i, ""), byName = C.team[who]?.name || who;
+  const ecgFiles = [], miss = [];
+  if (rows.length) {
+    const first = Math.min(...rows.map(r => r.at || now));
+    // الشهور: من أول فاتورة لين الحين (الصور اللي تتأخر تنحسب على شهر إرسالها)
+    for (let d = ridh(first), y = d.getUTCFullYear(), mo = d.getUTCMonth(); ; mo++) { const mk = monthOf(Date.UTC(y, mo, 15)); if (mk > monthOf(now)) break; await loadMonth(mk); }
+    const imgs = allLoaded().map(x => x.it).filter(x => x.num && x.kind !== "invoice" && x.kind !== "other");
+    // كل سطر ← الصورة الأقرب لتاريخ فاتورته (الأقرب أول، وصورة وحدة لكل سطر)
+    const pairs = [];
+    rows.forEach((r, ri) => imgs.filter(x => x.num === r.num).forEach(x => pairs.push({ ri, x, d: r.at ? Math.abs(x.at - r.at) : 0 })));
+    pairs.sort((a, b) => a.d - b.d);
+    const used = new Set(), got = new Map();
+    for (const p of pairs) if (!got.has(p.ri) && !used.has(p.x.id)) { got.set(p.ri, p.x); used.add(p.x.id); }
+    const per = {}; rows.forEach(r => per[r.num] = (per[r.num] || 0) + 1);
+    const seq = {};
+    for (let ri = 0; ri < rows.length; ri++) {
+      const r = rows[ri], x = got.get(ri), cell = ws.getRow(r.r).getCell(sc);
+      if (!x) { cell.value = "لا توجد صورة"; miss.push(r.num); continue; }
+      try {
+        const [buf] = await bucket().file(x.path).download();
+        seq[r.num] = (seq[r.num] || 0) + 1;
+        ecgFiles.push({ name: `${r.num}${per[r.num] > 1 ? "_" + seq[r.num] : ""}.jpg`, buf: await stamp(buf, r.num) });
+        cell.value = "تم";
+      } catch (e) { cell.value = "لا توجد صورة"; miss.push(r.num); C.log.warn({ err: String(e?.message || e), path: x.path }, "ECG: صورة"); }
+      ws.getRow(r.r).commit?.();
+    }
+  }
+  const ecgCap = rows.length ? `🫀 ECG: ✅ ${rows.length - miss.length} من ${rows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}` : "";
+  // البانوراما: من جهاز الأشعة (ننتظره 12 دقيقة لو كان شغّال)
+  let pano = null;
+  if (prows.length) {
+    const job = await newPanoJob(prows, sc, fileName, who, Buffer.from(await wb.xlsx.writeBuffer()));
+    if (Date.now() - agent.at < 15 * 60e3) pano = await waitPano(job.id, 12 * 60e3);
+    if (pano) { await dropPanoJob(job.id); pano = await applyPano(pano, job.rows, ws, sc); }
+  }
+  const zip = new JSZip();
+  for (const f of ecgFiles) zip.file("ECG/" + f.name, f.buf);
+  if (pano) for (const f of pano.files) zip.file("بانوراما/" + f.name, f.buf);
+  if (rows.length || pano) {
+    zip.file(fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 3 } });
+    const cap = [`📎 ${fileName}`, ecgCap, pano && pano.cap, prows.length && !pano && "🦷 البانوراما: جهاز الأشعة ما رد للحين — ترسل لحالها أول ما يرد.", `طلبه: ${byName}`].filter(Boolean).join("\n");
+    await sendBoth({ document: out, mimetype: "application/zip", fileName: `${base} - ${[rows.length && "ECG", pano && "بانوراما"].filter(Boolean).join(" + ")}.zip`, caption: cap });
+  } else await sendBoth({ text: `🦷 ${fileName}: ${prows.length} سطر بانوراما — جهاز الأشعة ما رد للحين، ترسل لحالها أول ما يرد.\nطلبه: ${byName}` });
+  // الحذف: شيت شهر خلص → بعد يوم تنحذف صور ذاك الشهر
+  if (rows.length) {
+    const last = Math.max(...rows.map(r => r.at || 0)), sm = last ? monthOf(last) : "";
+    if (sm && sm < monthOf(now) && !conf.purge.some(p => p.month === sm)) { conf.purge.push({ month: sm, at: now + 864e5, by: who }); await saveConf(); }
+  }
+}
+
+/* ---------- البانوراما: جهاز الأشعة (SabaPano) ---------- */
+let pjob = null, agent = { at: 0, ver: "" }, waiter = null;
+const dayOf = ms => ms ? ridh(ms).toISOString().slice(0, 10) : "";
+async function newPanoJob(prows, sc, fileName, who, sheetBuf) {
+  const id = Date.now().toString(36) + short();
+  if (pjob?.sheetPath) await bucket().file(pjob.sheetPath).delete().catch(() => {});   // طلب قديم ما خلص → الجديد يحل محله
+  const sheetPath = `pano/${id}.xlsx`;
+  await bucket().file(sheetPath).save(sheetBuf, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  pjob = { id, at: Date.now(), fileName, who, sc, sheetPath, sentAt: 0, rows: prows.map((r, i) => ({ i, r: r.r, num: r.num, date: dayOf(r.at) })) };
+  await C.db.doc("bot/pano_job").set(pjob).catch(() => {});
+  return pjob;
+}
+async function dropPanoJob(id) {
+  if (!pjob || pjob.id !== id) return;
+  await bucket().file(pjob.sheetPath).delete().catch(() => {});
+  pjob = null; await C.db.doc("bot/pano_job").delete().catch(() => {});
+}
+function waitPano(id, ms) {
+  return new Promise(resolve => {
+    const t = setTimeout(() => { if (waiter?.id === id) waiter = null; resolve(null); }, ms);
+    waiter = { id, resolve: r => { clearTimeout(t); waiter = null; resolve(r); } };
+  });
+}
+// صور كل مراجع (رقم الملف|التاريخ) ← أسطر الشيت: سطر واحد = آخر صورة بنفس اليوم، أكثر من سطر = بالترتيب. ما فيه بنفس اليوم = الأقرب (±3 أيام)
+async function applyPano(result, jrows, ws, sc) {
+  const per = {}; jrows.forEach(r => per[r.num] = (per[r.num] || 0) + 1);
+  const groups = new Map(); for (const r of jrows) { const k = r.num + "|" + r.date; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  const pick = new Map(), notes = [], miss = [];
+  for (const [k, rs] of groups) {
+    const all = (result.get(k) || []).slice().sort((a, b) => a.at.localeCompare(b.at)), date = rs[0].date;
+    let same = date ? all.filter(x => x.at.startsWith(date)) : all;
+    if (!same.length && all.length) {
+      const ms = s => Date.parse(s.slice(0, 10) + "T12:00:00Z"), d0 = date ? ms(date) : Date.now();
+      const near = all.reduce((b, x) => Math.abs(ms(x.at) - d0) < Math.abs(ms(b.at) - d0) ? x : b);
+      same = all.filter(x => x.at.slice(0, 10) === near.at.slice(0, 10));
+      notes.push(`${rs[0].num}: ${date ? `ما فيه صورة يوم ${date}، أخذت صورة ${near.at.slice(0, 10)}` : "السطر بدون تاريخ، أخذت آخر صورة"}`);
+    }
+    if (rs.length === 1) { if (same.length) { pick.set(rs[0].i, same[same.length - 1]); if (same.length > 1) notes.push(`${rs[0].num}: فيه ${same.length === 2 ? "صورتين" : same.length + " صور"} بنفس اليوم، أرسلت الأخيرة (${same[same.length - 1].at.slice(11, 16)})`); } }
+    else rs.forEach((r, j) => { if (same[j]) pick.set(r.i, same[j]); });
+  }
+  const files = [], seq = {};
+  for (const r of jrows) {
+    const x = pick.get(r.i), cell = ws.getRow(r.r).getCell(sc);
+    if (!x) { cell.value = "لا توجد صورة"; miss.push(r.num); ws.getRow(r.r).commit?.(); continue; }
     try {
-      const [buf] = await bucket().file(x.path).download();
       seq[r.num] = (seq[r.num] || 0) + 1;
-      zip.file(`${r.num}${per[r.num] > 1 ? "_" + seq[r.num] : ""}.jpg`, await stamp(buf, r.num));
+      files.push({ name: `${r.num}${per[r.num] > 1 ? "_" + seq[r.num] : ""}.jpg`, buf: await stamp(x.buf, r.num) });
       cell.value = "تم";
-    } catch (e) { cell.value = "لا توجد صورة"; miss.push(r.num); C.log.warn({ err: String(e?.message || e), path: x.path }, "ECG: صورة"); }
+    } catch (e) { cell.value = "لا توجد صورة"; miss.push(r.num); C.log.warn({ err: String(e?.message || e) }, "بانوراما: صورة"); }
     ws.getRow(r.r).commit?.();
   }
-  zip.file(fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
+  const cap = `🦷 بانوراما: ✅ ${files.length} من ${jrows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}${notes.length ? "\nℹ️ " + notes.join("\nℹ️ ") : ""}`;
+  return { files, cap };
+}
+// النتيجة وصلت بعد ما أرسلنا الـ ECG (جهاز الأشعة كان مطفي) → ملف البانوراما لحاله مع الشيت (فيه حالات الـ ECG بعد)
+async function finishLate(result) {
+  const job = pjob; if (!job) return;
+  const [sheetBuf] = await bucket().file(job.sheetPath).download();
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(sheetBuf); const ws = wb.worksheets[0];
+  const pano = await applyPano(result, job.rows, ws, job.sc);
+  const zip = new JSZip();
+  for (const f of pano.files) zip.file("بانوراما/" + f.name, f.buf);
+  zip.file(job.fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
   const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 3 } });
-  const found = rows.length - miss.length;
-  const cap = `🫀 ECG — ${fileName}\n✅ ${found} من ${rows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}\nطلبه: ${C.team[who]?.name || who}`;
-  await sendBoth({ document: out, mimetype: "application/zip", fileName: fileName.replace(/\.xlsx?$/i, "") + " - ECG.zip", caption: cap });
-  // الحذف: شيت شهر خلص → بعد يوم تنحذف صور ذاك الشهر
-  const last = Math.max(...rows.map(r => r.at || 0)), sm = last ? monthOf(last) : "";
-  if (sm && sm < monthOf(now) && !conf.purge.some(p => p.month === sm)) { conf.purge.push({ month: sm, at: now + 864e5, by: who }); await saveConf(); }
+  await sendBoth({ document: out, mimetype: "application/zip", fileName: `${job.fileName.replace(/\.xlsx?$/i, "")} - بانوراما.zip`, caption: `📎 ${job.fileName}\n${pano.cap}\nطلبه: ${C.team[job.who]?.name || job.who}` });
+  await dropPanoJob(job.id);
+}
+const readBody = (req, max) => new Promise((ok, no) => { const a = []; let n = 0; req.on("data", c => { n += c.length; if (n > max) { no(new Error("كبير")); req.destroy(); } else a.push(c); }); req.on("end", () => ok(Buffer.concat(a))); req.on("error", no); });
+// السيرفر (bot.js): / ← حي، /pano/ping /pano/poll /pano/result ← جهاز الأشعة بالمفتاح PANO_KEY (من متغيرات Railway)
+export async function panoHttp(req, res) {
+  const u = new URL(req.url, "http://x"), send = (code, body = "", type = "text/plain; charset=utf-8") => { if (!res.headersSent) { res.writeHead(code, { "content-type": type }); res.end(body); } };
+  if (u.pathname === "/" || u.pathname === "/health") return send(200, "saba bot ok");
+  if (!u.pathname.startsWith("/pano/")) return send(404, "not found");
+  const key = process.env.PANO_KEY || "";
+  if (!key) return send(503, "PANO_KEY missing");
+  if (req.headers["x-pano-key"] !== key) return send(401, "no");
+  agent = { at: Date.now(), ver: u.searchParams.get("v") || agent.ver };
+  if (u.pathname === "/pano/ping") return send(200, JSON.stringify({ ok: true, job: !!pjob }), "application/json");
+  if (u.pathname === "/pano/poll" && req.method === "GET") {
+    if (!pjob || (pjob.sentAt && Date.now() - pjob.sentAt < 8 * 60e3)) return send(204);   // ما فيه طلب / الجهاز شغّال عليه
+    pjob.sentAt = Date.now();
+    const items = [...new Map(pjob.rows.map(r => [r.num + "|" + r.date, { key: r.num + "|" + r.date, num: r.num, date: r.date }])).values()];
+    return send(200, JSON.stringify({ id: pjob.id, items }), "application/json");
+  }
+  if (u.pathname === "/pano/result" && req.method === "POST") {
+    const id = u.searchParams.get("id") || "";
+    if (!pjob || pjob.id !== id) return send(410, "gone");
+    const zip = await JSZip.loadAsync(await readBody(req, 500 * 1024 * 1024));
+    const meta = JSON.parse(await zip.file("result.json").async("string"));
+    const result = new Map();
+    for (const it of Array.isArray(meta) ? meta : [meta]) {
+      const arr = [];
+      for (const f of [].concat(it.files || [])) { const z = zip.file(f.f); if (z) arr.push({ buf: await z.async("nodebuffer"), at: String(f.at || "") }); }
+      result.set(String(it.key), arr);
+    }
+    send(200, "ok");
+    C.log.info({ id, keys: result.size }, "بانوراما: وصلت الصور من جهاز الأشعة");
+    if (waiter?.id === id) waiter.resolve(result);
+    else finishLate(result).catch(async e => { C.log.error({ err: String(e?.stack || e) }, "بانوراما: متأخر"); await sendBoth({ text: "❌ وصلت صور البانوراما بس ما قدرت أجهّز الملف: " + String(e?.message || e).slice(0, 120) }); });
+    return;
+  }
+  return send(404, "not found");
 }
 async function purgeDue() {
   const due = (conf.purge || []).filter(p => p.at <= Date.now()); if (!due.length) return;

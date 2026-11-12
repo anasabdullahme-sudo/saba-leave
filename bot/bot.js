@@ -9,14 +9,15 @@ import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getSecurityRules } from "firebase-admin/security-rules";
 import { initHrVac, onTeamImage as hrImage } from "./hrvac.js";
-import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM } from "./ecg.js";
+import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM, panoHttp } from "./ecg.js";
+import http from "node:http";
 import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.14.0";
+const VERSION = "2.15.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1187,6 +1188,13 @@ async function main() {
     onSent: (jid, phone, text) => { const k = chatKey(jid, normPhone(phone || "")); loadChat(k).then(() => remember(k, "model", text)); lastReply.set(jid, Date.now()); } });
   initHrVac({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, team: TEAM });
   initEcg({ db, log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, team: TEAM });
+  // (2.15.0) سيرفر صغير: جهاز الأشعة (SabaPano) يسأل البوت عن طلبات البانوراما ويرجّع الصور — يحتاج «Generate Domain» في Railway + PANO_KEY
+  if (!globalThis.__sabaHttp) {
+    globalThis.__sabaHttp = http.createServer((req, res) => panoHttp(req, res).catch(e => { log.warn({ err: String(e?.message || e) }, "pano http"); try { if (!res.headersSent) { res.writeHead(500); res.end("error"); } } catch {} }));
+    globalThis.__sabaHttp.requestTimeout = 15 * 60e3;
+    const ports = [...new Set([+process.env.PORT || 8080, 8080])];                     // Railway: المنفذ اللي يحدده، و8080 احتياط
+    ports.forEach((pt, i) => { const sv = i ? http.createServer(globalThis.__sabaHttp.listeners("request")[0]) : globalThis.__sabaHttp; sv.requestTimeout = 15 * 60e3; sv.on("error", e => log.warn({ err: String(e?.message || e), pt }, "سيرفر")); sv.listen(pt, () => log.info({ port: pt }, "سيرفر البانوراما شغّال")); });
+  }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
