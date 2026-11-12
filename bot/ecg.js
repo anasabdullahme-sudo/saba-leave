@@ -7,14 +7,14 @@
 // (2.15.0) أسطر البانوراما في نفس الشيت → جهاز الأشعة (برنامج SabaPano) يسأل البوت كل 10 دقايق (/pano/poll)، ياخذ صور
 //  البانوراما من بيانات rainbow ويرجّعها (/pano/result) → نكتب رقم الملف عليها ونسمّيها برقمه، وملف واحد فيه ECG + بانوراما + الشيت.
 //  جهاز الأشعة ما رد خلال 12 دقيقة؟ الـ ECG يروح على طول، والبانوراما تلحق لحالها (الطلب محفوظ: bot/pano_job + الشيت في التخزين)
-import { getStorage } from "firebase-admin/storage";
+import fs from "node:fs";
+import nodePath from "node:path";
 import { downloadMediaMessage } from "baileys";
 import { Jimp, loadFont, measureText } from "jimp";
 import { SANS_32_BLACK, SANS_64_BLACK, SANS_128_BLACK } from "jimp/fonts";
 import JSZip from "jszip";
 import ExcelJS from "exceljs";
 
-const BUCKET = "saba-leave.firebasestorage.app";
 const WIN = 5 * 60e3;                                   // 5 دقايق
 let C = null, conf = { jid: "", purge: [] }, ecgJid = "";
 const months = new Map();                               // "2026-11" → { items: [] }
@@ -25,7 +25,19 @@ const latin = s => String(s ?? "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨�
 const ridh = ms => new Date(ms + 3 * 3600e3);           // وقت الرياض (UTC+3 ثابت)
 const monthOf = ms => ridh(ms).toISOString().slice(0, 7);
 const hm = ms => { const d = ridh(ms); return `${d.getUTCDate()}/${d.getUTCMonth() + 1} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
-const bucket = () => C.bucket || getStorage().bucket(BUCKET);                 // C.bucket: للتجربة بس
+// (2.15.2) الصور على قرص البوت في Railway (Volume /data) — مشروع Firebase مجاني وما فيه Storage («The specified bucket does not exist»)
+const STORE = process.env.STORE_DIR || (fs.existsSync("/data") ? "/data/store" : "./store");
+const safeP = p => nodePath.join(STORE, String(p).replace(/\.\.+/g, "_"));
+const disk = {
+  file: p => ({
+    save: async buf => { const f = safeP(p); await fs.promises.mkdir(nodePath.dirname(f), { recursive: true }); await fs.promises.writeFile(f, buf); },
+    download: async () => [await fs.promises.readFile(safeP(p))],
+    delete: async () => fs.promises.rm(safeP(p), { force: true }),
+  }),
+  getFiles: async ({ prefix }) => { try { return [(await fs.promises.readdir(safeP(prefix))).map(n => ({ name: prefix + n }))]; } catch { return [[]]; } },
+  deleteFiles: async ({ prefix }) => fs.promises.rm(safeP(prefix), { recursive: true, force: true }),
+};
+const bucket = () => C.bucket || disk;                                           // C.bucket: للتجربة بس
 const short = () => Math.random().toString(36).slice(2, 6).toUpperCase();
 // رقم ملف: 7 أرقام (عادة يبدأ بـ7) — إنجليزي أو عربي
 export function fileNums(text) {
@@ -39,6 +51,7 @@ export function initEcg(ctx) {
   C.db.doc("bot/ecg_conf").get().then(d => { conf = { jid: "", purge: [], ...(d.data() || {}) }; ecgJid = conf.jid || ""; }).catch(() => {});
   loadMonth(monthOf(Date.now())).catch(() => {});
   C.db.doc("bot/pano_job").get().then(d => { if (d.exists && d.data()?.id) pjob = d.data(); }).catch(() => {});
+  C.db.doc("bot/pano_agent").get().then(d => { const a = d.data()?.at || 0; if (a > agent.at) agent = { ...agent, at: a }; agentSaved = a; }).catch(() => {});
   setInterval(() => resolvePending().catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: أرقام الصور")), 30e3);
   setInterval(() => purgeDue().catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: الحذف")), 30 * 60e3);
 }
@@ -177,7 +190,7 @@ export async function onTeamDM(m, who, text = "") {
     let buf; try { buf = await (C.download || downloadMediaMessage)({ ...m, message: g }, "buffer", {}, { logger: C.log, reuploadRequest: C.getSock().updateMediaMessage }); } catch { return false; }
     const sheet = await readSheet(buf).catch(() => null);
     if (!sheet || (!sheet.rows.length && !sheet.prows.length)) return false;   // مو شيت ECG/بانوراما → يكمل مثل أي ملف
-    const pOn = Date.now() - agent.at < 15 * 60e3;
+    const pOn = agentOn();
     await say(`⏳ وصل الشيت — ${[sheet.rows.length && `${sheet.rows.length} سطر E.C.G.`, sheet.prows.length && `${sheet.prows.length} سطر بانوراما`].filter(Boolean).join(" و ")}. أجهّز الصور…` +
       (sheet.prows.length ? (pOn ? "\n🦷 البانوراما من جهاز الأشعة — توصل خلال 10 دقايق تقريباً." : "\n🦷 جهاز الأشعة ما سأل من شوي (مطفي؟) — البانوراما ترسل لحالها أول ما يشتغل.") : ""));
     // ما ننتظرها هنا (ممكن 12 دقيقة لجهاز الأشعة) — باقي رسايل البوت تكمل عادي
@@ -270,6 +283,17 @@ async function stamp(buf, text) {
   img.print({ font, x: pad, y: Math.round(pad / 2), text });
   return img.getBuffer("image/jpeg", { quality: 90 });
 }
+// (2.15.2) ألوان الشيت: أخضر = لقينا الصورة، أصفر = صورة من يوم ثاني غير تاريخ الفاتورة، أحمر = ما فيه صورة
+const FILL = { ok: "FFC6EFCE", near: "FFFFEB9C", none: "FFFFC7CE" };
+function mark(ws, r, sc, kind, text) {
+  const row = ws.getRow(r), n = Math.max(ws.columnCount || 0, sc);
+  row.getCell(sc).value = text;
+  for (let c = 1; c <= n; c++) {                                                  // نسخة من التنسيق لكل خلية (exceljs يشارك التنسيق بين الخلايا)
+    const cell = row.getCell(c);
+    cell.style = { ...JSON.parse(JSON.stringify(cell.style || {})), fill: { type: "pattern", pattern: "solid", fgColor: { argb: FILL[kind] } } };
+  }
+  row.commit?.();
+}
 async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
   const now = Date.now(), base = fileName.replace(/\.xlsx?$/i, ""), byName = C.team[who]?.name || who;
   const ecgFiles = [], miss = [];
@@ -287,15 +311,15 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
     const per = {}; rows.forEach(r => per[r.num] = (per[r.num] || 0) + 1);
     const seq = {};
     for (let ri = 0; ri < rows.length; ri++) {
-      const r = rows[ri], x = got.get(ri), cell = ws.getRow(r.r).getCell(sc);
-      if (!x) { cell.value = "لا توجد صورة"; miss.push(r.num); continue; }
+      const r = rows[ri], x = got.get(ri);
+      if (!x) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); continue; }
       try {
         const [buf] = await bucket().file(x.path).download();
         seq[r.num] = (seq[r.num] || 0) + 1;
         ecgFiles.push({ name: `${r.num}${per[r.num] > 1 ? "_" + seq[r.num] : ""}.jpg`, buf: await stamp(buf, r.num) });
-        cell.value = "تم";
-      } catch (e) { cell.value = "لا توجد صورة"; miss.push(r.num); C.log.warn({ err: String(e?.message || e), path: x.path }, "ECG: صورة"); }
-      ws.getRow(r.r).commit?.();
+        const d = dayOf(x.at);
+        if (r.at && d !== dayOf(r.at)) mark(ws, r.r, sc, "near", `تم — صورة ${+d.slice(8)}/${+d.slice(5, 7)}`); else mark(ws, r.r, sc, "ok", "تم");
+      } catch (e) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); C.log.warn({ err: String(e?.message || e), path: x.path }, "ECG: صورة"); }
     }
   }
   const ecgCap = rows.length ? `🫀 ECG: ✅ ${rows.length - miss.length} من ${rows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}` : "";
@@ -303,7 +327,7 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
   let pano = null;
   if (prows.length) {
     const job = await newPanoJob(prows, sc, fileName, who, Buffer.from(await wb.xlsx.writeBuffer()));
-    if (Date.now() - agent.at < 15 * 60e3) pano = await waitPano(job.id, 12 * 60e3);
+    if (agentOn()) pano = await waitPano(job.id, 12 * 60e3);
     if (pano) { await dropPanoJob(job.id); pano = await applyPano(pano, job.rows, ws, sc); }
   }
   const zip = new JSZip();
@@ -323,7 +347,10 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
 }
 
 /* ---------- البانوراما: جهاز الأشعة (SabaPano) ---------- */
-let pjob = null, agent = { at: 0, ver: "" }, waiter = null;
+let pjob = null, agent = { at: 0, ver: "" }, waiter = null, agentSaved = 0;
+// جهاز الأشعة يسأل كل 10 دقايق؛ نكتب آخر سؤال مرة كل ساعة بالكثير (عشان بعد إعادة تشغيل البوت نعرف إنه شغّال)
+const AGENT_ON = 75 * 60e3;
+const agentOn = () => Date.now() - agent.at < AGENT_ON;
 const dayOf = ms => ms ? ridh(ms).toISOString().slice(0, 10) : "";
 async function newPanoJob(prows, sc, fileName, who, sheetBuf) {
   const id = Date.now().toString(36) + short();
@@ -349,7 +376,7 @@ function waitPano(id, ms) {
 async function applyPano(result, jrows, ws, sc) {
   const per = {}; jrows.forEach(r => per[r.num] = (per[r.num] || 0) + 1);
   const groups = new Map(); for (const r of jrows) { const k = r.num + "|" + r.date; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-  const pick = new Map(), notes = [], miss = [];
+  const pick = new Map(), notes = [], miss = [], nearOf = new Map();
   for (const [k, rs] of groups) {
     const all = (result.get(k) || []).slice().sort((a, b) => a.at.localeCompare(b.at)), date = rs[0].date;
     let same = date ? all.filter(x => x.at.startsWith(date)) : all;
@@ -357,6 +384,7 @@ async function applyPano(result, jrows, ws, sc) {
       const ms = s => Date.parse(s.slice(0, 10) + "T12:00:00Z"), d0 = date ? ms(date) : Date.now();
       const near = all.reduce((b, x) => Math.abs(ms(x.at) - d0) < Math.abs(ms(b.at) - d0) ? x : b);
       same = all.filter(x => x.at.slice(0, 10) === near.at.slice(0, 10));
+      rs.forEach(r => nearOf.set(r.i, near.at.slice(0, 10)));
       notes.push(`${rs[0].num}: ${date ? `ما فيه صورة يوم ${date}، أخذت صورة ${near.at.slice(0, 10)}` : "السطر بدون تاريخ، أخذت آخر صورة"}`);
     }
     if (rs.length === 1) { if (same.length) { pick.set(rs[0].i, same[same.length - 1]); if (same.length > 1) notes.push(`${rs[0].num}: فيه ${same.length === 2 ? "صورتين" : same.length + " صور"} بنفس اليوم، أرسلت الأخيرة (${same[same.length - 1].at.slice(11, 16)})`); } }
@@ -364,14 +392,14 @@ async function applyPano(result, jrows, ws, sc) {
   }
   const files = [], seq = {};
   for (const r of jrows) {
-    const x = pick.get(r.i), cell = ws.getRow(r.r).getCell(sc);
-    if (!x) { cell.value = "لا توجد صورة"; miss.push(r.num); ws.getRow(r.r).commit?.(); continue; }
+    const x = pick.get(r.i);
+    if (!x) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); continue; }
     try {
       seq[r.num] = (seq[r.num] || 0) + 1;
       files.push({ name: `${r.num}${per[r.num] > 1 ? "_" + seq[r.num] : ""}.jpg`, buf: await stamp(x.buf, r.num) });
-      cell.value = "تم";
-    } catch (e) { cell.value = "لا توجد صورة"; miss.push(r.num); C.log.warn({ err: String(e?.message || e) }, "بانوراما: صورة"); }
-    ws.getRow(r.r).commit?.();
+      const nd = nearOf.get(r.i);
+      if (nd && r.date) mark(ws, r.r, sc, "near", `تم — صورة ${+nd.slice(8)}/${+nd.slice(5, 7)}`); else mark(ws, r.r, sc, "ok", "تم");
+    } catch (e) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); C.log.warn({ err: String(e?.message || e) }, "بانوراما: صورة"); }
   }
   const cap = `🦷 بانوراما: ✅ ${files.length} من ${jrows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}${notes.length ? "\nℹ️ " + notes.join("\nℹ️ ") : ""}`;
   return { files, cap };
@@ -399,6 +427,7 @@ export async function panoHttp(req, res) {
   if (!key) return send(503, "PANO_KEY missing");
   if (req.headers["x-pano-key"] !== key) return send(401, "no");
   agent = { at: Date.now(), ver: u.searchParams.get("v") || agent.ver };
+  if (Date.now() - agentSaved > 3600e3) { agentSaved = Date.now(); C.db.doc("bot/pano_agent").set({ at: agent.at, ver: agent.ver }).catch(() => {}); }
   if (u.pathname === "/pano/ping") return send(200, JSON.stringify({ ok: true, job: !!pjob }), "application/json");
   if (u.pathname === "/pano/poll" && req.method === "GET") {
     if (!pjob || (pjob.sentAt && Date.now() - pjob.sentAt < 8 * 60e3)) return send(204);   // ما فيه طلب / الجهاز شغّال عليه
