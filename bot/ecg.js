@@ -211,8 +211,22 @@ export async function onTeamDM(m, who, text = "") {
 /* ---------- الشيت ---------- */
 const ECG_RE = /e\s*\.?\s*c\s*\.?\s*g|electro\s*cardio|تخطيط/i;
 const PANO_RE = /pano|o\s*\.?\s*p\s*\.?\s*g\b|orthopan|بانورا/i;
+// (2.15.1) شيت الإدارة فيه «جدول» Excel (Table1) — مكتبة exceljs تطيح عليه (tables[table.name]) → نشيل تعريف الجدول ونقرأ الخلايا عادي
+async function loadWb(buf) {
+  try { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); return wb; }
+  catch (e) {
+    const z = await JSZip.loadAsync(buf);
+    for (const f of Object.keys(z.files)) {
+      if (/^xl\/tables\//.test(f)) z.remove(f);
+      else if (/^xl\/worksheets\/sheet[^/]*\.xml$/.test(f)) z.file(f, (await z.file(f).async("string")).replace(/<tableParts[\s\S]*?<\/tableParts>|<tableParts[^>]*\/>/g, ""));
+      else if (/^xl\/worksheets\/_rels\/.*\.rels$/.test(f)) z.file(f, (await z.file(f).async("string")).replace(/<Relationship [^>]*relationships\/table"[^>]*\/>/g, ""));
+      else if (f === "[Content_Types].xml") z.file(f, (await z.file(f).async("string")).replace(/<Override [^>]*\/xl\/tables\/[^>]*\/>/g, ""));
+    }
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await z.generateAsync({ type: "nodebuffer" })); return wb;
+  }
+}
 async function readSheet(buf) {
-  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const wb = await loadWb(buf);
   const ws = wb.worksheets[0]; if (!ws) return null;
   let hr = 0, fc = 0, dc = 0, tc = 0, sc = 0;
   for (let r = 1; r <= Math.min(8, ws.rowCount) && !hr; r++) {
@@ -246,9 +260,11 @@ function cellTime(c) {
   const y = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s); if (y) return Date.UTC(+y[3], +y[2] - 1, +y[1], 12) - 3 * 3600e3;
   return 0;
 }
+const fonts = new Map();
 async function stamp(buf, text) {
   const img = await Jimp.read(buf), w = img.bitmap.width;
-  const font = await loadFont(w < 700 ? SANS_32_BLACK : w < 1800 ? SANS_64_BLACK : SANS_128_BLACK);
+  const fk = w < 700 ? SANS_32_BLACK : w < 1800 ? SANS_64_BLACK : SANS_128_BLACK;
+  const font = fonts.get(fk) || fonts.set(fk, await loadFont(fk)).get(fk);                    // الخط مرة وحدة (صور البانوراما كثيرة)
   const sz = w < 700 ? 32 : w < 1800 ? 64 : 128, pad = Math.round(sz / 4), tw = measureText(font, text);
   img.composite(new Jimp({ width: tw + pad * 2, height: Math.round(sz * 1.15) + pad, color: 0xffffffff }), 0, 0);
   img.print({ font, x: pad, y: Math.round(pad / 2), text });
