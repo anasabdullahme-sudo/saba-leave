@@ -11,13 +11,15 @@ import { getSecurityRules } from "firebase-admin/security-rules";
 import { initHrVac, onTeamImage as hrImage } from "./hrvac.js";
 import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM, panoHttp } from "./ecg.js";
 import http from "node:http";
+// (2.15.3) مكتبة التشفير حق الواتساب تطبع مفاتيح الجلسة كاملة في سجل Railway («Closing session: SessionEntry {...privKey...}») — نخفيها
+for (const k of ["log", "info", "warn"]) { const o = console[k].bind(console); console[k] = (...a) => { if (typeof a[0] === "string" && /^(Closing (open )?session|Removing old closed session|Opening session|Migrating session|Session already)/i.test(a[0])) return; o(...a); }; }
 import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin } from "./group.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.15.2";
+const VERSION = "2.15.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 

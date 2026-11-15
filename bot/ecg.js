@@ -14,6 +14,7 @@ import { Jimp, loadFont, measureText } from "jimp";
 import { SANS_32_BLACK, SANS_64_BLACK, SANS_128_BLACK } from "jimp/fonts";
 import JSZip from "jszip";
 import ExcelJS from "exceljs";
+let sharp = null; try { sharp = (await import("sharp")).default; sharp.concurrency(1); } catch { /* بدونها: jimp (أبطأ) */ }
 
 const WIN = 5 * 60e3;                                   // 5 دقايق
 let C = null, conf = { jid: "", purge: [] }, ecgJid = "";
@@ -51,6 +52,8 @@ export function initEcg(ctx) {
   C.db.doc("bot/ecg_conf").get().then(d => { conf = { jid: "", purge: [], ...(d.data() || {}) }; ecgJid = conf.jid || ""; }).catch(() => {});
   loadMonth(monthOf(Date.now())).catch(() => {});
   C.db.doc("bot/pano_job").get().then(d => { if (d.exists && d.data()?.id) pjob = d.data(); }).catch(() => {});
+  setInterval(() => flushOutbox().catch(() => {}), 60e3);                       // الصادر: نعيد المحاولة كل دقيقة
+  setTimeout(() => flushOutbox().catch(() => {}), 20e3);
   C.db.doc("bot/pano_agent").get().then(d => { const a = d.data()?.at || 0; if (a > agent.at) agent = { ...agent, at: a }; agentSaved = a; }).catch(() => {});
   setInterval(() => resolvePending().catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: أرقام الصور")), 30e3);
   setInterval(() => purgeDue().catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: الحذف")), 30 * 60e3);
@@ -166,18 +169,47 @@ async function alertTeam(it) {
   const [f] = await bucket().file(it.path).download();
   it.code = short(); it.alertIds = [];
   for (const who of ["anas", "majed"]) {
-    const jid = await teamJid(who); if (!jid) continue;
+    const jid = jidOf(who); if (!jid) continue;
     const s = await C.getSock().sendMessage(jid, { image: f, caption: `🫀 صورة ECG بدون رقم ملف #E${it.code}\nمن ${it.by} — ${hm(it.at)}\nرد (اسحب) على هذي الرسالة برقم الملف، أو «تجاهل» لو مو تخطيط.` }).catch(() => null);
     if (s?.key?.id) it.alertIds.push(s.key.id);
   }
 }
-async function teamJid(who) {
-  const ph = C.team[who]?.phone; if (!ph) return "";
-  try { const [w] = await C.getSock().onWhatsApp("966" + ph); return w?.exists ? w.jid : ""; } catch { return ""; }
-}
+// (2.15.3) الإرسال لأنس وماجد: برقمهم مباشرة (onWhatsApp كان يعلّق وقت رجوع الاتصال). الملفات تنحفظ في «الصادر» على القرص
+//  قبل الإرسال، ونعيد المحاولة كل دقيقة لين توصل الاثنين (حتى بعد إعادة تشغيل البوت)
+const jidOf = who => { const ph = String(C.team[who]?.phone || "").replace(/\D/g, "").replace(/^(966|0)/, ""); return ph ? `966${ph}@s.whatsapp.net` : ""; };
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("مهلة الإرسال")), ms))]);
+async function sendTo(who, content) { const j = jidOf(who); if (!j) return true; await withTimeout(C.getSock().sendMessage(j, content), content.document ? 10 * 60e3 : 60e3); return true; }
+const OUT = "outbox/";
+let flushing = false, outFailAt = 0;
 async function sendBoth(content, exclude = "") {
-  for (const who of ["anas", "majed"]) { if (who === exclude) continue; const jid = await teamJid(who); if (jid) await C.getSock().sendMessage(jid, content).catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: إرسال")); }
+  const to = ["anas", "majed"].filter(w => w !== exclude && jidOf(w));
+  if (!content.document) {                                                         // نص: 5 محاولات بالخلفية
+    (async () => { for (const w of to) for (let i = 0; i < 5; i++) { try { await sendTo(w, content); break; } catch (e) { C.log.warn({ err: String(e?.message || e), w, i }, "ECG: إرسال نص"); await new Promise(r => setTimeout(r, 30e3)); } } })();
+    return;
+  }
+  const id = Date.now().toString(36) + short();
+  await bucket().file(OUT + id + ".bin").save(content.document);
+  await bucket().file(OUT + id + ".json").save(Buffer.from(JSON.stringify({ id, at: Date.now(), to, fileName: content.fileName, mimetype: content.mimetype, caption: content.caption || "" })));
+  flushOutbox().catch(() => {});
 }
+async function flushOutbox() {
+  if (flushing) return; flushing = true;
+  try {
+    const [files] = await bucket().getFiles({ prefix: OUT });
+    for (const f of files.filter(f => f.name.endsWith(".json"))) {
+      const meta = JSON.parse((await bucket().file(f.name).download())[0].toString());
+      if (Date.now() - meta.at > 3 * 864e5) { await bucket().file(f.name).delete(); await bucket().file(OUT + meta.id + ".bin").delete(); continue; }   // 3 أيام وما انرسل → نشيله
+      const [doc] = await bucket().file(OUT + meta.id + ".bin").download();
+      for (const w of [...meta.to]) {
+        try { await sendTo(w, { document: doc, mimetype: meta.mimetype, fileName: meta.fileName, caption: meta.caption }); meta.to = meta.to.filter(x => x !== w); C.log.info({ id: meta.id, w }, "ECG: انرسل الملف"); }
+        catch (e) { outFailAt = Date.now(); C.log.warn({ err: String(e?.message || e), id: meta.id, w }, "ECG: إرسال الملف — بنعيد المحاولة"); }
+      }
+      if (meta.to.length) await bucket().file(f.name).save(Buffer.from(JSON.stringify(meta)));
+      else { await bucket().file(f.name).delete(); await bucket().file(OUT + meta.id + ".bin").delete(); }
+    }
+  } finally { flushing = false; }
+}
+async function outboxCount() { try { const [f] = await bucket().getFiles({ prefix: OUT }); return f.filter(x => x.name.endsWith(".json")).length; } catch { return 0; } }
 
 /* ---------- الخاص: أنس / ماجد ---------- */
 // يرجع true لو الرسالة لـ ECG (رد على تنبيه، شيت xlsx، تصدير دردشة zip)
@@ -186,6 +218,17 @@ export async function onTeamDM(m, who, text = "") {
   const doc = g.documentMessage;
   const name = String(doc?.fileName || ""), mime = String(doc?.mimetype || "");
   const say = t => C.getSock().sendMessage(jid, { text: t }, { quoted: m }).catch(() => {});
+  if (!doc && /حال[هة]\s*(ال)?بانورا|pano\s*status/i.test(text)) {                 // (2.15.3) «حالة البانوراما»
+    const ago = ms => { const mn = Math.round((Date.now() - ms) / 60e3); return !ms ? "ولا مرة" : mn < 1 ? "قبل أقل من دقيقة" : mn < 90 ? `قبل ${mn} دقيقة` : `قبل ${Math.round(mn / 60)} ساعة`; };
+    const ob = await outboxCount();
+    await say([`🦷 حالة البانوراما`,
+      `• جهاز الأشعة: آخر سؤال ${ago(agent.at)}${agent.at ? (agentOn() ? " ✅" : " ⚠️ (مطفي أو نايم؟)") : ""}${agent.ver ? ` · نسخة ${agent.ver}` : ""}`,
+      pjob ? `• طلب ينتظر: ${pjob.fileName} (${pjob.rows.length} سطر) — ${pjob.sentAt ? `جهاز الأشعة أخذه ${ago(pjob.sentAt)}` : "جهاز الأشعة ما أخذه للحين"}` : "• ما فيه طلب ينتظر",
+      lastRes.at ? `• آخر صور وصلت: ${ago(lastRes.at)} (${lastRes.n} صورة)` : "",
+      ob ? `• ملفات تنتظر الإرسال: ${ob} — أعيد المحاولة كل دقيقة` : "• ما فيه ملفات تنتظر الإرسال",
+    ].filter(Boolean).join("\n"));
+    return true;
+  }
   if (doc && (/\.xlsx?$/i.test(name) || /spreadsheet|excel/i.test(mime))) {
     let buf; try { buf = await (C.download || downloadMediaMessage)({ ...m, message: g }, "buffer", {}, { logger: C.log, reuploadRequest: C.getSock().updateMediaMessage }); } catch { return false; }
     const sheet = await readSheet(buf).catch(() => null);
@@ -274,13 +317,24 @@ function cellTime(c) {
   return 0;
 }
 const fonts = new Map();
-async function stamp(buf, text) {
-  const img = await Jimp.read(buf), w = img.bitmap.width;
+// (2.15.3) رقم الملف على الصورة: الملصق الصغير (أبيض + الرقم) بـ jimp، والصورة الكبيرة بـ sharp (سريعة وبالخلفية).
+// قبل: jimp يفك ويحفظ كل صورة بنفسه → 76 بانوراما حبست البوت دقايق → الواتساب انقطع (408) وضاع الملف
+async function label(text, w) {
   const fk = w < 700 ? SANS_32_BLACK : w < 1800 ? SANS_64_BLACK : SANS_128_BLACK;
-  const font = fonts.get(fk) || fonts.set(fk, await loadFont(fk)).get(fk);                    // الخط مرة وحدة (صور البانوراما كثيرة)
+  const font = fonts.get(fk) || fonts.set(fk, await loadFont(fk)).get(fk);
   const sz = w < 700 ? 32 : w < 1800 ? 64 : 128, pad = Math.round(sz / 4), tw = measureText(font, text);
-  img.composite(new Jimp({ width: tw + pad * 2, height: Math.round(sz * 1.15) + pad, color: 0xffffffff }), 0, 0);
+  const img = new Jimp({ width: tw + pad * 2, height: Math.round(sz * 1.15) + pad, color: 0xffffffff });
   img.print({ font, x: pad, y: Math.round(pad / 2), text });
+  return img;
+}
+async function stamp(buf, text) {
+  if (sharp) try {
+    const meta = await sharp(buf).metadata(), w = (meta.orientation || 1) >= 5 ? meta.height : meta.width;
+    const lb = await (await label(text, w)).getBuffer("image/png");
+    return await sharp(buf).rotate().composite([{ input: lb, top: 0, left: 0 }]).jpeg({ quality: 90 }).toBuffer();
+  } catch (e) { C.log.warn({ err: String(e?.message || e) }, "sharp — نرجع لـ jimp"); }
+  const img = await Jimp.read(buf);
+  img.composite(await label(text, img.bitmap.width), 0, 0);
   return img.getBuffer("image/jpeg", { quality: 90 });
 }
 // (2.15.2) ألوان الشيت: أخضر = لقينا الصورة، أصفر = صورة من يوم ثاني غير تاريخ الفاتورة، أحمر = ما فيه صورة
@@ -335,7 +389,7 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
   if (pano) for (const f of pano.files) zip.file("بانوراما/" + f.name, f.buf);
   if (rows.length || pano) {
     zip.file(fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
-    const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 3 } });
+    const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
     const cap = [`📎 ${fileName}`, ecgCap, pano && pano.cap, prows.length && !pano && "🦷 البانوراما: جهاز الأشعة ما رد للحين — ترسل لحالها أول ما يرد.", `طلبه: ${byName}`].filter(Boolean).join("\n");
     await sendBoth({ document: out, mimetype: "application/zip", fileName: `${base} - ${[rows.length && "ECG", pano && "بانوراما"].filter(Boolean).join(" + ")}.zip`, caption: cap });
   } else await sendBoth({ text: `🦷 ${fileName}: ${prows.length} سطر بانوراما — جهاز الأشعة ما رد للحين، ترسل لحالها أول ما يرد.\nطلبه: ${byName}` });
@@ -347,7 +401,7 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
 }
 
 /* ---------- البانوراما: جهاز الأشعة (SabaPano) ---------- */
-let pjob = null, agent = { at: 0, ver: "" }, waiter = null, agentSaved = 0;
+let pjob = null, agent = { at: 0, ver: "" }, waiter = null, agentSaved = 0, lastRes = { at: 0, n: 0 };
 // جهاز الأشعة يسأل كل 10 دقايق؛ نكتب آخر سؤال مرة كل ساعة بالكثير (عشان بعد إعادة تشغيل البوت نعرف إنه شغّال)
 const AGENT_ON = 75 * 60e3;
 const agentOn = () => Date.now() - agent.at < AGENT_ON;
@@ -413,7 +467,7 @@ async function finishLate(result) {
   const zip = new JSZip();
   for (const f of pano.files) zip.file("بانوراما/" + f.name, f.buf);
   zip.file(job.fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
-  const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 3 } });
+  const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
   await sendBoth({ document: out, mimetype: "application/zip", fileName: `${job.fileName.replace(/\.xlsx?$/i, "")} - بانوراما.zip`, caption: `📎 ${job.fileName}\n${pano.cap}\nطلبه: ${C.team[job.who]?.name || job.who}` });
   await dropPanoJob(job.id);
 }
@@ -447,7 +501,8 @@ export async function panoHttp(req, res) {
       result.set(String(it.key), arr);
     }
     send(200, "ok");
-    C.log.info({ id, keys: result.size }, "بانوراما: وصلت الصور من جهاز الأشعة");
+    lastRes = { at: Date.now(), n: [...result.values()].reduce((a, v) => a + v.length, 0) };
+    C.log.info({ id, keys: result.size, imgs: lastRes.n }, "بانوراما: وصلت الصور من جهاز الأشعة");
     if (waiter?.id === id) waiter.resolve(result);
     else finishLate(result).catch(async e => { C.log.error({ err: String(e?.stack || e) }, "بانوراما: متأخر"); await sendBoth({ text: "❌ وصلت صور البانوراما بس ما قدرت أجهّز الملف: " + String(e?.message || e).slice(0, 120) }); });
     return;
