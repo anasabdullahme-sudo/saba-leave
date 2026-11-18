@@ -377,16 +377,25 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
     }
   }
   const ecgCap = rows.length ? `🫀 ECG: ✅ ${rows.length - miss.length} من ${rows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}` : "";
-  // البانوراما: من جهاز الأشعة (ننتظره 12 دقيقة لو كان شغّال)
+  // البانوراما: من جهاز الأشعة (ننتظره 15 دقيقة لو كان شغّال)
   let pano = null;
   if (prows.length) {
     const job = await newPanoJob(prows, sc, fileName, who, Buffer.from(await wb.xlsx.writeBuffer()));
-    if (agentOn()) pano = await waitPano(job.id, 12 * 60e3);
+    if (agentOn()) pano = await waitPano(job.id, 15 * 60e3);
     if (pano) { await dropPanoJob(job.id); pano = await applyPano(pano, job.rows, ws, sc); }
   }
   const zip = new JSZip();
   for (const f of ecgFiles) zip.file("ECG/" + f.name, f.buf);
-  if (pano) for (const f of pano.files) zip.file("بانوراما/" + f.name, f.buf);
+  if (pano) for (const f of pano.files) zip.file("PANORAMIC/" + f.name, f.buf);          // أسماء المجلدات إنجليزي (العربي يطلع رموز في ويندوز)
+  // البانوراما بتتأخر → نحفظ صور الـ ECG مع الطلب عشان الملف اللي يجي بعدين يكون كامل (ECG + بانوراما + الشيت)
+  if (prows.length && !pano && ecgFiles.length && pjob) {
+    try {
+      const ez = new JSZip(); for (const f of ecgFiles) ez.file(f.name, f.buf);
+      const ecgPath = `pano/${pjob.id}-ecg.zip`;
+      await bucket().file(ecgPath).save(await ez.generateAsync({ type: "nodebuffer", compression: "STORE" }), { contentType: "application/zip" });
+      pjob.ecgPath = ecgPath; pjob.ecgCap = ecgCap; await C.db.doc("bot/pano_job").set(pjob).catch(() => {});
+    } catch (e) { C.log.warn({ err: String(e?.message || e) }, "ECG: حفظ الصور مع طلب البانوراما"); }
+  }
   if (rows.length || pano) {
     zip.file(fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
     const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
@@ -409,6 +418,7 @@ const dayOf = ms => ms ? ridh(ms).toISOString().slice(0, 10) : "";
 async function newPanoJob(prows, sc, fileName, who, sheetBuf) {
   const id = Date.now().toString(36) + short();
   if (pjob?.sheetPath) await bucket().file(pjob.sheetPath).delete().catch(() => {});   // طلب قديم ما خلص → الجديد يحل محله
+  if (pjob?.ecgPath) await bucket().file(pjob.ecgPath).delete().catch(() => {});
   const sheetPath = `pano/${id}.xlsx`;
   await bucket().file(sheetPath).save(sheetBuf, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   pjob = { id, at: Date.now(), fileName, who, sc, sheetPath, sentAt: 0, rows: prows.map((r, i) => ({ i, r: r.r, num: r.num, date: dayOf(r.at) })) };
@@ -458,17 +468,24 @@ async function applyPano(result, jrows, ws, sc) {
   const cap = `🦷 بانوراما: ✅ ${files.length} من ${jrows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}${notes.length ? "\nℹ️ " + notes.join("\nℹ️ ") : ""}`;
   return { files, cap };
 }
-// النتيجة وصلت بعد ما أرسلنا الـ ECG (جهاز الأشعة كان مطفي) → ملف البانوراما لحاله مع الشيت (فيه حالات الـ ECG بعد)
+// النتيجة وصلت بعد ما أرسلنا الـ ECG (جهاز الأشعة كان مطفي) → الملف كامل: صور الـ ECG (انحفظت مع الطلب) + البانوراما + الشيت
 async function finishLate(result) {
   const job = pjob; if (!job) return;
   const [sheetBuf] = await bucket().file(job.sheetPath).download();
-  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(sheetBuf); const ws = wb.worksheets[0];
+  const wb = await loadWb(sheetBuf); const ws = wb.worksheets[0];
   const pano = await applyPano(result, job.rows, ws, job.sc);
   const zip = new JSZip();
-  for (const f of pano.files) zip.file("بانوراما/" + f.name, f.buf);
+  let nEcg = 0;
+  if (job.ecgPath) {
+    try { const [eb] = await bucket().file(job.ecgPath).download(); const ez = await JSZip.loadAsync(eb);
+      for (const [n, f] of Object.entries(ez.files)) if (!f.dir) { zip.file("ECG/" + n, await f.async("nodebuffer")); nEcg++; } }
+    catch (e) { C.log.warn({ err: String(e?.message || e) }, "ECG: صور الطلب المتأخر"); }
+  }
+  for (const f of pano.files) zip.file("PANORAMIC/" + f.name, f.buf);
   zip.file(job.fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
   const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
-  await sendBoth({ document: out, mimetype: "application/zip", fileName: `${job.fileName.replace(/\.xlsx?$/i, "")} - بانوراما.zip`, caption: `📎 ${job.fileName}\n${pano.cap}\nطلبه: ${C.team[job.who]?.name || job.who}` });
+  await sendBoth({ document: out, mimetype: "application/zip", fileName: `${job.fileName.replace(/\.xlsx?$/i, "")} - ${nEcg ? "ECG + " : ""}بانوراما.zip`, caption: [`📎 ${job.fileName} (الملف كامل)`, nEcg ? job.ecgCap : "", pano.cap, `طلبه: ${C.team[job.who]?.name || job.who}`].filter(Boolean).join("\n") });
+  if (job.ecgPath) await bucket().file(job.ecgPath).delete().catch(() => {});
   await dropPanoJob(job.id);
 }
 const readBody = (req, max) => new Promise((ok, no) => { const a = []; let n = 0; req.on("data", c => { n += c.length; if (n > max) { no(new Error("كبير")); req.destroy(); } else a.push(c); }); req.on("end", () => ok(Buffer.concat(a))); req.on("error", no); });

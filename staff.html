@@ -484,7 +484,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261112a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261118a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -646,7 +646,7 @@ function renderCounts() {
   TYPES.forEach(t => setBadge(document.querySelector(`.ty[data-t="${t.id}"] .badge`), S.pending.filter(x => x.branch === S.branch && x.type === t.id).length));
   const inBranch = S.pending.filter(x => x.branch === S.branch).length;
   const heldIn = S.held.filter(x => x.branch === S.branch).length;
-  $("#hSub").textContent = (inBranch ? `${inBranch} طلب بانتظار الرفع` : "لا توجد طلبات بانتظار الرفع") + (heldIn ? ` و ${heldIn} معلّق` : "") + " في هذا الفرع";
+  $("#hSub").textContent = (inBranch ? `${inBranch} طلب بانتظار الرفع` : "لا توجد طلبات بانتظار الرفع") + (heldIn ? ` و ${heldIn} معلّق (كل الأنواع)` : "") + " في هذا الفرع";
   const total = S.pending.length;
   document.title = (total ? `(${total}) ` : "") + "لوحة الإجازات | سابا";
 }
@@ -1543,7 +1543,10 @@ $("#botDocs").onclick = async () => {
     const ds = DOCTORS.filter((d, i) => d.branch === b.id && DOCTORS.findIndex(x => x.id === d.id) === i); if (!ds.length) return "";
     const extra = b.id === "bawadi" ? Object.entries(docExtra).map(([k, v]) => `<label><span>${esc(k.split("|")[0])} <small style="color:var(--muted)">(بالاسم)</small></span><input value="${esc(v)}" disabled></label>`).join("") : "";
     return `<div class="g">${esc(b.ar || branchName(b.id))}</div>` + extra + ds.map(d => `<label><span>د. ${esc(d.ar)}</span><input data-doc="${esc(d.id)}" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" value="${esc(ph[d.id] || "")}"></label>`).join("");
-  }).join("");
+  }).join("") + (() => {                                            // (18/11) أطباء بدون فرع ثابت (يداومون في أكثر من فرع)
+    const ds = DOCTORS.filter((d, i) => !d.branch && DOCTORS.findIndex(x => x.id === d.id) === i); if (!ds.length) return "";
+    return `<div class="g">أطباء بدون فرع ثابت</div>` + ds.map(d => `<label><span>د. ${esc(d.ar)}</span><input data-doc="${esc(d.id)}" inputmode="tel" maxlength="14" placeholder="05xxxxxxxx" value="${esc(ph[d.id] || "")}"></label>`).join("");
+  })();
 };
 let docExtra = {}, testWait = 0;
 $("#docTest").onclick = async () => {
@@ -1702,19 +1705,20 @@ function fixDupMsg(e) {
 
 /* ---------- ربط إضافة «سابا ← صحة» ---------- */
 let extVersion = null, sehaWarned = null;
-const EXT_LATEST = "1.8.8", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
+const EXT_LATEST = "1.9.7", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
 const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 let extWarned = false;
 const EXT_STORE = "https://chromewebstore.google.com/detail/amooccmkmlokblanmfoiidhleicphfja";   // متجر كروم (غير مدرج): التثبيت والتحديث التلقائي من هنا
-$("#toolDl").href = EXT_STORE; $("#toolVer").textContent = EXT_LATEST;
+$("#toolDl").href = EXT_STORE; $("#toolVer").textContent = EXT_LATEST;   // يتغيّر لنسخة الجهاز لما الإضافة ترد (renderExtHint)
 function renderExtHint() {
+  if (extVersion) $("#toolVer").textContent = extVersion;
   const outdated = !extVersion || verLt(extVersion, EXT_LATEST);
   $("#toolDot").hidden = !outdated;
   $("#toolDl").title = !extVersion ? "الإضافة مو مثبتة في هالجهاز — اضغط وثبّتها من متجر كروم" : outdated ? `الإضافة في هالجهاز ${extVersion} — المثبّتة من المتجر تتحدث لحالها` : `الإضافة محدّثة (${extVersion})`;
   $("#sehaTxt").textContent = extVersion ? "افتح صحة وعبّي تلقائياً" : "افتح منصة صحة للرفع";
   const old = extVersion && verLt(extVersion, EXT_LATEST);
   $("#extHint").innerHTML = !extVersion ? `ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً — <a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من متجر كروم</a>`
-    : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — المثبّتة من المتجر تتحدث لحالها. لو مثبّتة من ملف: شيلها من chrome://extensions و<a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من المتجر</a> (<a href="${EXT_ZIP}" download>أو الملف ${EXT_LATEST}</a>)`
+    : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — المثبّتة من المتجر تتحدث لحالها. لو مثبّتة من ملف: شيلها من chrome://extensions و<a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من المتجر</a> (<a href="${EXT_ZIP}" download>أو الملف</a>)`
     : "<b>✓</b> إضافة التعبئة شغالة";
   if (old && !extWarned) { extWarned = true; toast(`إضافة صحة في هالجهاز قديمة (${extVersion}) — ثبّتها من متجر كروم (الرابط تحت زر صحة) عشان تتحدث لحالها`); }
 }

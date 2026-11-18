@@ -96,6 +96,25 @@ export const DOCTORS = [
   { id: "fatma-ibrahim",    branch: "haramain", ar: "فاطمة إبراهيم",  en: "Fatma Ibrahim",       alt: ["فاطمة ابراهيم محمد ابراهيم", "فاطمة ابراهيم ابراهيم", "د.فاطمة ابراهيم", "Fatima Ebrahim Ebrahim", "Dr.Fatima Ebrahim", "فاطمه ابراهيم", "Fatima Ibrahim", "Fatma Ibrahim Mohamed", "Fatma Ebrahim", "Fatima Ibraheem"] },
   { id: "sahar-mohamed",    branch: "haramain", ar: "سحر محمد",        en: "Sahar Mohamed", seha: "سحر محمد محمود علي",       alt: ["Sahar Mohammed", "Sahar Muhammad"] },
   { id: "sara-shoreiji",     branch: "haramain", ar: "سارة الجارحي",    en: "Sara Fouad Elgarhi", seha: "ساره فؤاد الشوربجي الجارحي",  alt: ["سارة الشوربجي", "ساره الشوربجي", "سارة فؤاد الشوربجي", "ساره فؤاد الشوربجى الجارحى", "Sarah El-Shourbagy", "Sara Elshorbagy", "Sarah Elshourbagy", "Sara El Shorbagy", "Sara Fouad Elshorbagy", "سارة فؤاد الجارحي", "ساره فؤاد الجارحي", "سارة فؤاد", "Sara Elgarhi", "Sarah Elgarhi", "Sara El-Garhy", "Sara Elgarhy", "Sarah Fouad Elgarhy"] },
+  // (18/11) أطباء البوادي اللي كانوا يطلعون «طبيب غير مدرج» — بدون فرع ثابت (branch فاضي):
+  // يتعرّفون ويتحفظ رقمهم، والطلب يبقى في الفرع اللي جا منه (بعضهم يداوم في أكثر من فرع)
+  { id: "majdi-sekla",      branch: "", ar: "مجدي نصيف",        en: "Majdi Nasif Sekla", seha: "مجدي نصيف سكلا", alt: ["مجدي نصيف سكلا", "Majdi Nasef Sekla", "Majdi Nasif", "Majdi Nasef", "Magdy Nassif", "Magdy Nasif"] },
+  { id: "amgad-kamel",      branch: "", ar: "أمجد كامل",        en: "Amgad Hamed Kamel", seha: "امجد حامد محمد", alt: ["امجد حامد محمد", "أمجد حامد كامل", "Amgad Kamel", "Amjad Kamel", "Amgad Hamed"] },
+  { id: "osama-rubayyi",    branch: "", ar: "أسامة يوسف",       en: "Osama Yousef Rubayyi", seha: "اسامة يوسف ربيع", alt: ["اسامة يوسف ربيع", "أسامة يوسف ربيع", "Osama Youssef", "Osama Yousef", "Osama Rubayyi", "Osama Yousef Rubayy"] },
+  { id: "nermin-beshbishy", branch: "", ar: "نيرمين البشبيشي",  en: "Nermin Ibrahim Elbeshbishy", seha: "نرمين ابراهيم البشبيشي", alt: ["نرمين ابراهيم البشبيشي", "نرمين البشبيشي", "Nermeen Elbeshbishy", "Nermin Beshbishy", "Nermin Elbeshbishy"] },
+  { id: "ashraf-sinjidi",   branch: "", ar: "أشرف السنجيدي",    en: "Ashraf Mohammed Alsinjidi", seha: "اشرف محمد السنجيدي", alt: ["اشرف محمد السنجيدي", "أشرف محمد السنجيدي", "Ashraf Mohamed Alsangerdi", "Ashraf Elsengedy", "Ashraf Sengedy", "Ashraf Alsinjidi"] },
+  { id: "ahmed-maatouk",    branch: "", ar: "أحمد معتوق",       en: "Ahmed Abdulhamid Mattouk", seha: "احمد عبد الحميد محمد", alt: ["احمد معتوق", "احمد عبد الحميد معتوق", "Ahmed Abdulhamid Maatouk", "Ahmed Maatouk", "Ahmed Matouk", "Ahmed Mattouk"] },
+  { id: "eman-mansour",     branch: "", ar: "إيمان منصور",      en: "Eman Gamal Mansour", seha: "ايمان جمال منصور", alt: ["ايمان جمال منصور", "ايمان منصور", "Eman Mansour", "Iman Mansour", "Iman Gamal Mansour"] },
+  { id: "abdulhalim-qutb",  branch: "", ar: "عبدالحليم قطب",    en: "Abdulhalem Abdulhalem Qutob", seha: "عبدالحليم قطب قطب", alt: ["عبدالحليم قطب قطب", "عبد الحليم قطب", "Abdulhaleim Abdulhaleim Qutob", "Abdelhalim Kotb", "Abdulhalim Qutb"] },
+  { id: "wael-hegeen",      branch: "", ar: "وائل الهجين",      en: "Wael Mohamed Elhagein", seha: "وائل محمد الهجين", alt: ["وائل محمد الهجين", "Wael Elhegeen", "Wael Elhagein", "Wael Mohammed Elhagein"] },
+  { id: "rasha-fishawy",    branch: "", ar: "رشا الفيشاوي",     en: "Rasha Mahmoud Elfishawy", seha: "رشا محمود الفيشاوي", alt: ["رشا محمود الفيشاوي", "Rasha Elfishawy", "Rasha Fishawy"] },
+  { id: "ashraf-amir",      branch: "", ar: "أشرف الأمير",      en: "Ashraf Abdulqayoum Amir", seha: "اشرف عبدالقيوم امير", alt: ["اشرف عبدالقيوم امير", "اشرف الامير", "Ashraf Abdulqayoum Abdulrazzaq Amir", "Ashraf Elamir", "Ashraf Amir"] },
+  { id: "sherif-atreby",    branch: "", ar: "شريف الأتربي",     en: "Sherif Elatreby", seha: "شريف فتحي الأتربي", alt: ["شريف فتحي الأتربي", "شريف الاتربي", "Sherif Fathy Elatreby", "Sherif Atreby"] },
+  { id: "raed-shaaban",     branch: "", ar: "رائد شعبان",       en: "Raed Shaaban", seha: "رائد شعبان على", alt: ["رائد شعبان على", "رائد شعبان علي", "Raed Shaban", "Raed Shaaban Ali"] },
+  { id: "majd-adwani",      branch: "", ar: "مجد العدواني",     en: "Majd Aladwani", seha: "مجد معيوف العدواني", alt: ["مجد معيوف العدواني", "Majd Maayouf Aladwani", "Majd Adwani"] },
+  { id: "abdelsamad-ashiry", branch: "", ar: "عبدالصمد العشيري", en: "Abdelsamad Elashiry", seha: "عبدالصمد انور العشيري", alt: ["عبدالصمد انور العشيري", "Abdelsamad Anwar Elashiry", "Abdulsamad Alashiry"] },
+  { id: "amr-abolkheir",    branch: "", ar: "عمرو أبو الخير",   en: "Amr Abolkheir", seha: "عمرو عبدالله ابوالخير", alt: ["عمرو عبدالله ابوالخير", "عمرو ابو الخير", "Amr Abu Elkheir", "Amr Abdullah Abolkheir"] },
+  { id: "heba-bakhuraiba",  branch: "", ar: "هبة باخريبة",      en: "Heba Bakhuraiba", seha: "هبه عادل باخريبه", alt: ["هبه عادل باخريبه", "هبة باخريبه", "Heba Adel Bakhuraiba"] },
 ];
 export const doctorById = id => DOCTORS.find(d => d.id === id);
 

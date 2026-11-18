@@ -13,13 +13,14 @@ import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM, panoHttp }
 import http from "node:http";
 // (2.15.3) مكتبة التشفير حق الواتساب تطبع مفاتيح الجلسة كاملة في سجل Railway («Closing session: SessionEntry {...privKey...}») — نخفيها
 for (const k of ["log", "info", "warn"]) { const o = console[k].bind(console); console[k] = (...a) => { if (typeof a[0] === "string" && /^(Closing (open )?session|Removing old closed session|Opening session|Migrating session|Session already)/i.test(a[0])) return; o(...a); }; }
-import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin } from "./group.js";
+import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin, doctorNames as boardDoctorNames } from "./group.js";
+import { initAssist, isAssistGroup, onAssistGroup } from "./assist.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.15.3";
+const VERSION = "2.16.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -599,6 +600,7 @@ async function senderPhoneOf(m) {
   return normPhone(String(pnJid).split(/[:@]/)[0]);
 }
 async function groupRoute(m) {
+  if (await isAssistGroup(m.key?.remoteJid).catch(() => false)) return onAssistGroup(m);     // (2.16.0) قروب الشكاوي → مساعد أنس
   if (await isEcgGroup(m.key?.remoteJid).catch(() => false)) return ecgGroup(m);
   return handleGroupMessage(m);
 }
@@ -1198,6 +1200,7 @@ async function main() {
     ports.forEach((pt, i) => { const sv = i ? http.createServer(globalThis.__sabaHttp.listeners("request")[0]) : globalThis.__sabaHttp; sv.requestTimeout = 15 * 60e3; sv.on("error", e => log.warn({ err: String(e?.message || e), pt }, "سيرفر")); sv.listen(pt, () => log.info({ port: pt }, "سيرفر البانوراما شغّال")); });
   }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
+  initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage });
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {

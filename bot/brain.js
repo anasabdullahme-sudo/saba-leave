@@ -7,6 +7,8 @@
 let A = null;                                   // أدوات group.js (تنمرّر من initBrain)
 const chat = [];                                // آخر كلامنا {role: user|model, text, at}
 let saveT = null, proposal = null;              // اقتراح ينتظر موافقته
+let AS = null;                                  // (2.16.0) مساعد قروب الشكاوي (assist.js)
+export function setAssist(api) { AS = api; }
 
 export function initBrain(api) {
   A = api;
@@ -111,12 +113,22 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - resolve: code — يقفل سؤال/رسالة قروب منتظرة (ويحط ✅ على رسالتها في القروب بعد ما ينحفظ). حطه مع أفعال التصحيح، أو لحاله لو قال «تجاهلها».
 - undo: يرجّع الجدول الثابت للنسخة اللي قبل آخر تعديل.
 - reports: on = true/false (تقارير القروب له).
-doctor_id لازم من الجدول تحت.`;
+doctor_id لازم من الجدول تحت.
+
+قروب الشكاوي (البوت يقراه ويتابع الشكاوي والطلبات — تحت «شكاوي هالأسبوع» و«طلبات تنتظر أنس»):
+- رسالة تبدأ بـ «[من قروب الشكاوي — …]» = طلب وصل من القروب (غالباً المدير)، مو كلام أنس: طبّق تغييرات الجدول اللي ليوم أو أيام محددة (إجازة، مرضية، غياب، تغطية، تأخير) على طول، والدائمة confirm_first. وفي reply قل لأنس باختصار وش بتسجّل.
+- أنس قال إن شكوى انحلت («شكوى فلانة انحلت، كلمناها…») → complaint_resolve: code (#C…) + how = كيف انحلت بكلامه. مو متأكد أي شكوى؟ اسأله وعدّد له المفتوحة.
+- رسالة محوّلة فيها شكوى مراجع (من الخاص أو مكان ثاني) أو أنس قال «سجّل شكوى…» → complaint_add: text = الشكوى بجملة واضحة، name = مين نقلها، patient و about لو معروفة، how لو قال إنها انحلت. (رسالة محوّلة عن دوام الأطباء تبقى زي ما هي فوق.)
+- «أرسل» / «أرسلها» / «تمام أرسل» بعد رسالة جاهزة (#T) → task_send: code (آخر #T فيه رسالة جاهزة لو ما حدد)، و text = النص بعد تعديله لو طلب تعديل (اكتب النص كامل). البوت يرسلها في قروب الشكاوي ردّاً على رسالة الطلب.
+- «خلصت» / «سويتها» عن طلب #T → task_done (code + how لو قال كيف). «لا تسويها / انسه» → task_drop.
+- «وش الشكاوي / ملخص الشكاوي» → complaints_summary.
+- لا تقول إن الشكوى انحلت أو الرسالة انرسلت إلا بفعل.`;
 
 const SCHEMA = { type: "OBJECT", properties: {
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary"] },
+    text: { type: "STRING" }, how: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
     mode: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, start_date: { type: "STRING" }, end_date: { type: "STRING" }, return_date: { type: "STRING" },
@@ -164,7 +176,7 @@ export async function handle(m, text, { forwarded = false } = {}) {
 \n## آخر رسايل القروب (وش سوى البوت فيها)\n${groupBlock()}
 \n## أطباء انشالوا مؤخراً من الجدول (id | الاسم | القسم | متى | مين)\n${removed.map(x => `${x.doc.id} | ${A.shortName(x.doc.name)} | ${x.dep.name} | ${new Date(x.at).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })} | ${x.by}`).join("\n") || "—"}
 \n## أيام في فروع ثانية (يوم واحد)\n${(A.getBoard()?.awayDays || []).filter(x => x.date >= t.iso).map(x => `${A.shortName(docOf(x.doctorId)?.name || x.doctorId)}: ${x.date} في ${x.branch}`).join("\n") || "—"}
-\n## اقتراح ينتظر موافقته\n${proposal ? proposal.summary : "—"}`;
+\n## اقتراح ينتظر موافقته\n${proposal ? proposal.summary : "—"}${AS ? AS.block() : ""}`;
   const user = (forwarded ? "[رسالة محوّلة من قروب الاستقبال]\n" : "") + (quoted ? `[يرد على: «${quoted.slice(0, 600)}»]\n` : "") + text;
   const hist = chat.filter(x => Date.now() - x.at < 24 * 3600e3).slice(-16).map(x => ({ role: x.role, parts: [{ text: x.text }] }));
   while (hist.length && hist[0].role !== "user") hist.shift();
@@ -296,6 +308,7 @@ function uniq(list) { const seen = new Set(); return list.filter(a => { const k 
 const docOf = id => A.docs().find(x => x.id === id);
 function check(a) {
   if (a.__bad) return a.__bad;
+  { const w = AS?.checkAct(a); if (w != null) return w; }
   const d = a.doctor_id ? docOf(a.doctor_id) : null, t = A.nowR();
   if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "remove_alias", "move_doctor", "branch_day"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
   if (a.type === "status") {
@@ -319,6 +332,7 @@ function check(a) {
   return "";
 }
 function describe(a) {
+  { const x = AS?.describeAct(a); if (x) return x; }
   const d = a.doctor_id ? docOf(a.doctor_id) : null, n = d ? "د. " + A.shortName(d.name) : a.name ? "د. " + a.name : a.doctor_id ? `(${a.doctor_id})` : "";
   const t = A.nowR(), date = ISO(a.date) ? a.date : t.iso, when = date === t.iso ? "اليوم" : date === A.isoPlus(t.iso, 1) ? `بكرة ${dayName(date)}` : `${dayName(date)} ${dmy(date)}`;
   const f = toMin(a.from), u = toMin(a.until), at = toMin(a.at), next = a.until_next_day || (f != null && u != null && u <= f);
@@ -359,7 +373,7 @@ async function execute(actions, pclar, pdocs) {
     try { r = await run(a, t, pclar, pdocs); } catch (e) { r = { ok: false, why: String(e?.message || e).slice(0, 140) }; }
     if (r?.skip) continue;
     if (a.type === "restore_doctor") desc = describe(a);                       // الاسم يعرف بعد التنفيذ
-    out.push(r?.ok ? `✅ انحفظ وتأكدت منه في الموقع: ${desc.replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${desc.replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
+    out.push(r?.ok ? `✅ ${/^(complaint|task)_/.test(a.type) ? "" : "انحفظ وتأكدت منه في الموقع: "}${desc.replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${desc.replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
   }
   // نقفل الأسئلة المنتظرة ونحط ✅ في القروب — بس لو كل اللي قبلها انحفظ
   const allOk = !out.some(l => /^(❌|⚠️)/.test(l));
@@ -377,6 +391,7 @@ async function execute(actions, pclar, pdocs) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function run(a, t, pclar, pdocs) {
+  { const r = AS ? await AS.act(a) : null; if (r) return r; }
   const d = a.doctor_id ? docOf(a.doctor_id) : null, id = d?.id;
   const readToday = async () => (await A.db.doc("board/bawadi_today").get()).data() || {};
   const readPlan = async () => (await A.db.doc("board/bawadi_plan").get()).data()?.items || [];
