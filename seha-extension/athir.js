@@ -135,6 +135,69 @@
     return [n && n.day === 0 && n.mins <= 60 ? "amber" : "gray", whenTxt(n)];
   }
 
+  /* ---------- (1.9.9) خط أحمر على الطبيب اللي ما يستقبل الحين ---------- */
+  // إجازة، غير متواجد، وقف استقبال، زحمة، مواعيد فقط، خلص دوامه، اليوم مو من أيامه، أو دوامه يبدأ بعد أكثر من ساعة.
+  // يرجّع السبب (أو "" = عادي). الموظف يقدر يختاره عادي — الخط تنبيه بس.
+  const dmy = iso => iso.slice(8, 10) + "/" + iso.slice(5, 7);
+  function strike(d) {
+    const t = nowR();
+    const vac = (board.vacations || []).find(v => v.doctorId === d.id && v.start <= t.iso && (!v.end || v.end >= t.iso));
+    if (vac) return `إجازة${vac.end ? " لين " + dmy(vac.end) : ""}`;
+    const s = today?.date === t.iso ? today.st?.[d.id] : null, a = active(d, t);
+    if (s) {
+      if (s.kind === "stop" || (s.kind === "stop_at" && s.from != null && t.m >= s.from)) return "وقف استقبال";
+      if (s.kind === "absent") return s.off ? "خلص دوامه اليوم" : "غير متواجد اليوم";
+      if (s.kind === "busy") return "زحمة — عنده انتظار";
+      if (s.kind === "appt") return s.until != null && t.m >= s.until ? "خلص دوامه اليوم" : "مواعيد فقط";
+      if (s.kind === "appt_at" && s.from != null && t.m >= s.from) return "مواعيد فقط";
+      if (s.apptFrom != null && t.m >= s.apptFrom) return "مواعيد فقط";
+      if (s.kind === "late" && s.from != null && s.from - t.m > 60) return `متأخر — يوصل ${hm(s.from)}`;
+      if (s.kind === "starts" && s.from != null) return s.from - t.m > 60 ? `دوامه اليوم يبدأ ${hm(s.from)}` : s.until != null && t.m >= s.until ? "خلص دوامه اليوم" : "";
+      if (["leaves", "free", "present"].includes(s.kind) && s.until != null && t.m >= s.until) return "خلص دوامه اليوم";
+      if (["free", "present", "late", "leaves", "appt_at", "stop_at"].includes(s.kind)) return "";
+    }
+    if (a) return "";
+    if (!(d.workdays || []).includes(t.wd)) return "اليوم مو من أيام دوامه";
+    const n = nextStart(d, t);
+    if (n && n.day === 0) return n.mins > 60 ? `دوامه يبدأ ${hm(n.s)} — بعد ${left(n.mins)}` : "";
+    return (shiftsFor(d, t.wd) || []).length ? "خلص دوامه اليوم" : "اليوم مو من أيام دوامه";
+  }
+  const whyCache = new Map(); let whyKey = "";
+  function whyOf(text) {
+    const t = nowR(), k = t.iso + t.m + (today?.date || "") + JSON.stringify(today?.st || {}).length + (board?.updatedAt || "");
+    if (k !== whyKey) { whyCache.clear(); whyKey = k; }
+    if (!whyCache.has(text)) { const d = board ? matchAthir(text) : null; whyCache.set(text, d ? strike(d) : ""); }
+    return whyCache.get(text);
+  }
+  function paint(el, why) {
+    if (!el) return;
+    if ((el.dataset.sabaWhy || "") === why) return;
+    el.dataset.sabaWhy = why;
+    const st = el.style;
+    if (why) { st.textDecoration = "line-through"; st.textDecorationColor = "#D92D20"; st.textDecorationThickness = "2px"; st.color = "#8A94A6"; el.title = "⛔ " + why; }
+    else { st.textDecoration = ""; st.textDecorationColor = ""; st.textDecorationThickness = ""; st.color = ""; if (/^⛔ /.test(el.title || "")) el.title = ""; }
+  }
+  // الاسم في الخانة بعد ما ينختار (select2 / chosen / select عادي)
+  function paintSelected(why) {
+    const nx = field.nextElementSibling;
+    const shown = nx?.querySelector?.(".select2-selection__rendered, .chosen-single > span") || null;
+    paint(shown || field, why);
+  }
+  // القائمة لما تنفتح: كل اسم عليه خط + السبب صغير جنبه
+  function paintList() {
+    if (!board) return;
+    for (const li of document.querySelectorAll(".select2-results__option, .chosen-results li, .select2-results li")) {
+      const tag = li.querySelector(":scope > .saba-why"), txt = (li.firstChild?.nodeType === 3 ? li.textContent.replace(tag?.textContent || "", "") : li.textContent.replace(tag?.textContent || "", "")).trim();
+      if (!/\|/.test(txt)) continue;
+      const why = whyOf(txt);
+      if ((li.dataset.sabaWhy || "") === why && (!why || tag)) continue;
+      paint(li, why);
+      tag?.remove();
+      if (why) { const sp = document.createElement("span"); sp.className = "saba-why"; sp.textContent = "  ⛔ " + why; sp.style.cssText = "display:inline-block;text-decoration:none;color:#B4232A;font-size:11.5px;font-weight:600;margin-inline-start:8px;background:#FDECEC;border-radius:6px;padding:0 6px"; li.append(sp); }
+    }
+    if (field) for (const o of field.options) { if (!/\|/.test(o.text)) continue; const why = whyOf(o.text.trim()); o.style.color = why ? "#B4232A" : ""; o.title = why ? "⛔ " + why : ""; }
+  }
+
   /* ---------- البطاقة جنب خانة الطبيب ---------- */
   function ensureBox() {
     if (host && document.documentElement.contains(host)) return;
@@ -171,9 +234,12 @@
   function tick() {
     field = findField();
     if (!field) { if (host) host.style.display = "none"; return; }
+    if (!board) load();
+    try { paintList(); } catch { /* شكل قائمة غريب — البطاقة تكمل */ }
     const o = field.options[field.selectedIndex], txt = o && o.value && !/اختر/.test(o.text) ? o.text.trim() : "";
+    try { paintSelected(txt && board ? whyOf(txt) : ""); } catch {}
     if (!txt) { if (host) host.style.display = "none"; lastSig = ""; return; }
-    if (!board) { load(); return; }
+    if (!board) return;
     const t = nowR(), sig = txt + "|" + t.m + "|" + (today?.date || "") + (board?.updatedAt || "");
     if (sig !== lastSig) {
       lastSig = sig; ensureBox();
