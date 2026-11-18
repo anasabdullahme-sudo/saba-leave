@@ -57,7 +57,12 @@
   }
 
   /* ---------- حالة الطبيب الحين (نفس منطق صفحة الأطباء) ---------- */
+  let nowC = null, nowAt = 0;
   function nowR() {
+    if (nowC && Date.now() - nowAt < 1000) return nowC;
+    nowAt = Date.now(); return (nowC = nowR0());
+  }
+  function nowR0() {
     const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(new Date()).map(x => [x.type, x.value]));
     return { m: +p.hour * 60 + +p.minute, wd: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday], iso: `${p.year}-${p.month}-${p.day}` };
   }
@@ -143,6 +148,7 @@
     const t = nowR();
     const vac = (board.vacations || []).find(v => v.doctorId === d.id && v.start <= t.iso && (!v.end || v.end >= t.iso));
     if (vac) return `إجازة${vac.end ? " لين " + dmy(vac.end) : ""}`;
+    const aw = awayToday(d, t); if (aw) return `في فرع ${aw} اليوم`;
     const s = today?.date === t.iso ? today.st?.[d.id] : null, a = active(d, t);
     if (s) {
       if (s.kind === "stop" || (s.kind === "stop_at" && s.from != null && t.m >= s.from)) return "وقف استقبال";
@@ -161,6 +167,21 @@
     const n = nextStart(d, t);
     if (n && n.day === 0) return n.mins > 60 ? `دوامه يبدأ ${hm(n.s)} — بعد ${left(n.mins)}` : "";
     return (shiftsFor(d, t.wd) || []).length ? "خلص دوامه اليوم" : "اليوم مو من أيام دوامه";
+  }
+  // في فرع ثاني اليوم (كل أسبوع أو يوم واحد) — نفس صفحة الأطباء
+  function awayToday(d, t) {
+    const one = (board.awayDays || []).find(x => x.doctorId === d.id && x.date === t.iso);
+    return String(one?.branch || d.away?.[t.wd] || d.away?.[String(t.wd)] || "").replace(/^(فرع|سابا)\s+/, "");
+  }
+  // متواجد الحين فعلاً: ما عليه خط، ودوامه شغّال الحين (اللي بيبدأ بعد شوي ما ينحسب)
+  function hereNow(d) {
+    if (strike(d)) return false;
+    const t = nowR(), s = today?.date === t.iso ? today.st?.[d.id] : null;
+    if (s) {
+      if ((s.kind === "starts" || s.kind === "late") && s.from != null) return t.m >= s.from;
+      if (["present", "free", "leaves"].includes(s.kind)) return true;
+    }
+    return !!active(d, t);
   }
   const whyCache = new Map(); let whyKey = "";
   function whyOf(text) {
@@ -203,7 +224,7 @@
     if (host && document.documentElement.contains(host)) return;
     document.getElementById("saba-athir-doc")?.remove();
     host = document.createElement("div"); host.id = "saba-athir-doc";
-    host.style.cssText = "all:initial;position:fixed;z-index:2147483646;display:none";
+    host.style.cssText = "all:initial;position:fixed;z-index:1030;display:none";   // (1.9.9) تحت نوافذ أثير (الطباعة/المعاينة)
     const root = host.attachShadow({ mode: "open" });
     const CSS = `.b{direction:rtl;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;background:#fff;border:1px solid #DCEBF4;border-inline-start:5px solid #00A6E2;border-radius:12px;padding:7px 12px;box-shadow:0 8px 22px -12px rgba(0,55,101,.45);display:grid;gap:3px;min-width:220px;max-width:340px;text-align:right}
       .r1{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:700;color:#003765;flex-wrap:wrap}
@@ -220,6 +241,7 @@
     const vis = field.offsetParent ? field : (field.nextElementSibling?.classList?.contains("select2") || field.nextElementSibling?.className?.includes?.("chosen") ? field.nextElementSibling : field.parentElement);
     const r = (vis || field).getBoundingClientRect();
     if (!r.width) { host.style.display = "none"; return; }
+    host.style.visibility = covered(vis || field) ? "hidden" : "visible";
     const w = host.offsetWidth || 260;
     host.style.top = Math.max(4, r.top + r.height / 2 - (host.offsetHeight || 50) / 2) + "px";
     host.style.left = Math.max(4, r.left - w - 12) + "px";               // يسار الخانة (الصفحة عربية)
@@ -232,6 +254,7 @@
     return byOpts[0] || null;
   }
   function tick() {
+    try { availTick(); } catch { /* الصندوق ما يوقف البطاقة */ }
     field = findField();
     if (!field) { if (host) host.style.display = "none"; return; }
     if (!board) load();
@@ -253,10 +276,96 @@
     }
     place();
   }
+  /* ---------- (1.9.9) نافذة فوق الصفحة (طباعة، معاينة، رسالة) → البطاقة والصندوق يختفون ---------- */
+  const POPUP = ".modal, .bootbox, .swal2-container, .sweet-alert, .ui-dialog, [role=dialog], .fancybox-container, .jconfirm";
+  function popupOpen() {
+    for (const m of document.querySelectorAll(POPUP)) {
+      const r = m.getBoundingClientRect(); if (r.width < innerWidth * .3 || r.height < innerHeight * .3) continue;   // نافذة كبيرة بس (مو المحادثات الصغيرة تحت)
+      const cs = getComputedStyle(m); if (cs.display === "none" || cs.visibility === "hidden" || (cs.opacity !== "" && +cs.opacity === 0)) continue;
+      return true;
+    }
+    return false;
+  }
+  function covered(el) {
+    if (popupOpen()) return true;
+    if (!el) return false;
+    const r = el.getBoundingClientRect(); if (!r.width) return false;
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return false;   // برا الشاشة (سكرول) — مو مغطّى
+    const top = document.elementFromPoint(x, y);
+    if (!top || el === top || el.contains(top) || top.contains(el)) return false;
+    return !top.closest?.(".select2-container, .select2-dropdown, .chosen-container, .chosen-drop, #saba-athir-doc, #saba-athir-avail");
+  }
+  try { const ps = document.createElement("style"); ps.textContent = "@media print{#saba-athir-doc,#saba-athir-avail{display:none!important}}"; (document.head || document.documentElement).append(ps); } catch {}
+
+  /* ---------- (1.9.9) «المتواجدين الحين» جنب «موعد ☑» في كشف جديد (للمعلومة بس — ما يعبّي شي) ---------- */
+  const isExam = () => /[?&]c=exam\b/.test(location.search) && /[?&]a=add\b/.test(location.search);
+  const SKIP_DEP = /جلد|طبيعي|تغذي|بيوتي|تجميل/;
+  let av = null, avBox = null, avOpen = "", avSig = "", avAnchor = null;
+  const short = n => String(n || "").split(/\s*[–-]\s*/)[0].trim();
+  function findAnchor() {
+    if (avAnchor && document.documentElement.contains(avAnchor) && avAnchor.getBoundingClientRect().width) return avAnchor;
+    avAnchor = null;
+    for (const cb of document.querySelectorAll("input[type=checkbox]")) {
+      const lab = cb.closest("label") || (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.parentElement;
+      if (lab && norm(lab.textContent) === "موعد") { avAnchor = lab; break; }
+    }
+    if (!avAnchor) for (const el of document.querySelectorAll("label, span, b, strong")) if (norm(el.textContent) === "موعد" && el.children.length < 3) { avAnchor = el; break; }
+    return avAnchor;
+  }
+  function ensureAv() {
+    if (av && document.documentElement.contains(av)) return;
+    document.getElementById("saba-athir-avail")?.remove();
+    av = document.createElement("div"); av.id = "saba-athir-avail";
+    av.style.cssText = "all:initial;position:fixed;z-index:1030;display:none";
+    const root = av.attachShadow({ mode: "open" });
+    const CSS = `.w{direction:rtl;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;width:380px;text-align:right}
+      .chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+      .t{font-size:12px;font-weight:700;color:#0077A8;margin-inline-end:2px}
+      .c{font:600 11.5px inherit;font-family:inherit;border:1px solid #9BB3C4;border-radius:99px;padding:2px 9px;background:#fff;color:#1d2a36;cursor:pointer}
+      .c:hover{border-color:#00A6E2}.c.on{background:#00A6E2;color:#fff;border-color:#00A6E2}
+      .list{margin-top:5px;max-width:300px;background:#fff;border:1px solid #00A6E2;border-radius:8px;box-shadow:0 8px 20px -8px rgba(0,55,101,.45);padding:2px 9px}
+      .r{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid #E1E9EF}.r:last-child{border:0}
+      .r b{font-weight:600;color:#1d2a36}.r span{color:#5B7690;white-space:nowrap}
+      .none{font-size:11.5px;color:#5B7690}`;
+    try { const sh = new CSSStyleSheet(); sh.replaceSync(CSS); root.adoptedStyleSheets = [sh]; root.innerHTML = '<div class="w"></div>'; } catch { root.innerHTML = `<style>${CSS}</style><div class="w"></div>`; }
+    avBox = root.querySelector(".w");
+    avBox.addEventListener("click", e => { const b = e.target.closest?.("[data-dep]"); if (!b) return; avOpen = avOpen === b.dataset.dep ? "" : b.dataset.dep; avSig = ""; availTick(); });
+    document.documentElement.append(av);
+  }
+  addEventListener("click", e => { if (avOpen && av && !e.composedPath().includes(av)) { avOpen = ""; avSig = ""; availTick(); } }, true);
+  function availTick() {
+    if (!isExam() || !board) { if (av) av.style.display = "none"; return; }
+    const a = findAnchor(); if (!a) { if (av) av.style.display = "none"; return; }
+    const ar = a.getBoundingClientRect();
+    if (!ar.width || covered(null)) { if (av) av.style.display = "none"; return; }
+    ensureAv();
+    const t = nowR(), groups = [];
+    for (const dep of board.departments || []) {
+      if (SKIP_DEP.test(norm(dep.name)) || dep.floor === "B") continue;
+      const here = (dep.doctors || []).map(d => ({ ...d, dep, fl: d.floor || dep.floor })).filter(hereNow);
+      if (here.length) groups.push({ id: dep.id || dep.name, name: dep.name, here });
+    }
+    if (avOpen && !groups.some(g => g.id === avOpen)) avOpen = "";
+    const sig = t.m + "|" + avOpen + "|" + groups.map(g => g.id + ":" + g.here.map(d => d.id).join(",")).join(";");
+    if (sig !== avSig) {
+      avSig = sig;
+      const fl = d => board.floorNames?.[d.fl] || FLOOR_DEF[d.fl] || (d.fl ? "الدور " + d.fl : "");
+      const open = groups.find(g => g.id === avOpen);
+      avBox.innerHTML = `<div class="chips"><span class="t">👨‍⚕️ المتواجدين الحين:</span>${groups.length ? groups.map(g => `<button class="c${g.id === avOpen ? " on" : ""}" data-dep="${esc(g.id)}">${esc(short(g.name))}${g.id === avOpen ? " ▾" : ""}</button>`).join("") : '<span class="none">ما فيه أحد متواجد الحين</span>'}</div>`
+        + (open ? `<div class="list">${open.here.map(d => `<div class="r"><b>د. ${esc(short(d.name))}</b><span>${esc([fl(d), d.room ? "عيادة " + d.room : ""].filter(Boolean).join(" · "))}</span></div>`).join("")}</div>` : "");
+    }
+    av.style.display = "block";
+    const w = av.offsetWidth || 380;
+    let left = ar.left - w - 10, top = ar.top - 4;
+    if (left < 4) { left = Math.max(4, ar.right - w); top = ar.bottom + 6; }    // ما فيه مكان يسار «موعد» → تحتها
+    av.style.left = left + "px"; av.style.top = Math.max(4, top) + "px";
+  }
+
   const alive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
   const iv = setInterval(() => { if (!alive()) { clearInterval(iv); return; } if (document.visibilityState === "visible") tick(); }, 500);       // select2 ما يطلق change عادي، فنراقب القيمة
-  addEventListener("scroll", place, true); addEventListener("resize", place);
-  setInterval(() => { if (field && document.visibilityState === "visible") load(); }, 60000);
+  addEventListener("scroll", () => { place(); try { availTick(); } catch {} }, true); addEventListener("resize", () => { place(); try { availTick(); } catch {} });
+  setInterval(() => { if ((field || isExam()) && document.visibilityState === "visible") load(); }, 60000);
   // الخلفية تشيك كل 30 ثانية: أي تعديل (من القروب أو صفحة الأطباء أو زر الطبيب) يتحدث في البطاقة على طول بدون ما تعيد اختيار الطبيب
   try {
     chrome.storage.onChanged.addListener((ch, area) => {
