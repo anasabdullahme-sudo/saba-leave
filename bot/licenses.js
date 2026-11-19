@@ -91,6 +91,10 @@ async function readOne(buf, mime) {
 }
 const unwrapDoc = m => { const g = m.message || {}; return g.documentMessage || g.documentWithCaptionMessage?.message?.documentMessage || null; };
 export const isPdf = m => /pdf/i.test(unwrapDoc(m)?.mimetype || "") || /\.pdf$/i.test(unwrapDoc(m)?.fileName || "");
+// (2.18.2) صور التراخيص بعد (أنس أرسل 14 صورة وما انقرت — كان يقرأ PDF بس)
+const imgOf = m => { const g = m.message || {}; const d = unwrapDoc(m); return g.imageMessage || (d && /^image\//i.test(d.mimetype || "") ? d : null); };
+export const isCand = m => isPdf(m) || !!imgOf(m);
+const mimeOf = m => isPdf(m) ? "application/pdf" : String(imgOf(m)?.mimetype || "image/jpeg").split(";")[0];
 
 function upsert(r, file) {
   const num = lat(r.license_number || "").replace(/[^\dA-Za-z\u0621-\u064A-]/g, ""), nm = norm(r.name_ar || r.name_en);
@@ -113,11 +117,11 @@ async function ingest(msgs, download) {
   const out = { lic: 0, added: 0, renewed: 0, same: 0, soon: 0, unread: [], other: 0, moved: [] };
   await siteDocs().catch(() => {});
   for (const m of msgs) {
-    const d = unwrapDoc(m), name = d?.fileName || "ملف.pdf";
+    const d = unwrapDoc(m), name = d?.fileName || (imgOf(m) ? "صورة" : "ملف.pdf");
     let buf = null; try { buf = await download(m); } catch { out.unread.push(name); continue; }
-    const r = await readOne(buf, "application/pdf");
+    const r = await readOne(buf, mimeOf(m));
     if (!r) { out.unread.push(name); continue; }
-    if (!r.is_license) { out.other++; continue; }
+    if (!r.is_license) { out.other++; out.otherNames = [...(out.otherNames || []), name]; continue; }
     out.lic++;
     const u = upsert(r, name);
     if (u.bad) { out.unread.push(name + " (ما لقيت الاسم أو تاريخ الانتهاء)"); continue; }
@@ -264,4 +268,4 @@ function groupText() {
   return `📋 تراخيص الممارسين (${list.length}):\n${list.map(row).join("\n")}`;
 }
 export function licGroupNote() { return S.items.length; }
-const api = { ingest, summary, isPdf, groupText, missingText, branchOf, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S, sameDoc, missingDocs } };
+const api = { ingest, summary, isPdf, isCand, groupText, missingText, branchOf, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S, sameDoc, missingDocs } };

@@ -22,7 +22,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.18.1";
+const VERSION = "2.18.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -260,14 +260,14 @@ function askAdminFile(m) {
     let lic = "";
     if (LIC) {
       p.read ||= new Set();
-      const pdfs = p.list.filter(x => LIC.isPdf(x) && !p.read.has(x.key.id));
+      const pdfs = p.list.filter(x => LIC.isCand(x) && !p.read.has(x.key.id));      // (2.18.2) PDF + صور
       if (pdfs.length) {
-        if (pdfs.length > 2) await sock.sendMessage(jid, { text: `📄 قاعد أقرأ ${pdfs.length} ملف PDF… (أرد عليك لما أخلص)` }).catch(() => {});
+        if (pdfs.length > 2) await sock.sendMessage(jid, { text: `📄 قاعد أقرأ ${pdfs.length} ملف… (أشوف إذا هي تراخيص — أرد عليك لما أخلص)` }).catch(() => {});
         for (const x of pdfs) p.read.add(x.key.id);
         try { lic = LIC.summary(await LIC.ingest(pdfs, x => downloadMediaMessage({ ...x, message: x.message?.documentWithCaptionMessage?.message || x.message }, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage }))); }
         catch (e) { log.warn({ err: String(e?.message || e) }, "التراخيص: القراءة"); }
         if (adminFiles.get(jid) !== p) return;                               // أنس رد أو انلغى أثناء القراءة
-        if (p.list.some(x => !p.read.has(x.key.id) && LIC.isPdf(x))) return; // وصلت ملفات زيادة أثناء القراءة → المؤقت الجديد يكمل
+        if (p.list.some(x => !p.read.has(x.key.id) && LIC.isCand(x))) return; // وصلت ملفات زيادة أثناء القراءة → المؤقت الجديد يكمل
       }
     }
     const n = p.list.length; p.at = Date.now();
@@ -281,6 +281,16 @@ async function answerAdminFile(m, text) {
   const q = m.message?.extendedTextMessage?.contextInfo?.stanzaId || "";
   if (q && q !== p.qid) return false;                                      // ساحب رسالة ثانية → مو جواب على سؤال الملف
   const n = latin(text).replace(/[ً-ْـ]/g, "").replace(/[أإآ]/g, "ا").trim().toLowerCase();
+  // (2.18.2) «هذي تراخيص اقراها» → نقرا الملفات كتراخيص (حتى لو بدأ بـ«لا»)، وما نحطها في الوارد
+  if (LIC && /ترخيص|تراخيص|اقرا|اقراها/.test(n)) {
+    adminFiles.delete(jid); clearTimeout(p.timer);
+    const todo = p.list.filter(x => LIC.isCand(x));
+    if (!todo.length) { await sock.sendMessage(jid, { text: "هذي مو PDF ولا صور — أرسل التراخيص كملفات PDF أو صور." }).catch(() => {}); return true; }
+    await sock.sendMessage(jid, { text: `📄 قاعد أقرأ ${todo.length} ملف كتراخيص… (أرد عليك لما أخلص)` }).catch(() => {});
+    let sum = ""; try { sum = LIC.summary(await LIC.ingest(todo, x => downloadMediaMessage({ ...x, message: x.message?.documentWithCaptionMessage?.message || x.message }, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage }))); } catch (e) { log.warn({ err: String(e?.message || e) }, "التراخيص: القراءة"); }
+    await sock.sendMessage(jid, { text: (sum || "ما لقيت ترخيص في الملفات هذي.") + "\n\n(ما حطيتها في الوارد)" }).catch(() => {});
+    return true;
+  }
   const yes = /^(نعم|ايوه|ايوا|اي|ايه|ارفع|ارفعه|ارفعها|حطه|حطها|حطهم|تمام|اوكي|ok|yes|👍|✅)/.test(n), no = /^(لا|لاء|no|خله|خلها|لاتحط|لا تحط|❌)/.test(n);
   if (!yes && !no) return false;
   adminFiles.delete(jid); clearTimeout(p.timer);
