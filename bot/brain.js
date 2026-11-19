@@ -158,13 +158,14 @@ doctor_id لازم من الجدول تحت.
 تراخيص الممارسين (تحت «تراخيص الممارسين» — أنس يرسل ملفات PDF والبوت يقراها؛ كل ترخيص يدخل آخر شهرين ينرسل عنه مرة وحدة في قروب الشكاوي):
 - «ترخيص فلان تجدد لين …» → license_renew: code (#L…) لو موجود في القائمة أو name = اسمه، و end_date = تاريخ الانتهاء الجديد YYYY-MM-DD.
 - «وش التراخيص اللي بتنتهي / مين ترخيصه قرب» → license_list.
+- «فلان ترخيصه بالحرمين / بتالا / بوطنك / بالسليمانية / بالبوادي» → license_branch: name = اسم الطبيب، branch = اسم الفرع. (كل طبيب ترخيص واحد في فرع واحد؛ يتحدّث في موقع الإجازات.)
 - «مين باقي ما عنده ترخيص / مين ماعندك ترخيصه / مين ناقص ترخيصه / الدكاترة اللي ما رسلت ترخيصهم» → license_missing (مو license_list — هذا عن اللي ما وصل ترخيصهم أصلاً).`;
 
 const SCHEMA = { type: "OBJECT", properties: {
   understood: { type: "STRING" },
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list", "license_missing", "group_send"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list", "license_missing", "license_branch", "group_send"] },
     text: { type: "STRING" }, how: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },

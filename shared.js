@@ -37,6 +37,24 @@ export const BRANCHES = [
   { id: "bawadi",       ar: "سابا البوادي" },
   { id: "watanak",      ar: "وطنك" },
 ];
+// (19/11) فرع ترخيص الطبيب من البوت (يقراه من ملف الترخيص أو أنس يقوله) — public/docBranches يغلب الجدول اللي تحت،
+// والطبيب اللي مو موجود ينضاف. كل طبيب له ترخيص واحد في فرع واحد = حساب صحة اللي تنرفع عليه إجازاته.
+const nTok = s => normName(s).split(" ").filter(w => w.length > 1);
+function strictDoc(name) {
+  const T = nTok(name); if (T.length < 2) return null;
+  return DOCTORS.find(d => [d.ar, d.en, d.seha, ...(d.alt || [])].some(n => { const D = nTok(n); return D.length >= 2 && D[0] === T[0] && (T.includes(D[D.length - 1]) || D.includes(T[T.length - 1])); })) || null;
+}
+export function applyDocBranches(items) {
+  const ok = id => BRANCHES.some(b => b.id === id);
+  for (const it of items || []) {
+    if (!ok(it.branch)) continue;
+    const names = (it.names || []).filter(Boolean);
+    const d = names.map(strictDoc).find(Boolean);
+    if (d) { d.branch = it.branch; for (const n of names) if (!(d.alt ||= []).includes(n)) d.alt.push(n); continue; }
+    if (!it.ar && !names[0]) continue;
+    DOCTORS.push({ id: "lic-" + normName(names[0] || it.ar).replace(/\s+/g, "-").slice(0, 40), branch: it.branch, ar: it.ar || names[0], en: it.en || "", seha: names[0] || it.ar, alt: names });
+  }
+}
 export const DEFAULT_BRANCH = "bawadi";
 
 /* ---------- حساب منصة صحة لكل فرع (من صفحة "حسابات صحة طبي") ---------- */
@@ -193,8 +211,8 @@ export function matchDoctor(input) {
   if (!toks.length) return { doctor: null, branch: DEFAULT_BRANCH };
   let best = null, bestScore = 0;
   for (const d of DOCTORS) {
-    for (const v of [d.ar, d.en, ...(d.alt || [])]) {
-      const dt = normName(v).split(" ").filter(Boolean);
+    for (const v of [d.ar, d.en, ...(d.alt || [])].filter(Boolean)) {
+      const dt = normName(v).split(" ").filter(Boolean); if (!dt.length) continue;
       const first = toks.some(t => tokEq(t, dt[0]));
       const rest = dt.slice(1).filter(x => toks.some(t => tokEq(t, x))).length;
       let score = (first ? 2 : 0) + rest * 1.5;
@@ -205,7 +223,7 @@ export function matchDoctor(input) {
   if (best && bestScore >= 4) return { doctor: best, branch: best.branch };
   // اسم أول فقط: يُقبل إذا كان فريد بين الأطباء
   if (best && bestScore >= 2 && toks.length === 1) {
-    const sameFirst = DOCTORS.filter(d => [d.ar, d.en].some(v => tokEq(normName(v).split(" ")[0], toks[0])));
+    const sameFirst = DOCTORS.filter(d => [d.ar, d.en].filter(Boolean).some(v => tokEq(normName(v).split(" ")[0] || "", toks[0])));
     if (sameFirst.length === 1) return { doctor: best, branch: best.branch };
   }
   return { doctor: null, branch: DEFAULT_BRANCH };
@@ -622,6 +640,7 @@ async function liveBackend(role) {
     : FS.getFirestore(app);
   const st = useStorage ? ST.getStorage(app) : null;
   const col = FS.collection(db, "requests");
+  FS.getDoc(FS.doc(db, "public", "docBranches")).then(d => { if (d.exists()) applyDocBranches(d.data().items || []); }).catch(() => {});   // (19/11) فروع التراخيص من البوت
   const toObj = d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now(), doneAt: x.doneAt?.toMillis?.() ?? null, heldAt: x.heldAt?.toMillis?.() ?? null, openedAt: x.openedAt?.toMillis?.() ?? null, inquiryAt: x.inquiryAt?.toMillis?.() ?? null, doctorRemindedAt: x.doctorRemindedAt?.toMillis?.() ?? null }; };
 
   const models = {};

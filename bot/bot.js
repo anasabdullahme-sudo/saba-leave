@@ -22,7 +22,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.18.0";
+const VERSION = "2.18.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1219,7 +1219,7 @@ async function main() {
   }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
   initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage, licText: () => LIC?.groupText() || "" });
-  LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin, doctors: () => boardDoctorList() }); setAssist(LIC.ext);   // (2.17.0) التراخيص
+  LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin, doctors: () => boardDoctorList(), db }); setAssist(LIC.ext);   // (2.17.0) التراخيص
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {
