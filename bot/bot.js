@@ -22,7 +22,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.18.3";
+const VERSION = "2.18.4";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -659,6 +659,14 @@ async function onIncoming(m) {
   }
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
   if (admin && text && await answerAdminFile(m, text).catch(e => { log.warn({ err: String(e?.message || e) }, "ملف المسؤول"); return false; })) return;   // «نعم/لا» على «أحط الملف في الموقع؟»
+  // (2.18.4) أنس رد (سحب) على ملف/صورة أرسلها هو: «هذا امجد» → ربط الترخيص بالطبيب (بدل ما يروح للمساعد ويفهمه غلط)
+  if (admin && text && LIC) {
+    const ci = m.message?.extendedTextMessage?.contextInfo, qm = ci?.quotedMessage;
+    if (qm && (qm.imageMessage || qm.documentMessage || qm.documentWithCaptionMessage)) {
+      const r = await LIC.teach(ci.stanzaId, qm, text, x => downloadMediaMessage({ ...x, message: x.message?.documentWithCaptionMessage?.message || x.message }, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage })).catch(e => { log.warn({ err: String(e?.message || e) }, "التراخيص: الربط"); return null; });
+      if (r) { await sock.sendMessage(jid, { text: r }, { quoted: m }).catch(() => {}); return; }
+    }
+  }
   if (text && await handleAdminMessage(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول"); return false; })) return;   // «نعم/لا» على طبيب جديد
   // المسؤول: ما ينعامل كمراجع أبداً (ما نسأله عن رقم طلب أو هوية)
   if (admin) {

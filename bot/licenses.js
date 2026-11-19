@@ -72,7 +72,9 @@ const SCHEMA = { type: "OBJECT", properties: {
 const PROMPT = `هذا ملف من موظف في عيادة. هل هو رخصة/تصنيف ممارس صحي (مثل بطاقة أو شهادة «الهيئة السعودية للتخصصات الصحية» SCFHS، أو ترخيص مزاولة مهنة من وزارة الصحة)؟
 لو نعم: is_license = true وطلّع: name_ar و name_en (اسم الممارس كما هو)، license_number (رقم التسجيل/الترخيص/التصنيف)، profession (طبيب، أخصائي، استشاري، ممرض، فني…)، specialty (التخصص)،
 facility = اسم المنشأة / جهة العمل كما هو مكتوب (مثلاً «مجمع عيادات سابا … فرع الحرمين»)، 
-expiry_gregorian = تاريخ انتهاء الترخيص بالميلادي YYYY-MM-DD لو مكتوب، و expiry_hijri = تاريخ الانتهاء بالهجري YYYY-MM-DD لو مكتوب. انتبه: تاريخ الانتهاء مو تاريخ الإصدار.
+expiry_gregorian = تاريخ انتهاء ترخيص الممارس بالميلادي YYYY-MM-DD لو مكتوب، و expiry_hijri = تاريخ انتهاء ترخيص الممارس بالهجري YYYY-MM-DD لو مكتوب.
+انتبه: تاريخ انتهاء الممارس هو اللي فوق جنب «رقم الموافقة» و«تاريخ الإصدار» — مو تاريخ الإصدار، ومو «تاريخ انتهاء الرخصة» اللي تحت في بيانات المنشأة (هذا حق المنشأة).
+name_ar: لو الاسم مكتوب إنجليزي بس، اكتبه بالعربي كما يُنطق (AMGAD HAMED KAMEL → أمجد حامد كامل) و name_en الإنجليزي كما هو.
 لو مو ترخيص (فاتورة، إجازة، تقرير…): is_license = false بس. لا تخترع شي مو مكتوب.`;
 async function readOne(buf, mime) {
   if (!C.gemini || buf.length > 18e6) return null;
@@ -125,6 +127,8 @@ async function ingest(msgs, download) {
     out.lic++;
     const u = upsert(r, name);
     if (u.bad) { out.unread.push(name + " (ما لقيت الاسم أو تاريخ الانتهاء)"); continue; }
+    if (!u.it.boardName) { const bd = (C.doctors?.() || []).find(dd => sameDoc(dd, u.it)); if (bd) { u.it.doctorId = bd.id; u.it.boardName = bd.name; } }   // اسم الجدول للعرض («أمجد كامل» بدل AMGAD MOHAMED)
+    if (m.key?.id) { S.byMsg ||= {}; S.byMsg[m.key.id] = u.it.code; const ks = Object.keys(S.byMsg); if (ks.length > 600) delete S.byMsg[ks[0]]; }
     if (u.isNew) out.added++; else if (u.renewed) out.renewed++; else out.same++;
     if (u.it.branchChanged && Date.now() - u.it.branchChanged < 60e3) out.moved.push(`د. ${shortName(u.it)}: ${u.it.branchWas ? brAr(u.it.branchWas) + " ← " : ""}${brAr(u.it.branch)}`);
     if (daysTo(u.it.expiry) <= WARN_DAYS) out.soon++;
@@ -145,6 +149,7 @@ function summary(o) {
 
 /* ---------- (2.17.2) السطر المختصر: اسم الطبيب (الأول + العائلة) — تاريخ الانتهاء (العد التنازلي) ---------- */
 export function shortName(x) {
+  if (x.boardName) return x.boardName;
   let ws = String(x.name || x.nameEn || "").replace(/[-–_]/g, " ").split(/\s+/).filter(w => w && !/^(بن|بنت|ابن|bin|binti)$/i.test(w));
   if (!ws.length) return "—";
   const first = /^(عبد|ابو|أبو)$/.test(ws[0]) && ws[1] ? ws[0] + " " + ws[1] : ws[0];
@@ -163,7 +168,7 @@ const brTxt = x => brAr(branchFor(x)) || "الفرع؟";
 function pushBranches() {
   clearTimeout(pushT);
   pushT = setTimeout(async () => {
-    const items = [...S.items.filter(x => x.branch).map(x => ({ names: [x.name, x.nameEn].filter(Boolean), ar: shortName(x), en: x.nameEn || "", branch: x.branch })),
+    const items = [...S.items.filter(x => x.branch).map(x => ({ names: [x.boardName, x.name, x.nameEn].filter(Boolean), ar: shortName(x), en: x.nameEn || "", branch: x.branch })),
       ...Object.values(S.docBranch || {}).map(v => ({ names: v.names, ar: v.ar, en: "", branch: v.branch }))];
     try { await C.db?.doc("public/docBranches").set({ items, at: Date.now() }); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التراخيص: تحديث الموقع"); }
   }, 3000);
@@ -185,6 +190,27 @@ async function tick() {
   try { await sock.sendMessage(jid, { text }); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التراخيص: الإرسال للقروب"); return; }
   for (const x of due) x.notified = x.expiry;
   save(); C.log.info({ n: due.length }, "التراخيص: تنبيه في قروب الشكاوي");
+}
+
+/* ---------- (2.18.4) أنس يرد على ملف/صورة أرسلها: «هذا امجد» → نربط الترخيص بالطبيب ---------- */
+async function teach(quotedId, quotedMsg, text, download) {
+  const want = String(text || "").replace(/^(هذا|هذي|هذه|هاذا|ذا|ترخيص|تبع|حق|حقت|الدكتور|الدكتوره|دكتور|دكتوره|د\.?)\s+/g, "").replace(/^(هذا|هذي|ترخيص|حق|د\.?|دكتور|الدكتور)\s+/g, "").trim();
+  if (!want || want.length > 40) return null;
+  let code = S.byMsg?.[quotedId];
+  if (!code && quotedMsg) {                                                    // ما انقرى كترخيص → نقراه الحين
+    const m = { key: { id: quotedId }, message: quotedMsg };
+    if (isCand(m)) { await ingest([m], download).catch(() => null); code = S.byMsg?.[quotedId]; }
+  }
+  const it = code && S.items.find(x => x.code === code);
+  if (!it) return "ما قدرت أقرأ هذا الملف كترخيص — أرسله PDF أو صورة أوضح.";
+  await siteDocs().catch(() => {});
+  const docs = C.doctors?.() || [], w = norm(want);
+  const d = docs.find(x => norm(x.name) === w) || docs.find(x => sameName(x.name, want)) || docs.find(x => nt(x.name).some(t => t.length > 2 && nt(want).some(u => u === t || (u.length >= 4 && (t.startsWith(u) || u.startsWith(t))))));
+  if (!d) return `ما لقيت «${want}» في جدول أطباء البوادي — اكتب اسمه الأول والعائلة.`;
+  it.doctorId = d.id; it.boardName = d.name; it.aliases = [...new Set([...(it.aliases || []), d.name])];
+  save(); pushBranches();
+  const n = daysTo(it.expiry);
+  return `✅ ربطت الترخيص (${it.nameEn || it.name}) بـ د. ${d.name} — ينتهي ${dmyy(it.expiry)} — ${brTxt(it)} (${n < 0 ? `انتهى من ${-n} يوم` : `باقي ${n} يوم`}).`;
 }
 
 /* ---------- مع مساعد الخاص (brain.js) ---------- */
@@ -241,8 +267,10 @@ const tok = s => norm(s).split(" ").map(w => w.replace(/^ال(?=\S{3})/, "").rep
 function lev1(a, b) { if (a === b) return true; if (Math.abs(a.length - b.length) > 1 || a.length < 4) return false; let i = 0, j = 0, e = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++e > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } } return e + (a.length - i) + (b.length - j) <= 1; }
 // الطبيب في الجدول (اسمه المختصر: «نشوى السقا») ↔ الترخيص (الاسم الكامل): الاسم الأول + العائلة لازم يطابقون
 function sameDoc(d, lic) {
-  const names = [d.name, ...(d.aliases || [])];
-  const L = [...tok(lic.name), ...tok(lic.nameEn || "")];
+  if (lic.doctorId && lic.doctorId === d.id) return true;
+  const sd = site.docs.find(x => [x.ar, ...(x.alt || [])].some(n => n && sameName(n, d.name)));
+  const names = [d.name, ...(d.aliases || []), ...(sd ? [sd.en, sd.seha, ...(sd.alt || [])].filter(Boolean) : [])];
+  const L = [...tok(lic.name), ...tok(lic.nameEn || ""), ...(lic.aliases || []).flatMap(tok)];
   return names.some(n => { const T = tok(n); if (T.length < 2) return T.length === 1 && L[0] && lev1(T[0], L[0]); return lev1(T[0], L[0] || "") && T.slice(1).every(w => L.some(x => lev1(w, x))); })
     || names.some(n => { const T = tok(n); return T.length >= 2 && T.every(w => L.some(x => lev1(w, x))); });
 }
@@ -268,4 +296,4 @@ function groupText() {
   return `📋 تراخيص الممارسين (${list.length}):\n${list.map(row).join("\n")}`;
 }
 export function licGroupNote() { return S.items.length; }
-const api = { ingest, summary, isPdf, isCand, groupText, missingText, branchOf, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S, sameDoc, missingDocs } };
+const api = { ingest, summary, isPdf, isCand, teach, groupText, missingText, branchOf, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S, sameDoc, missingDocs } };
