@@ -14,13 +14,15 @@ import http from "node:http";
 // (2.15.3) مكتبة التشفير حق الواتساب تطبع مفاتيح الجلسة كاملة في سجل Railway («Closing session: SessionEntry {...privKey...}») — نخفيها
 for (const k of ["log", "info", "warn"]) { const o = console[k].bind(console); console[k] = (...a) => { if (typeof a[0] === "string" && /^(Closing (open )?session|Removing old closed session|Opening session|Migrating session|Session already)/i.test(a[0])) return; o(...a); }; }
 import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin, doctorNames as boardDoctorNames } from "./group.js";
-import { initAssist, isAssistGroup, onAssistGroup } from "./assist.js";
+import { initAssist, isAssistGroup, onAssistGroup, assistJid } from "./assist.js";
+import { initLicenses } from "./licenses.js";
+import { selfTest, setAssist } from "./brain.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.16.0";
+const VERSION = "2.17.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -70,6 +72,7 @@ async function connect() {
       log.info("باركود الربط جاهز — افتح لوحة الموظفين واضغط «واتساب»");
     }
     if (connection === "open") {
+      if (!globalThis.__sabaSelfTest) { globalThis.__sabaSelfTest = 1; setTimeout(() => selfTest(VERSION).catch(e => log.warn({ err: String(e?.message || e) }, "اختبار الفهم")), 5 * 60e3); }   // (2.16.1)
       connected = true; me = sock.user?.id || "";
       await setStatus({ state: "connected", qr: null, me });
       // رقم البوت للعامة (زر «استفسر واتساب» في صفحة المراجع)
@@ -246,14 +249,29 @@ async function saveTeamFile(m, who) {
 }
 // أنس أرسل ملف (مو رد على مراجع) → نسأله: أحطه في الموقع؟ (ملفات ورا بعض = سؤال واحد)
 const adminFiles = new Map();                                            // jid → { list, qid, at, timer }
+let LIC = null;                                                          // (2.17.0) التراخيص
 const fileLabel = m => { const g = m.message || {}, x = g.documentMessage || g.documentWithCaptionMessage?.message?.documentMessage; return x?.fileName || (g.imageMessage ? "صورة" : g.videoMessage ? "فيديو" : "ملف"); };
 function askAdminFile(m) {
   const jid = m.key.remoteJid; let p = adminFiles.get(jid);
   if (!p || Date.now() - p.at > 30 * 60e3) { p = { list: [], qid: "", at: 0, timer: null }; adminFiles.set(jid, p); }
   p.list.push(m); p.at = Date.now(); clearTimeout(p.timer);
   p.timer = setTimeout(async () => {
-    const n = p.list.length;
-    const q = await sock.sendMessage(jid, { text: `📎 وصلني ${n === 1 ? "«" + fileLabel(p.list[0]) + "»" : n === 2 ? "ملفين" : n + " ملفات"}.\nتبغاني ${n === 1 ? "أحطه" : "أحطها"} في الموقع (📥 الوارد)؟ رد «نعم» أو «لا».` }, { quoted: p.list[n - 1] }).catch(() => null);
+    // (2.17.0) ملفات PDF: نشوف إذا هي تراخيص ونقراها أول — والوارد يبقى اختيار أنس (ما نحط شي لحاله)
+    let lic = "";
+    if (LIC) {
+      p.read ||= new Set();
+      const pdfs = p.list.filter(x => LIC.isPdf(x) && !p.read.has(x.key.id));
+      if (pdfs.length) {
+        if (pdfs.length > 2) await sock.sendMessage(jid, { text: `📄 قاعد أقرأ ${pdfs.length} ملف PDF… (أرد عليك لما أخلص)` }).catch(() => {});
+        for (const x of pdfs) p.read.add(x.key.id);
+        try { lic = LIC.summary(await LIC.ingest(pdfs, x => downloadMediaMessage({ ...x, message: x.message?.documentWithCaptionMessage?.message || x.message }, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage }))); }
+        catch (e) { log.warn({ err: String(e?.message || e) }, "التراخيص: القراءة"); }
+        if (adminFiles.get(jid) !== p) return;                               // أنس رد أو انلغى أثناء القراءة
+        if (p.list.some(x => !p.read.has(x.key.id) && LIC.isPdf(x))) return; // وصلت ملفات زيادة أثناء القراءة → المؤقت الجديد يكمل
+      }
+    }
+    const n = p.list.length; p.at = Date.now();
+    const q = await sock.sendMessage(jid, { text: `${lic ? lic + "\n\n" : ""}📎 وصلني ${n === 1 ? "«" + fileLabel(p.list[0]) + "»" : n === 2 ? "ملفين" : n + " ملفات"}.\nتبغاني ${n === 1 ? "أحطه" : "أحطها"}${lic ? " بعد" : ""} في الموقع (📥 الوارد)؟ رد «نعم» أو «لا».` }, { quoted: p.list[n - 1] }).catch(() => null);
     p.qid = q?.key?.id || "";
   }, 2500);
 }
@@ -1201,6 +1219,7 @@ async function main() {
   }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
   initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage });
+  LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin }); setAssist(LIC.ext);   // (2.17.0) التراخيص
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {

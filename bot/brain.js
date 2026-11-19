@@ -7,8 +7,10 @@
 let A = null;                                   // أدوات group.js (تنمرّر من initBrain)
 const chat = [];                                // آخر كلامنا {role: user|model, text, at}
 let saveT = null, proposal = null;              // اقتراح ينتظر موافقته
-let AS = null;                                  // (2.16.0) مساعد قروب الشكاوي (assist.js)
-export function setAssist(api) { AS = api; }
+const EXT = [];                                 // (2.16.0) مساعد قروب الشكاوي (assist.js) + (2.17.0) التراخيص (licenses.js)
+export function setAssist(api) { if (api && !EXT.includes(api)) EXT.push(api); }
+const AS = { block: () => EXT.map(e => e.block()).join(""), checkAct: a => { for (const e of EXT) { const w = e.checkAct(a); if (w != null) return w; } return null; },
+  describeAct: a => { for (const e of EXT) { const x = e.describeAct(a); if (x) return x; } return null; }, act: async a => { for (const e of EXT) { const r = await e.act(a); if (r) return r; } return null; } };
 
 export function initBrain(api) {
   A = api;
@@ -72,6 +74,10 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 تكلّم باللهجة السعودية، بطبيعية واختصار (سطرين لخمسة)، كأنك زميل فاهم. بدون مقدمات ولا إيموجي كثير.
 
 كيف تشتغل:
+- (2.16.1) أول شي اكتب في understood كلامه بصياغتك أنت، واضحة ومرتبة: كل طبيب لحاله (اسمه الكامل من الجدول) ← وش المطلوب ← اليوم بالتاريخ YYYY-MM-DD ← الوقت HH:MM.
+  أنس يكتب بسرعة: أخطاء إملائية («اكرا» = إكرامي، «الوزري» = الوزيري)، بدون فواصل، كلمات ناقصة، ترتيب ملخبط، مصري أو سعودي، كلام فويس. أعد قراءة الجملة أكثر من مرة واربطها بالرسالة اللي يرد عليها وباللي قبلها لين تفهم وش يبي.
+  «خلها ثابتة / نفسها كل يوم / مثل امس» = خذ الأوقات من الرسالة اللي يرد عليها أو من آخر شي انحكى عن نفس الطبيب.
+  بعدها actions تطابق understood بالضبط: كل طبيب في understood له فعله بكل حقوله (ما تنسى end_date ولا end_time).
 - افهم قصده من كلامه ومن السياق كله: المحادثة، الرسالة اللي يرد عليها، رسايل القروب الأخيرة، الطلبات المنتظرة، والجدول.
 - في reply قل وش فهمت بالضبط (الطبيب، اليوم والتاريخ، الوقت) ووش بتسوي — بصيغة المستقبل («بعدّل…»، «بحط…»)، مو الماضي، لأن التنفيذ يصير بعد ردك.
 - قبل أي فعل شيك على حالات اليوم والخطط والجدول: لو الشي المطلوب موجود أصلاً قل له إنه موجود وبدون أفعال.
@@ -122,26 +128,31 @@ doctor_id لازم من الجدول تحت.
 - «أرسل» / «أرسلها» / «تمام أرسل» بعد رسالة جاهزة (#T) → task_send: code (آخر #T فيه رسالة جاهزة لو ما حدد)، و text = النص بعد تعديله لو طلب تعديل (اكتب النص كامل). البوت يرسلها في قروب الشكاوي ردّاً على رسالة الطلب.
 - «خلصت» / «سويتها» عن طلب #T → task_done (code + how لو قال كيف). «لا تسويها / انسه» → task_drop.
 - «وش الشكاوي / ملخص الشكاوي» → complaints_summary.
-- لا تقول إن الشكوى انحلت أو الرسالة انرسلت إلا بفعل.`;
+- لا تقول إن الشكوى انحلت أو الرسالة انرسلت إلا بفعل.
+
+تراخيص الممارسين (تحت «تراخيص الممارسين» — أنس يرسل ملفات PDF والبوت يقراها؛ كل ترخيص يدخل آخر شهرين ينرسل عنه مرة وحدة في قروب الشكاوي):
+- «ترخيص فلان تجدد لين …» → license_renew: code (#L…) لو موجود في القائمة أو name = اسمه، و end_date = تاريخ الانتهاء الجديد YYYY-MM-DD.
+- «وش التراخيص اللي بتنتهي / مين ترخيصه قرب» → license_list.`;
 
 const SCHEMA = { type: "OBJECT", properties: {
+  understood: { type: "STRING" },
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list"] },
     text: { type: "STRING" }, how: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
     mode: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, start_date: { type: "STRING" }, end_date: { type: "STRING" }, return_date: { type: "STRING" },
     name: { type: "STRING" }, dept: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" }, alias: { type: "STRING" },
     branch: { type: "STRING" }, clear: { type: "BOOLEAN" }, code: { type: "STRING" }, decision: { type: "STRING" }, n: { type: "INTEGER" }, on: { type: "BOOLEAN" } }, required: ["type"] } } },
-  required: ["reply"] };
+  required: ["understood", "reply"], propertyOrdering: ["understood", "reply", "confirm_first", "use_proposal", "actions"] };
 
-async function callAI(system, contents) {
-  for (const model of A.models) {
+async function callAI(system, contents, { models, temp = 0.3 } = {}) {
+  for (const model of models || A.models) {
     try {
       const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 60000);
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": A.gemini }, signal: ctl.signal,
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature: 0.3, maxOutputTokens: 8192, responseMimeType: "application/json", responseSchema: SCHEMA } }) });
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature: temp, maxOutputTokens: 8192, responseMimeType: "application/json", responseSchema: SCHEMA } }) });
       clearTimeout(tm);
       if (!res.ok) { A.log.warn({ model, status: res.status }, "Gemini الخاص"); continue; }
       const j = await res.json(), txt = (j?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("");
@@ -155,10 +166,7 @@ async function callAI(system, contents) {
 }
 
 /* ---------- الرسالة من أنس ---------- */
-export async function handle(m, text, { forwarded = false } = {}) {
-  if (!A?.gemini) return false;
-  const ci = m.message?.extendedTextMessage?.contextInfo || {};
-  const q = ci.quotedMessage, quoted = (q?.conversation || q?.extendedTextMessage?.text || q?.imageMessage?.caption || "").trim();
+async function buildCtx() {
   const t = A.nowR(), tomorrow = A.isoPlus(t.iso, 1);
   const [planD, pdD, pcD, rmD] = await Promise.all([A.db.doc("board/bawadi_plan").get(), A.db.doc("bot/pending_doctors").get(), A.db.doc("bot/pending_clarify").get(), A.db.doc("bot/removed_doctors").get()]);
   const removed = (rmD.data()?.items || []).filter(x => Date.now() - x.at < 30 * 864e5);
@@ -177,7 +185,20 @@ export async function handle(m, text, { forwarded = false } = {}) {
 \n## أطباء انشالوا مؤخراً من الجدول (id | الاسم | القسم | متى | مين)\n${removed.map(x => `${x.doc.id} | ${A.shortName(x.doc.name)} | ${x.dep.name} | ${new Date(x.at).toLocaleString("en-GB", { timeZone: "Asia/Riyadh", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })} | ${x.by}`).join("\n") || "—"}
 \n## أيام في فروع ثانية (يوم واحد)\n${(A.getBoard()?.awayDays || []).filter(x => x.date >= t.iso).map(x => `${A.shortName(docOf(x.doctorId)?.name || x.doctorId)}: ${x.date} في ${x.branch}`).join("\n") || "—"}
 \n## اقتراح ينتظر موافقته\n${proposal ? proposal.summary : "—"}${AS ? AS.block() : ""}`;
-  const user = (forwarded ? "[رسالة محوّلة من قروب الاستقبال]\n" : "") + (quoted ? `[يرد على: «${quoted.slice(0, 600)}»]\n` : "") + text;
+  return { system, plans, pdocs, pclar };
+}
+// الأفعال من رد الذكاء + تعبئة الناقص من الكلام نفسه (الرسالة المقتبسة، ردّه، وفهمه)
+function prepActs(o, txt, quoted) {
+  const R = [o.understood, o.reply].filter(Boolean).join("\n"), T2 = [quoted, txt].filter(Boolean).join("\n");
+  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt)));
+}
+
+export async function handle(m, text, { forwarded = false } = {}) {
+  if (!A?.gemini) return false;
+  const ci = m.message?.extendedTextMessage?.contextInfo || {};
+  const q = ci.quotedMessage, quoted = (q?.conversation || q?.extendedTextMessage?.text || q?.imageMessage?.caption || "").trim();
+  const { system, pdocs, pclar } = await buildCtx();
+  const user = (forwarded ? "[رسالة محوّلة من قروب الاستقبال]\n" : "") + (quoted ? `[يرد على: «${quoted.slice(0, 2500)}»]\n` : "") + text;
   const hist = chat.filter(x => Date.now() - x.at < 24 * 3600e3).slice(-16).map(x => ({ role: x.role, parts: [{ text: x.text }] }));
   while (hist.length && hist[0].role !== "user") hist.shift();
   const contents = []; for (const h of hist) { if (contents.length && contents[contents.length - 1].role === h.role) contents[contents.length - 1].parts[0].text += "\n" + h.parts[0].text; else contents.push(h); }
@@ -188,14 +209,22 @@ export async function handle(m, text, { forwarded = false } = {}) {
   try { if (jid) sock?.sendPresenceUpdate("paused", jid); } catch {}
   if (!out) return false;                                        // الذكاء ما رد → group.js يكمل بالطريقة القديمة
   noteIn(user);
-  const prep = (o, txt) => uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map(a => fillTimes(a, o.reply, txt)).map(a => fillDate(a, o.reply, txt)));
+  const prep = (o, txt) => prepActs(o, txt, quoted);
   let actions = prep(out, text);
   // فعل ناقص (حقول ما تعبّت) → نرجع للذكاء مرة وحدة يكمّله بدل ما نقول «ما طبّقت»
   const miss = actions.map(a => [a, check(a)]).filter(([, w]) => w);
   if (miss.length && !out.use_proposal) {
     const fix = await callAI(system, [...contents, { role: "model", parts: [{ text: JSON.stringify({ reply: out.reply, actions: out.actions }) }] },
       { role: "user", parts: [{ text: "[النظام] الأفعال هذي ناقصة وما تنفع:\n" + miss.map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nرجّع نفس الرد مع actions كاملة: كل فعل فيه حقوله المطلوبة بالضبط (status: doctor_id, kind, date, start_time/end_time أو at_time حسب النوع — move_doctor: doctor_id و dept باسم قسم من الجدول — add_doctor: name و dept …). لو فعلاً ناقصك معلومة من أنس، اسأله و actions فاضية." }] }]).catch(() => null);
-    if (fix) { const fa = prep(fix, text); if (!fa.length || !fa.some(a => check(a))) { blog(user, out); out = fix; actions = fa; } }
+    let fa = fix ? prep(fix, text) : null;
+    if (fix && (!fa.length || !fa.some(a => check(a)))) { blog(user, out); out = fix; actions = fa; }
+    else {                                                                     // (2.16.1) محاولة ثالثة: نعيد صياغة الطلب خطوة خطوة، بموديل ثاني وحرارة صفر
+      const miss2 = (fa || actions).map(a => [a, check(a)]).filter(([, w]) => w);
+      const fix2 = await callAI(system, [...contents, { role: "model", parts: [{ text: JSON.stringify({ understood: (fix || out).understood, reply: (fix || out).reply, actions: (fix || out).actions }) }] },
+        { role: "user", parts: [{ text: "[النظام] لسى ناقص:\n" + miss2.map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nأعد قراءة كلام أنس والرسالة اللي يرد عليها كلمة كلمة. اكتب understood من جديد: كل طبيب ← المطلوب ← التاريخ YYYY-MM-DD ← الوقت HH:MM (التواريخ والأوقات موجودة في الكلام أو في الرسالة المقتبسة أو في ردك أنت). بعدها actions كاملة. لو فعلاً المعلومة مو موجودة في أي مكان: اسأله سؤال واحد واضح عن الناقص بس، و actions فاضية." }] }],
+        { models: [...A.models].reverse(), temp: 0 }).catch(() => null);
+      if (fix2) { const f2 = prep(fix2, text); if (!f2.length || f2.filter(a => check(a)).length < miss2.length) { blog(user, out); out = fix2; actions = f2; } }
+    }
   }
   blog(user, out);
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
@@ -222,7 +251,7 @@ const TENSE = [[/(^|\s)(عدّلت|عدلت)(?=\s|$)/g, "$1بعدّل"], [/(^|\s
 // آخر 10 ردود للذكاء (للمراجعة لو صار شي غلط) — بدون بيانات مراجعين
 const bl = [];
 function blog(user, out) {
-  bl.push({ at: Date.now(), model: out.__model || "", user: String(user).slice(0, 400), reply: String(out.reply || "").slice(0, 400), actions: JSON.stringify(out.actions || []).slice(0, 1500), cf: !!out.confirm_first, up: !!out.use_proposal });
+  bl.push({ at: Date.now(), model: out.__model || "", user: String(user).slice(0, 400), understood: String(out.understood || "").slice(0, 600), reply: String(out.reply || "").slice(0, 400), actions: JSON.stringify(out.actions || []).slice(0, 1500), cf: !!out.confirm_first, up: !!out.use_proposal });
   while (bl.length > 10) bl.shift();
   A.db.doc("board/bawadi_brainlog").set({ items: bl, at: Date.now() }).catch(() => {});
 }
@@ -235,9 +264,102 @@ const toMin = s => {
   let h = +x[1] % 24; const ap = x[3] || ""; if (/^(م|pm|مساء)/.test(ap) && h < 12) h += 12; if (/^(ص|am|صباح)/.test(ap) && h === 12) h = 0;
   return h * 60 + +(x[2] || 0);
 };
+// (2.16.1) التاريخ بأي شكل يكتبه الذكاء أو أنس → YYYY-MM-DD («28-11-2026» و«28/11» و«28 نوفمبر» و«٢٨-١١» كانت تطيح الإجازة بـ«ناقص تاريخ»)
+const MON = [["يناير", "jan"], ["فبراير", "feb"], ["مارس", "mar"], ["ابريل", "apr"], ["مايو", "may"], ["يونيو", "jun"], ["يوليو", "jul"], ["اغسطس", "aug"], ["سبتمبر", "sep"], ["اكتوبر", "oct"], ["نوفمبر", "nov"], ["ديسمبر", "dec"]];
+const monthNum = w => { const n = String(w || "").toLowerCase().replace(/[أإآ]/g, "ا"); const i = MON.findIndex(([ar, en]) => n.startsWith(ar) || n.startsWith(en)); return i < 0 ? 0 : i + 1; };
+const mkISO = (y, m, d) => { if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31 && y > 2000)) return ""; const x = new Date(Date.UTC(y, m - 1, d)); return x.getUTCMonth() === m - 1 ? x.toISOString().slice(0, 10) : ""; };
+function guessY(m, d, ref) {                                                   // بدون سنة: هالسنة، ولو فات بأكثر من شهرين → السنة الجاية
+  const y = +ref.slice(0, 4), a = mkISO(y, m, d); if (!a) return "";
+  return a < A.isoPlus(ref, -60) ? mkISO(y + 1, m, d) : a;
+}
+function toISO(v, ref) {
+  if (v == null || v === "") return "";
+  ref = ref || A.nowR().iso;
+  const t = lat(v).trim().replace(/[\u200e\u200f]/g, ""); let m;
+  if ((m = /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/.exec(t))) return mkISO(+m[1], +m[2], +m[3]);
+  if ((m = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/.exec(t))) return mkISO(+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
+  if ((m = /^(\d{1,2})[-\/.](\d{1,2})$/.exec(t))) return guessY(+m[2], +m[1], ref);
+  if ((m = /^(\d{1,2})\s*(?:من\s+)?([\p{L}]+)(?:\s+(\d{4}))?/u.exec(t)) && monthNum(m[2])) return m[3] ? mkISO(+m[3], monthNum(m[2]), +m[1]) : guessY(monthNum(m[2]), +m[1], ref);
+  return "";
+}
+// الكلام مقطّع: سطور، وفواصل، و«ود.» — وكل طبيب ياخذ من مقطعه (ولو مقطعه ما فيه وقت/تاريخ: من المقطع اللي بعده — «د. علياء ود. كريم من 23 إلى 27»)
+const GENERIC = new Set(["محمد", "احمد", "علي", "عبدالله", "دكتور", "دكتوره", "الدكتور", "الدكتوره"]);
+function nameKeys(d) {
+  const ws = [A.shortName(d.name), ...(d.aliases || [])].flatMap(n => A.norm(n).split(/\s+/)).map(w => w.replace(/^د$/, "")).filter(w => w.length > 2 && !GENERIC.has(w));
+  return [...new Set(ws)];
+}
+// اسم مكتوب غلط أو ناقص: «اكرا» = اكرامي، «الشوربجي»، «سكلا»… (حرف زيادة/ناقص يمر)
+function lev(x, y) { if (Math.abs(x.length - y.length) > 1) return 9; const dp = Array.from({ length: x.length + 1 }, (_, i) => [i, ...Array(y.length).fill(0)]); for (let j = 1; j <= y.length; j++) dp[0][j] = j; for (let i = 1; i <= x.length; i++) for (let j = 1; j <= y.length; j++) dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)); return dp[x.length][y.length]; }
+function nameHit(w, k) {
+  if (!w || w.length < 3) return false;
+  const k2 = k.replace(/^ال(?=[\u0600-\u06FF]{4})/, "");
+  return w === k || w === k2 || (w.length >= 4 && (k.startsWith(w) || k2.startsWith(w))) || (k2.length >= 5 && w.startsWith(k2.slice(0, 5))) || (w.length >= 5 && lev(w, k2) <= 1);
+}
+// لكل ذكر للطبيب: نافذة من اسمه لين اسم الطبيب اللي بعده — ولو ما فيها وقت/تاريخ تكبر وتشمل اللي بعده («علياء وكريم 23 الى 27»)
+const cleanTok = w => A.norm(w).replace(/^(د|ود|و|لد|ل)(?=[\u0600-\u06FF]{3})/, "").replace(/^ال(?=[\u0600-\u06FF]{4})/, "");
+function segsFor(d, txt) {
+  if (!d) return [];
+  const mine = nameKeys(d), others = A.docs().filter(x => x.id !== d.id).map(nameKeys), out = [];
+  for (const line of String(txt || "").split(/\n+/)) {
+    const raw = line.split(/\s+/).filter(Boolean), toks = raw.map(cleanTok);
+    const hit = toks.map(w => mine.some(k => nameHit(w, k)));
+    const oth = toks.map((w, i) => !hit[i] && others.some(ks => ks.some(k => nameHit(w, k))));
+    hit.forEach((h, i) => {
+      if (!h || (i > 0 && hit[i - 1])) return;                               // أول كلمة من اسمه بس
+      const bounds = []; for (let j = i + 1; j < toks.length; j++) if (oth[j] && !oth[j - 1] && !hit[j - 1]) bounds.push(j);
+      bounds.push(toks.length);
+      out.push([...new Set(bounds.slice(0, 3))].map(b => raw.slice(i, b).join(" ")));
+    });
+  }
+  return out;
+}
+// مدى الإجازة من نص: «من 23 إلى 28 نوفمبر» / «23-11-2026 إلى 25-11-2026» / «من ٢٣ الى ٢٥ يرجع ٢٦»
+function rangeIn(txt, ref) {
+  const t = lat(txt); ref = ref || A.nowR().iso; let m;
+  const full = [...t.matchAll(/\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4}/g)].map(x => toISO(x[0], ref)).filter(Boolean);
+  const ret = /(?:يرجع|ترجع|يباشر|تباشر|يداوم|تداوم|عودته|عودتها|رجوعه|رجوعها|مباشرته|مباشرتها)[^\d]{0,12}(\d{1,2}(?:[-\/.]\d{1,2}(?:[-\/.]\d{2,4})?)?)(?:\s*([\p{L}]+))?/u.exec(t);
+  let start = "", end = "";
+  if (full.length < 2) {                                                     // «من 23/11 الى 2/12» (بدون سنة)
+    const part = [...t.matchAll(/(?<![\d\/.-])(\d{1,2})[\/.-](\d{1,2})(?![\d\/.-])/g)].map(x => guessY(+x[2], +x[1], ref)).filter(Boolean);
+    if (part.length >= 2 && !full.length) { start = part[0]; end = part[1] < part[0] ? guessY(+part[1].slice(5, 7), +part[1].slice(8, 10), A.isoPlus(ref, 300)) : part[1]; }
+  }
+  if (start && end) { /* خلاص */ }
+  else if (full.length >= 2) { start = full[0]; end = full[1]; }
+  else if ((m = /(?:من|بين)?\s*(\d{1,2})(?:\s*([\p{L}]+))?\s*(?:الى|إلى|لين|لغاية|حتى|ل|-|–|و)\s*(\d{1,2})(?!\d|[-\/.:]\d)(?:\s*([\p{L}]+))?/u.exec(t))) {
+    const mon2 = monthNum(m[4]) || monthNum(m[2]), mon1 = monthNum(m[2]) || mon2;
+    const today = ref, y = +ref.slice(0, 4);
+    let M1 = mon1, M2 = mon2;
+    if (!M2) { M1 = M2 = +ref.slice(5, 7); if (+m[1] < +ref.slice(8, 10) - 3 && +m[3] < +ref.slice(8, 10) - 3) { M1 = M2 = M1 % 12 + 1; } }
+    if (+m[3] < +m[1] && M1 === M2) M2 = M1 % 12 + 1;                          // «من 28 إلى 3» → الشهر اللي بعده
+    start = guessY(M1, +m[1], today); end = guessY(M2, +m[3], today);
+    if (start && end && end < start) end = guessY(M2, +m[3], A.isoPlus(today, 300));
+  } else if (full.length === 1) start = full[0];
+  if (!start && ret) { const lone = /(?<![\d:])(\d{1,2})(?![\d:])/.exec(t.slice(0, ret.index)); if (lone) { const cm = +ref.slice(5, 7); start = guessY(+lone[1] < +ref.slice(8, 10) - 3 ? cm % 12 + 1 : cm, +lone[1], ref); } }
+  if (!end && ret) { const r = toISO(/[-\/.]/.test(ret[1]) ? ret[1] : ret[1] + (monthNum(ret[2]) ? " " + ret[2] : "-" + (start ? +start.slice(5, 7) : +ref.slice(5, 7))), ref); if (r) end = A.isoPlus(r, -1); }
+  return { start, end };
+}
+function fillVac(a, reply, user) {
+  if (a.type !== "vacation" || (ISO(a.start_date) && ISO(a.end_date))) return a;
+  const o = { ...a };
+  if (!ISO(o.end_date) && ISO(o.return_date)) o.end_date = A.isoPlus(o.return_date, -1);
+  if (ISO(o.start_date) && ISO(o.end_date)) return o;
+  const d = o.doctor_id ? docOf(o.doctor_id) : null;
+  for (const src of [user, reply]) for (const seg of segsFor(d, src)) {
+    for (let k = 1; k <= seg.length; k++) {
+      const r = rangeIn(seg.slice(0, k).join(" ")); if (!r.start && !r.end) continue;
+      if (!ISO(o.start_date) && r.start) o.start_date = r.start;
+      if (!ISO(o.end_date) && r.end) o.end_date = r.end;
+      if (ISO(o.start_date) && ISO(o.end_date)) return o;
+      break;
+    }
+  }
+  return o;
+}
 // أسماء الحقول من الذكاء → الأسماء الداخلية (يقبل الاسم القديم احتياط)
 function normA(a) {
   const o = {}; for (const [k, v] of Object.entries(a || {})) if (v !== "" && v != null && !(Array.isArray(v) && !v.length)) o[k] = v;   // الحقول الفاضية اللي يعبّيها الذكاء بلا معنى
+  for (const k of ["date", "start_date", "end_date", "return_date"]) if (o[k] != null && !ISO(o[k])) { const v = toISO(o[k]); if (v) o[k] = v; else delete o[k]; }
+  if (!o.end_date && o.until_date) { const v = toISO(o.until_date); if (v) o.end_date = v; }
   if (!o.date && o.start_date && ["status", "cancel_plan"].includes(o.type)) o.date = o.start_date;
   o.from = a.start_time ?? a.from ?? (a.kind === "starts_at" ? a.at_time : undefined);
   o.until = a.end_time ?? a.until;
@@ -249,16 +371,25 @@ function normA(a) {
 const NEEDS_T = a => (a.type === "status" && a.kind === "starts_at") || (a.type === "schedule" && a.mode !== "set_days") || (a.type === "schedule" && a.mode === "set_days" && a.from) || a.type === "add_doctor";
 function timesIn(txt) {
   const t = lat(txt), out = [];
-  for (const m of t.matchAll(/(?<![\d:])(\d{1,2})(?::(\d{2}))?\s*(صباحاً|صباحا|مساءً|مساء|الصبح|الظهر|العصر|الليل|ص|م|am|pm)?(?![\d:])/gi)) {
+  for (const m of t.matchAll(/(?<![\d:])(\d{1,2})(?::(\d{2}))?\s*(?:ال?ساعه|الساعة)?\s*(صباحاً|صباحا|مساءً|مساء|الصبح|بالصبح|الصباح|الفجر|فجراً|فجرا|الظهر|ظهراً|ظهرا|العصر|عصراً|عصرا|المغرب|الليل|بالليل|ليلاً|ليلا|ص|م|am|pm)?(?![\d:])/gi)) {
     if (!m[2] && !m[3]) continue;                                           // رقم بدون : ولا ص/م (تاريخ/عدد) → نتجاهله
     let h = +m[1]; if (h > 24) continue; const ap = m[3] || "";
-    if (/^(م|pm|مساء|العصر|الليل)/i.test(ap) && h < 12) h += 12; if (/^(ص|am|صباح|الصبح)/i.test(ap) && h === 12) h = 0; if (/الظهر/.test(ap) && h < 6) h += 12;
+    if (/^(م|pm|مساء|العصر|عصر|المغرب|الليل|بالليل|ليل)/i.test(ap) && h < 12 && !(/ليل/.test(ap) && h <= 4)) h += 12; if (/^(ص|am|صباح|الصبح|بالصبح|الصباح|الفجر|فجر)/i.test(ap) && h === 12) h = 0; if (/ظهر/.test(ap) && h < 6) h += 12;
     out.push(String(h % 24).padStart(2, "0") + ":" + (m[2] || "00"));
   }
   return [...new Set(out)];
 }
-function fillTimes(a, reply, user) {
+// (2.16.1) أوقات كل طبيب من سطره هو: «د. مجدي نصيف — بكرة: دوامه من 9ص إلى 5م» (رسالة البوت اللي أنس رد عليها) أو «د.اكرامي الشرقاوي من ٥-١»
+function timesFor(d, txt) {
+  if (!d) return [];
+  for (const seg of segsFor(d, txt)) for (let k = 1; k <= seg.length; k++) { const ts = timesIn(seg.slice(0, k).join(" ")); if (ts.length >= 2) return ts; if (ts.length) break; }
+  return [];
+}
+function fillTimes(a, reply, user, many = false) {
   if (!NEEDS_T(a) || (a.from && a.until)) return a;
+  const own = timesFor(a.doctor_id ? docOf(a.doctor_id) : null, (user || "") + "\n" + (reply || ""));
+  if (own.length >= 2) return { ...a, from: a.from || own[0], until: a.until || own.find(x => x !== (a.from || own[0])) || own[1] };
+  if (many) return a;                                                        // أكثر من طبيب: لا ناخذ أوقات طبيب ثاني — الأحسن يقول «ناقص» من إنه يحفظ غلط
   for (const src of [reply, user]) {
     const ts = timesIn(src || ""); if (ts.length < 2) continue;
     const o = { ...a };
@@ -319,8 +450,8 @@ function check(a) {
     if (!["starts_at", "present", "leaves_at", "late", "stop", "free", "appointments_only", "busy", "absent_today", "clear"].includes(a.kind)) return `نوع حالة غريب (${a.kind})`;
   }
   if (a.type === "schedule" && a.mode === "set_days" && !(a.days || []).length) return `د. ${A.shortName(d.name)}: أي أيام؟ (set_days بدون أيام)`;
-  if (a.type === "schedule" && (toMin(a.from) == null || toMin(a.until) == null) && (a.mode !== "set_days" || a.from || a.until)) return `د. ${A.shortName(d.name)}: ناقص وقت الدوام (start_time و end_time)`;
-  if (a.type === "vacation" && (!ISO(a.start_date) || !ISO(a.end_date))) return "ناقص تاريخ بداية/نهاية الإجازة";
+  if (a.type === "schedule" && (toMin(a.from) == null || toMin(a.until) == null) && (a.mode !== "set_days" || a.from || a.until)) return `د. ${A.shortName(d.name)}: وش وقت دوامه؟ (مثلاً «9ص–5م»)`;
+  if (a.type === "vacation" && (!ISO(a.start_date) || !ISO(a.end_date))) return `د. ${A.shortName(d.name)}: من متى لين متى الإجازة؟ (مثلاً «من 23 لين 25»)`;
   if (a.type === "end_vacation" && !ISO(a.return_date)) return "ناقص يوم المباشرة";
   if (a.type === "add_doctor" && !String(a.name || "").trim()) return "ناقص اسم الطبيب";
   if (a.type === "branch_day" && !a.clear && !String(a.branch || "").trim()) return "ناقص اسم الفرع";
@@ -373,7 +504,7 @@ async function execute(actions, pclar, pdocs) {
     try { r = await run(a, t, pclar, pdocs); } catch (e) { r = { ok: false, why: String(e?.message || e).slice(0, 140) }; }
     if (r?.skip) continue;
     if (a.type === "restore_doctor") desc = describe(a);                       // الاسم يعرف بعد التنفيذ
-    out.push(r?.ok ? `✅ ${/^(complaint|task)_/.test(a.type) ? "" : "انحفظ وتأكدت منه في الموقع: "}${desc.replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${desc.replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
+    out.push(r?.ok ? `✅ ${/^(complaint|task|license)_/.test(a.type) ? "" : "انحفظ وتأكدت منه في الموقع: "}${desc.replace(/^• /, "")}${r.note ? " — " + r.note : ""}` : `❌ ما انحفظ: ${desc.replace(/^• /, "")}${r?.why ? " — " + r.why : ""}`);
   }
   // نقفل الأسئلة المنتظرة ونحط ✅ في القروب — بس لو كل اللي قبلها انحفظ
   const allOk = !out.some(l => /^(❌|⚠️)/.test(l));
@@ -699,6 +830,102 @@ export async function bootFixes() {
     if (am) { const out = await execute([{ type: "schedule", doctor_id: am.id, mode: "set_days", days: [6, 0, 1, 2, 3, 4], from: "12:00", until: "20:00" }], [], []); lines.push(`د. أمينة الحلواني:\n${out.join("\n")}`); if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx0911am3"); }
     else mark.push("fx0911am3");
   }
+  // 9) (2.16.1) الطب العام — دوام ثابت (رسالة ماجد #R6Q، وأنس قال 17/11 «الدوامات هذي بتكون ثابتة» والبوت ما حفظها: الأوقات ما وصلت للذكاء)
+  if (!doneIds.has("fx1911gp")) {
+    const want = [["gguqlrc", "مجدي نصيف", "09:00", "17:00"], ["bxm6z5u", "سارة الجارحي", "12:00", "20:00"], ["g62723r", "كرامي", "17:00", "01:00"], ["zdrud94", "السنجيدي", "01:00", "09:00"]];
+    const acts = [], miss = [];
+    for (const [id, nm, f, u] of want) { const d = A.docs().find(x => x.id === id) || byName(nm); if (d) acts.push({ type: "schedule", doctor_id: d.id, mode: "all_days", from: f, until: u }); else miss.push(nm); }
+    const out = acts.length ? await execute(acts, [], []) : [];
+    lines.push(`الطب العام — الدوام الثابت (طلبك 17/11 اللي ما انحفظ):\n${out.join("\n")}${miss.length ? "\n❌ ما لقيت: " + miss.join("، ") : ""}`);
+    if (!miss.length && !out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx1911gp");
+  }
+  // 10) (2.16.1) إجازات طلبها المدير في قروب الشكاوي 19/11 وما انحفظت («ناقص تاريخ» — الذكاء كتب التاريخ 23-11-2026 بدل 2026-11-23)
+  if (!doneIds.has("fx1911vac")) {
+    const want = [["علياء", "2026-11-23", "2026-11-27"], ["كريم شديد", "2026-11-23", "2026-11-27"], ["مجد العدواني", "2026-11-23", "2026-11-28"], ["كرامي", "2026-11-23", "2026-11-25"]];
+    const vacs = (await A.db.doc("board/bawadi").get()).data()?.vacations || [];
+    const acts = [], have = [], miss = [];
+    for (const [nm, s0, e0] of want) {
+      const d = byName(nm); if (!d) { miss.push(nm); continue; }
+      if (vacs.some(v => v.doctorId === d.id && v.start <= s0 && (!v.end || v.end >= e0))) { have.push("د. " + A.shortName(d.name)); continue; }
+      acts.push({ type: "vacation", doctor_id: d.id, start_date: s0, end_date: e0 });
+    }
+    const out = acts.length ? await execute(acts, [], []) : [];
+    lines.push(`إجازات قروب الشكاوي (23/11):\n${[...out, have.length ? "✅ محفوظة من قبل: " + have.join("، ") : "", miss.length ? "❌ ما لقيت: " + miss.join("، ") : ""].filter(Boolean).join("\n")}`);
+    if (!miss.length && !out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx1911vac");
+  }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
+}
+
+/* ---------- (2.16.1) اختبار الفهم: البوت يجرّب نفسه على رسايل صعبة بعد كل تحديث — بدون ما يحفظ شي ---------- */
+// كل حالة: نص (و«يرد على» لو فيه) + المتوقّع. النتيجة تنحفظ في board/bawadi_selftest (بدون بيانات مراجعين) وسطر واحد لأنس.
+function selfCases() {
+  const t = A.nowR(), D = n => A.isoPlus(t.iso, n), wd = w => D(((w - t.wd + 7) % 7) || 7);
+  const R6Q = `✅ قريت رسالة #R6Q  Majed:\n«سابا 1\nمن غدا الثلاثاء ستكون عيادة الطب العام كالاتي :\nد.مجدي نصيف ٩-٥\nد.سارة الشوربجي ١٢م-٨م\nد.اكرامي الشرقاوي من ٥-١\nد.اشرف السنجيدي من ١ص-٩ص»\n\nاللي سويته:\n📅 د. مجدي نصيف — بكرة: دوامه من 9ص إلى 5م\n📅 د. سارة الجارحي — بكرة: دوامه من 12م إلى 8م\n📅 د. أكرامي الشرقاوي — بكرة: دوامه من 5م إلى 1ص\n📅 د. أشرف السنجيدي — بكرة: دوامه من 1ص إلى 9ص`;
+  return [
+    { q: "اكرا وقف", all: [{ doc: "كرامي", type: "status", kind: ["stop"], date: D(0) }] },
+    { q: "اكرامي وقف استقبال", all: [{ doc: "كرامي", type: "status", kind: ["stop"] }] },
+    { q: "وقف استقبال نشوى الساعه ٨ بالليل", all: [{ doc: "نشوى", type: "status", kind: ["stop"], at: "20:00" }] },
+    { q: "رشا مواعيد بس", all: [{ doc: "الوزيري", type: "status", kind: ["appointments_only"] }] },
+    { q: "الوزري زحمه مره", all: [{ doc: "الوزيري", type: "status", kind: ["busy"] }] },
+    { q: "منال مو جايه اليوم", all: [{ doc: "منال", type: "status", kind: ["absent_today"], date: D(0) }] },
+    { q: "دكتوره رشا مش جايه النهارده", all: [{ doc: "الوزيري", type: "status", kind: ["absent_today"], date: D(0) }] },
+    { q: "نشوى بتتاخر ساعه", all: [{ doc: "نشوى", type: "status", kind: ["late"] }] },
+    { q: "مجدي بكره اجازه", any: [{ doc: "مجدي", type: "status", kind: ["absent_today"], date: D(1) }, { doc: "مجدي", type: "vacation", start: D(1), end: D(1) }] },
+    { q: "الشرقاوي من ٢٣ الى ٢٥ يرجع ٢٦", all: [{ doc: "كرامي", type: "vacation", start: "2026-11-23", end: "2026-11-25" }], until: "2026-11-23" },
+    { q: "اجازة مجد العدواني من 23 ل 28", all: [{ doc: "مجد العدواني", type: "vacation", start: "2026-11-23", end: "2026-11-28" }], until: "2026-11-23" },
+    { q: "عليا وكريم شديد اجازه 23 الى 27", all: [{ doc: "علياء", type: "vacation", start: "2026-11-23", end: "2026-11-27" }, { doc: "كريم شديد", type: "vacation", start: "2026-11-23", end: "2026-11-27" }], until: "2026-11-23" },
+    { q: "دوام مجدي بكرة من 9 الصبح لين 5 العصر", all: [{ doc: "مجدي", type: "status", kind: ["starts_at"], date: D(1), from: "09:00", until: "17:00" }] },
+    { q: "سارة الشوربجي دوامها ثابت ١٢م-٨م", all: [{ doc: "سارة الجارحي", type: "schedule", from: "12:00", until: "20:00" }] },
+    { q: "الدوامات هذي بتكون ثابته للايام القادمه", quoted: R6Q, all: [
+      { doc: "مجدي", type: "schedule", from: "09:00", until: "17:00" }, { doc: "سارة الجارحي", type: "schedule", from: "12:00", until: "20:00" },
+      { doc: "كرامي", type: "schedule", from: "17:00", until: "01:00" }, { doc: "السنجيدي", type: "schedule", from: "01:00", until: "09:00" }] },
+    { q: "خلها ثابته", quoted: R6Q, all: [{ doc: "مجدي", type: "schedule", from: "09:00", until: "17:00" }, { doc: "كرامي", type: "schedule", from: "17:00", until: "01:00" }] },
+    { q: "مجدي اجازه بكره واكرامي يغطي عنه من ٩ الصبح لين ٥ العصر", all: [{ doc: "كرامي", type: "status", kind: ["starts_at"], date: D(1), from: "09:00", until: "17:00" }], any: [{ doc: "مجدي", type: "status", kind: ["absent_today"], date: D(1) }, { doc: "مجدي", type: "vacation", start: D(1) }] },
+    { q: "اشرف السنجيدي الخميس الجاي من ٥ العصر لين ١ بالليل", all: [{ doc: "السنجيدي", type: "status", kind: ["starts_at"], date: wd(4), from: "17:00", until: "01:00" }] },
+    { q: "ولاء طلعت", any: [{ doc: "ولاء", type: "status", kind: ["absent_today", "leaves_at"] }] },
+    { q: "الغي حالة نشوى ورجعها لجدولها", all: [{ doc: "نشوى", type: "status", kind: ["clear"] }] },
+    { q: "عبدالحليم موجود", all: [{ doc: "عبدالحليم", type: "status", kind: ["present"] }] },
+    { q: "نيرمين بكرا تبدا ١٠ الصبح لين ٢ الظهر", all: [{ doc: "نيرمين", type: "status", kind: ["starts_at"], date: D(1), from: "10:00", until: "14:00" }] },
+    { q: "اسامه يوسف السبت مايجي", all: [{ doc: "أسامة", type: "status", kind: ["absent_today"], date: wd(6) }] },
+    { q: "منال دوامها صار من ٨ الصبح لين ٤ العصر كل يوم", all: [{ doc: "منال", type: "schedule", from: "08:00", until: "16:00" }] },
+    { q: "[رسالة محوّلة من قروب الاستقبال]\nد.مجدي نصيف بكره ٩ص-٥م", all: [{ doc: "مجدي", type: "status", kind: ["starts_at"], date: D(1), from: "09:00", until: "17:00" }] },
+    { q: "شكرا", none: true },
+    { q: "كيف الحال", none: true },
+  ].filter(c => !c.until || t.iso < c.until);
+}
+function hitSpec(a, sp) {
+  const d = A.docs().find(x => A.norm(x.name).includes(A.norm(sp.doc)) || (x.aliases || []).some(y => A.norm(y).includes(A.norm(sp.doc))));
+  if (!d || a.doctor_id !== d.id || a.type !== sp.type) return false;
+  if (sp.kind && !sp.kind.includes(a.kind)) return false;
+  if (sp.date && (a.date || A.nowR().iso) !== sp.date) return false;
+  if (sp.start && a.start_date !== sp.start) return false;
+  if (sp.end && a.end_date !== sp.end) return false;
+  if (sp.from && toMin(a.from) !== toMin(sp.from)) return false;
+  if (sp.until && toMin(a.until) !== toMin(sp.until)) return false;
+  if (sp.at && toMin(a.at) !== toMin(sp.at)) return false;
+  return true;
+}
+export async function selfTest(version) {
+  if (!A?.gemini) return;
+  const ref = A.db.doc("board/bawadi_selftest"), prev = (await ref.get()).data() || {};
+  if (prev.version === version) return;                                      // مرة وحدة لكل نسخة
+  const { system } = await buildCtx(), res = [];
+  for (const c of selfCases()) {
+    const user = (c.quoted ? `[يرد على: «${c.quoted.slice(0, 2500)}»]\n` : "") + c.q;
+    let out = await callAI(system, [{ role: "user", parts: [{ text: user }] }]).catch(() => null);
+    let acts = out ? prepActs(out, c.q, c.quoted || "") : [];
+    if (out && acts.some(a => check(a))) {                                    // نفس المحاولة الثانية اللي يسويها مع أنس
+      const fix = await callAI(system, [{ role: "user", parts: [{ text: user }] }, { role: "model", parts: [{ text: JSON.stringify({ understood: out.understood, reply: out.reply, actions: out.actions }) }] },
+        { role: "user", parts: [{ text: "[النظام] الأفعال هذي ناقصة:\n" + acts.map(a => [a, check(a)]).filter(([, w]) => w).map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nأعد قراءة الكلام والرسالة المقتبسة، اكتب understood من جديد، ورجّع actions كاملة." }] }], { models: [...A.models].reverse(), temp: 0 }).catch(() => null);
+      if (fix) { const fa = prepActs(fix, c.q, c.quoted || ""); if (fa.filter(a => check(a)).length < acts.filter(a => check(a)).length || !fa.some(a => check(a))) { out = fix; acts = fa; } }
+    }
+    const good = acts.filter(a => !check(a));
+    const ok = !out ? false : c.none ? !acts.length : (c.all || []).every(sp => good.some(a => hitSpec(a, sp))) && (!c.any || c.any.some(sp => good.some(a => hitSpec(a, sp))));
+    res.push({ q: c.q.slice(0, 160), ok, understood: String(out?.understood || "").slice(0, 300), got: good.map(describe).join(" | ").slice(0, 400), bad: acts.filter(a => check(a)).map(a => check(a)).join(" | ").slice(0, 300), model: out?.__model || "" });
+    await sleep(6000);                                                        // بهدوء — حدود Gemini المجانية
+  }
+  const n = res.filter(r => r.ok).length;
+  await ref.set({ version, at: Date.now(), pass: n, total: res.length, results: res });
+  await A.dmAdmin(`🧪 جرّبت فهمي بعد التحديث على ${res.length} رسالة صعبة (بدون ما أحفظ شي): فهمت ${n} صح.${n < res.length ? "\nاللي ما فهمتها انحفظت لـ Claude يصلّحها:\n" + res.filter(r => !r.ok).slice(0, 6).map(r => "• " + r.q.split("\n").pop().slice(0, 70)).join("\n") : ""}`);
 }

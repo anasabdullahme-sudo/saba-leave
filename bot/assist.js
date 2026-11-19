@@ -345,6 +345,7 @@ async function tick() {
     }
   }
 }
+export const assistJid = () => S.jid;
 export function assistStatus() {
   const w = weekOf(Date.now());
   return { group: !!S.jid, week: w, complaints: S.complaints.filter(c => c.week === w).length, open: openTasks().length, log: S.log.length };
