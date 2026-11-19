@@ -881,6 +881,17 @@ export async function bootFixes() {
     lines.push(`إجازات قروب الشكاوي (23/11):\n${[...out, have.length ? "✅ محفوظة من قبل: " + have.join("، ") : "", miss.length ? "❌ ما لقيت: " + miss.join("، ") : ""].filter(Boolean).join("\n")}`);
     if (!miss.length && !out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx1911vac");
   }
+  // 11) (2.18.3) قروب الشكاوي 19/11 — أنس: «تامر دوامه ١-٩، اليوم آخر يوم، والهام ترجع السبت» (البوت قراها وما طبّقها)
+  if (!doneIds.has("fx1911tamer")) {
+    const t0 = A.nowR(), acts = [], miss = [];
+    const tamer = byName("تامر"), elham = byName("إلهام") || byName("الهام");
+    if (tamer && t0.iso === "2026-11-19" && t0.m < 21 * 60) acts.push({ type: "status", doctor_id: tamer.id, kind: "starts_at", date: "2026-11-19", from: "13:00", until: "21:00" }); else if (!tamer) miss.push("تامر");
+    const ev = elham && (A.getBoard()?.vacations || []).find(v => v.doctorId === elham.id && (!v.end || v.end >= "2026-11-20"));
+    if (ev && ev.end !== "2026-11-20") acts.push({ type: "end_vacation", doctor_id: elham.id, return_date: "2026-11-21" }); else if (!elham) miss.push("إلهام");
+    const out = acts.length ? await execute(acts, [], []) : [];
+    if (acts.length || miss.length) lines.push(`قروب الشكاوي (تامر وإلهام):\n${[...out, miss.length ? "❌ ما لقيت: " + miss.join("، ") : ""].filter(Boolean).join("\n")}`);
+    if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx1911tamer");
+  }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
 }

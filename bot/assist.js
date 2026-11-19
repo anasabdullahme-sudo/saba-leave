@@ -163,11 +163,17 @@ const TRIAGE = `أنت مساعد أنس (مشرف عيادات سابا — ف�
    «فلان يرجع/ترجع يوم كذا» = نهاية إجازة: board = «د. فلان يرجع من الإجازة يوم YYYY-MM-DD» (مو تعديل دوام).
    draft = لو المطلوب رسالة تنرسل في القروب أو للموظفين (تذكير، تعميم، رد): اكتب نصها جاهز باللهجة السعودية المهنية المختصرة، كأن أنس كاتبها. غير كذا فاضي.
    compose = true لو المطلوب رسالة فيها دوامات أو تغييرات الأطباء (دوام الجمعة، تغييرات الأسبوع، مين يداوم…) — هذي يجهّزها مساعد الخاص من الجدول، فخل draft فاضي.
+5) board_updates — (2.18.3) أي معلومة انقالت في القروب تغيّر جدول أطباء البوادي — من أي أحد (المدير، أنس، ماجد، الموظفين)، حتى لو جات كجواب على سؤال أو وسط كلام:
+   دوام طبيب اليوم/يوم معيّن، تغطية، إجازة، رجوع من إجازة («ترجع السبت» = نهاية إجازة)، غياب، تأخير، «اليوم آخر يوم».
+   كل وحدة جملة واضحة كاملة: اسم الطبيب ← التغيير ← التاريخ YYYY-MM-DD ← الوقت بصيغة ص/م.
+   الوقت بدون ص/م: العيادة الصبح 8–12 والمسا 1–11 → «١-٩» = 1م–9م، «٩-٥» = 9ص–5م، «٥-١» = 5م–1ص. واللي يغطي عن طبيب ياخذ نفس دوامه لو ما انقال غير كذا.
+   هذي تنطبّق في الجدول على طول — لا تحطها task.
 4) task_updates — طلب مفتوح (من «طلبات أنس المفتوحة») صار خلاص (أنس رد أو سواه أو انلغى): done = true.
 قواعد:
 - حلل الرسايل المعلّمة «جديدة» بس. القديمة سياق.
 - الكلام العادي (سلام، شكر، سوالف، تنسيق عادي ما فيه طلب) → ولا شي.
-- رسايل أنس نفسه غالباً ردود: استخدمها في complaint_updates و task_updates. ما تسوي منها task إلا لو كتب إنه لازم يسوي شي.
+- رسايل أنس نفسه غالباً ردود: استخدمها في complaint_updates و task_updates و board_updates. ما تسوي منها task إلا لو كتب إنه لازم يسوي شي.
+- طلب كل اللي فيه تغيير جدول → board_updates بس (مو task). task للشي اللي أنس لازم يسويه بنفسه (رسالة، رد، متابعة).
 - سؤال موجّه لأنس ولا أحد جاوبه → task.
 - لا تكرر شكوى أو طلب موجود في القوائم تحت — حدّثه بدل كذا.
 - لا تخترع أسماء أو تواريخ ما انقالت. التواريخ موجودة تحت عند «الحين».
@@ -176,7 +182,8 @@ const SCHEMA = { type: "OBJECT", properties: {
   new_complaints: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, by: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" }, summary: { type: "STRING" } }, required: ["summary"] } },
   complaint_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, resolved: { type: "BOOLEAN" }, how: { type: "STRING" }, note: { type: "STRING" } }, required: ["code"] } },
   tasks: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, from: { type: "STRING" }, what: { type: "STRING" }, board: { type: "STRING" }, draft: { type: "STRING" }, compose: { type: "BOOLEAN" } }, required: ["what"] } },
-  task_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, done: { type: "BOOLEAN" }, note: { type: "STRING" } }, required: ["code"] } } } };
+  task_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, done: { type: "BOOLEAN" }, note: { type: "STRING" } }, required: ["code"] } },
+  board_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, text: { type: "STRING" } }, required: ["text"] } } } };
 
 const mref = x => "M" + x.id.slice(-6);
 const openTasks = () => S.tasks.filter(t => t.status === "pending");
@@ -245,6 +252,12 @@ async function apply(out, fresh) {
     notes.push(t);
   }
   save();
+  const bu = (out.board_updates || []).map(b => String(b.text || "").trim()).filter(Boolean);
+  if (bu.length) {
+    const src = [...new Set((out.board_updates || []).flatMap(b => (b.ids || []).map(byRef).filter(Boolean)))];
+    const quote = src.map(x => `${x.by}: ${x.text}`).join("\n").slice(0, 900);
+    await brainHandle({ key: { remoteJid: "" }, message: {} }, `[من قروب الشكاوي — انقال في القروب:\n«${quote}»]\nطبّق في جدول أطباء البوادي:\n${bu.map(x => "- " + x).join("\n")}`).catch(e => C.log.warn({ err: String(e?.message || e) }, "المساعد: الجدول"));
+  }
   for (const t of notes) {
     const lines = [`📌 من قروب الشكاوي — ${t.from || "—"}:`, t.quote ? `«${t.quote.slice(0, 400)}»` : "", `المطلوب: ${t.what}`];
     if (t.draft) lines.push("", `✍️ رسالة جاهزة (#${t.code}):`, t.draft, "", "رد «أرسل» وأرسلها في القروب، أو قل لي وش أعدّل.");
