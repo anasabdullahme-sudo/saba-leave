@@ -44,6 +44,24 @@ function doctorsBlock() {
     d.away && Object.keys(d.away).length ? "في فروع ثانية كل أسبوع: " + Object.entries(d.away).map(([w, b]) => `${WD[+w]} ${b}`).join("، ") : "",
     d.room ? "غرفة " + d.room : "", d.fee ? "كشفية " + d.fee : ""].filter(Boolean).join(" | ")).join("\n");
 }
+// (2.17.2) التغييرات يوم يوم (اليوم + 9 أيام) — عشان «جهّز لي رسالة تغييرات الجمعة / الأسبوع الجاي» يطلع من بيانات حقيقية
+function changesBlock(iso, plans) {
+  const b = A.getBoard() || {}, out = [];
+  for (let i = 0; i <= 9; i++) {
+    const day = A.isoPlus(iso, i), wd = new Date(day + "T12:00:00Z").getUTCDay(), L = [];
+    for (const v of b.vacations || []) {
+      if (v.start === day) L.push(`يبدأ إجازة: د. ${A.shortName(v.name)}${v.end ? ` (لين ${v.end}، يرجع ${A.isoPlus(v.end, 1)})` : ""}`);
+      if (v.end && A.isoPlus(v.end, 1) === day) L.push(`يرجع من الإجازة: د. ${A.shortName(v.name)}`);
+      if (v.start < day && (!v.end || v.end >= day) && i === 0) L.push(`في إجازة: د. ${A.shortName(v.name)}`);
+    }
+    for (const p of plans || []) if (p.date === day) L.push(`خطة: ${p.text || p.summary || JSON.stringify(p).slice(0, 160)}`);
+    for (const x of b.awayDays || []) if (x.date === day) L.push(`في فرع ثاني: د. ${A.shortName(docOf(x.doctorId)?.name || x.doctorId)} (${x.branch})`);
+    const working = A.docs().filter(d => (d.workdays || []).includes(wd) && !(b.vacations || []).some(v => v.doctorId === d.id && v.start <= day && (!v.end || v.end >= day)));
+    if (wd === 5 || L.length) L.push(`يداومون (حسب الجدول): ${working.map(d => `${A.shortName(d.name)} ${shiftTxt(d.alt?.days?.includes(wd) ? d.alt.shifts : d.shifts)}`).join("، ") || "—"}`);
+    if (L.length) out.push(`${dayName(day)} ${day}:\n  ${L.join("\n  ")}`);
+  }
+  return out.join("\n") || "—";
+}
 function vacBlock(iso) {
   return (A.getBoard()?.vacations || []).filter(v => !v.end || v.end >= iso).map(v => `${A.shortName(v.name)} (${v.doctorId}): ${v.start} → ${v.end || "مفتوحة"}`).join("\n") || "—";
 }
@@ -72,6 +90,13 @@ function groupBlock() {
 
 const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فرع البوادي، جدة) على الواتساب الخاص. تدير صفحة أطباء البوادي (الجدول + حالات اليوم) اللي الاستقبال والأداة يشوفونها.
 تكلّم باللهجة السعودية، بطبيعية واختصار (سطرين لخمسة)، كأنك زميل فاهم. بدون مقدمات ولا إيموجي كثير.
+
+(2.17.2) «جهّز لي رسالة …» (تغييرات الجمعة، تغييرات الأسبوع الجاي، دوام يوم، تعميم، تذكير، رد على المدير):
+- اكتب الرسالة كاملة جاهزة للنسخ في reply على طول — لا تقول «بجهّز» ولا «أبشر بجهزها» وتسكت. الطول هنا مو مشكلة.
+- خذ المعلومات من «التغييرات يوم يوم» و«الإجازات» و«الخطط» و«حالات اليوم» و«الجدول» و«قروب الشكاوي» (آخر رسايله) — لا تخترع. اكتب الرسالة بأسلوب رسمي مختصر (تحية سطر، بعدها النقاط: اليوم والتاريخ ← الطبيب ← التغيير)، واللي ما تأكدت منه قل لأنس تحت الرسالة.
+- لو أنس قال «عدّل/ضيف/شيل/غيّر …» بعد رسالة جهزتها → رجّع الرسالة كاملة بعد التعديل (مو الجزء المعدّل بس).
+- «أرسلها في القروب» بعد رسالة جاهزة → group_send: text = الرسالة كاملة كما هي.
+- الرسالة الجاهزة ما تحتاج actions (إلا group_send لما يطلب الإرسال).
 
 كيف تشتغل:
 - (2.16.1) أول شي اكتب في understood كلامه بصياغتك أنت، واضحة ومرتبة: كل طبيب لحاله (اسمه الكامل من الجدول) ← وش المطلوب ← اليوم بالتاريخ YYYY-MM-DD ← الوقت HH:MM.
@@ -132,13 +157,14 @@ doctor_id لازم من الجدول تحت.
 
 تراخيص الممارسين (تحت «تراخيص الممارسين» — أنس يرسل ملفات PDF والبوت يقراها؛ كل ترخيص يدخل آخر شهرين ينرسل عنه مرة وحدة في قروب الشكاوي):
 - «ترخيص فلان تجدد لين …» → license_renew: code (#L…) لو موجود في القائمة أو name = اسمه، و end_date = تاريخ الانتهاء الجديد YYYY-MM-DD.
-- «وش التراخيص اللي بتنتهي / مين ترخيصه قرب» → license_list.`;
+- «وش التراخيص اللي بتنتهي / مين ترخيصه قرب» → license_list.
+- «مين باقي ما عنده ترخيص / مين ماعندك ترخيصه / مين ناقص ترخيصه / الدكاترة اللي ما رسلت ترخيصهم» → license_missing (مو license_list — هذا عن اللي ما وصل ترخيصهم أصلاً).`;
 
 const SCHEMA = { type: "OBJECT", properties: {
   understood: { type: "STRING" },
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list", "license_missing", "group_send"] },
     text: { type: "STRING" }, how: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
@@ -178,6 +204,7 @@ async function buildCtx() {
 الأيام الجاية: ${[2, 3, 4, 5, 6].map(i => dayName(A.isoPlus(t.iso, i)) + " " + A.isoPlus(t.iso, i)).join("، ")}
 \n## جدول أطباء البوادي (id | الاسم | أسماء ثانية | القسم | الأيام | الدوام | …)\n${doctorsBlock()}
 \n## الإجازات (الحالية والجاية)\n${vacBlock(t.iso)}
+\n## التغييرات يوم يوم (للرسايل)\n${changesBlock(t.iso, plans)}
 \n## حالات اليوم ${t.iso} (على الموقع والأداة الحين)\n${todayBlock(t.iso)}
 \n## خطط محفوظة لأيام جاية (تنطبق أول يومها)\n${planBlock(plans)}
 \n## طلبات تنتظر أنس\n${pendingBlock(pdocs, pclar)}
@@ -890,6 +917,8 @@ function selfCases() {
     { q: "اسامه يوسف السبت مايجي", all: [{ doc: "أسامة", type: "status", kind: ["absent_today"], date: wd(6) }] },
     { q: "منال دوامها صار من ٨ الصبح لين ٤ العصر كل يوم", all: [{ doc: "منال", type: "schedule", from: "08:00", until: "16:00" }] },
     { q: "[رسالة محوّلة من قروب الاستقبال]\nد.مجدي نصيف بكره ٩ص-٥م", all: [{ doc: "مجدي", type: "status", kind: ["starts_at"], date: D(1), from: "09:00", until: "17:00" }] },
+    { q: "جهز لي رساله التغييرات ليوم الجمعه وتغييرات الاسبوع القادم", draft: true },
+    { q: "جهز لي رساله بدوام الجمعه", draft: true },
     { q: "شكرا", none: true },
     { q: "كيف الحال", none: true },
   ].filter(c => !c.until || t.iso < c.until);
@@ -921,7 +950,7 @@ export async function selfTest(version) {
       if (fix) { const fa = prepActs(fix, c.q, c.quoted || ""); if (fa.filter(a => check(a)).length < acts.filter(a => check(a)).length || !fa.some(a => check(a))) { out = fix; acts = fa; } }
     }
     const good = acts.filter(a => !check(a));
-    const ok = !out ? false : c.none ? !acts.length : (c.all || []).every(sp => good.some(a => hitSpec(a, sp))) && (!c.any || c.any.some(sp => good.some(a => hitSpec(a, sp))));
+    const ok = !out ? false : c.draft ? !acts.length && String(out.reply || "").length > 120 && /\d{1,2}[\/-]\d{1,2}|الجمعة|الجمعه/.test(out.reply || "") : c.none ? !acts.length : (c.all || []).every(sp => good.some(a => hitSpec(a, sp))) && (!c.any || c.any.some(sp => good.some(a => hitSpec(a, sp))));
     res.push({ q: c.q.slice(0, 160), ok, understood: String(out?.understood || "").slice(0, 300), got: good.map(describe).join(" | ").slice(0, 400), bad: acts.filter(a => check(a)).map(a => check(a)).join(" | ").slice(0, 300), model: out?.__model || "" });
     await sleep(6000);                                                        // بهدوء — حدود Gemini المجانية
   }

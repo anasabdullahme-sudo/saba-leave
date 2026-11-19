@@ -13,7 +13,7 @@ import { initEcg, isEcgGroup, onGroup as ecgGroup, onTeamDM as ecgDM, panoHttp }
 import http from "node:http";
 // (2.15.3) مكتبة التشفير حق الواتساب تطبع مفاتيح الجلسة كاملة في سجل Railway («Closing session: SessionEntry {...privKey...}») — نخفيها
 for (const k of ["log", "info", "warn"]) { const o = console[k].bind(console); console[k] = (...a) => { if (typeof a[0] === "string" && /^(Closing (open )?session|Removing old closed session|Opening session|Migrating session|Session already)/i.test(a[0])) return; o(...a); }; }
-import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin, doctorNames as boardDoctorNames } from "./group.js";
+import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin, doctorNames as boardDoctorNames, doctorList as boardDoctorList } from "./group.js";
 import { initAssist, isAssistGroup, onAssistGroup, assistJid } from "./assist.js";
 import { initLicenses } from "./licenses.js";
 import { selfTest, setAssist } from "./brain.js";
@@ -22,7 +22,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.17.1";
+const VERSION = "2.18.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1219,7 +1219,7 @@ async function main() {
   }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
   initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage, licText: () => LIC?.groupText() || "" });
-  LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin }); setAssist(LIC.ext);   // (2.17.0) التراخيص
+  LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin, doctors: () => boardDoctorList() }); setAssist(LIC.ext);   // (2.17.0) التراخيص
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
   const daily = async () => {

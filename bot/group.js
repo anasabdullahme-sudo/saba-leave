@@ -882,6 +882,7 @@ async function groupSender(m) {
   return String(pj).split(/[:@]/)[0].replace(/\D/g, "").replace(/^966/, "");
 }
 export const doctorNames = () => docs().map(d => shortName(d.name));
+export const doctorList = () => docs().map(d => ({ id: d.id, name: shortName(d.name), aliases: d.aliases || [] }));
 const findDep = name => { const n = norm(name || "").replace(/^ال/, ""); if (!n) return null; return (board?.departments || []).find(p => { const pn = norm(p.name).replace(/^ال/, ""); return pn.includes(n) || n.includes(pn); }) || null; };
 const code3 = () => Array.from({ length: 3 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
 async function askAdmin({ e, sch }, ctx) {

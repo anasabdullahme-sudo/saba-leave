@@ -160,7 +160,9 @@ const TRIAGE = `أنت مساعد أنس (مشرف عيادات سابا — ف�
 2) complaint_updates — رسالة تخص شكوى مفتوحة (من «شكاوي الأسبوع»): resolved = true لو أحد قال إنها انحلت/تم التواصل/اعتذرنا/تعوّض/انحلّت المشكلة، و how = كيف انحلت. note = لو فيه معلومة جديدة عنها.
 3) tasks — أي شي مطلوب من أنس يسويه أو يرد عليه (تذكير، إرسال رسالة، رد على سؤال، متابعة، تجهيز شي، تعديل في جدول الأطباء). from = مين طلب. what = المطلوب منه بجملة واضحة.
    board = لو فيه تغيير في جدول أطباء البوادي (إجازة، غياب، مرضية، تغطية طبيب مكان طبيب، تأخير، دوام): اكتبه جملة واضحة فيها اسم الطبيب واليوم بالتاريخ YYYY-MM-DD (مثلاً «د. وائل إجازة مرضية يوم 2026-11-19»). غير كذا فاضي.
+   «فلان يرجع/ترجع يوم كذا» = نهاية إجازة: board = «د. فلان يرجع من الإجازة يوم YYYY-MM-DD» (مو تعديل دوام).
    draft = لو المطلوب رسالة تنرسل في القروب أو للموظفين (تذكير، تعميم، رد): اكتب نصها جاهز باللهجة السعودية المهنية المختصرة، كأن أنس كاتبها. غير كذا فاضي.
+   compose = true لو المطلوب رسالة فيها دوامات أو تغييرات الأطباء (دوام الجمعة، تغييرات الأسبوع، مين يداوم…) — هذي يجهّزها مساعد الخاص من الجدول، فخل draft فاضي.
 4) task_updates — طلب مفتوح (من «طلبات أنس المفتوحة») صار خلاص (أنس رد أو سواه أو انلغى): done = true.
 قواعد:
 - حلل الرسايل المعلّمة «جديدة» بس. القديمة سياق.
@@ -173,7 +175,7 @@ const TRIAGE = `أنت مساعد أنس (مشرف عيادات سابا — ف�
 const SCHEMA = { type: "OBJECT", properties: {
   new_complaints: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, by: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" }, summary: { type: "STRING" } }, required: ["summary"] } },
   complaint_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, resolved: { type: "BOOLEAN" }, how: { type: "STRING" }, note: { type: "STRING" } }, required: ["code"] } },
-  tasks: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, from: { type: "STRING" }, what: { type: "STRING" }, board: { type: "STRING" }, draft: { type: "STRING" } }, required: ["what"] } },
+  tasks: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, from: { type: "STRING" }, what: { type: "STRING" }, board: { type: "STRING" }, draft: { type: "STRING" }, compose: { type: "BOOLEAN" } }, required: ["what"] } },
   task_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, done: { type: "BOOLEAN" }, note: { type: "STRING" } }, required: ["code"] } } } };
 
 const mref = x => "M" + x.id.slice(-6);
@@ -238,7 +240,7 @@ async function apply(out, fresh) {
     if (!String(n.what || "").trim()) continue;
     const src = (n.ids || []).map(byRef).filter(Boolean);
     if (src.length && src.every(s => s.team === "anas") && !n.draft) continue;          // أنس كتبها لنفسه
-    const t = { code: "T" + (++S.tseq), at: Date.now(), from: String(n.from || src[0]?.by || "").slice(0, 60), what: String(n.what).slice(0, 300), draft: String(n.draft || "").trim().slice(0, 1500), board: String(n.board || "").trim().slice(0, 400), quote: src.map(s => s.text).join("\n").slice(0, 500), key: src[src.length - 1]?.key || null, status: "pending" };
+    const t = { code: "T" + (++S.tseq), at: Date.now(), from: String(n.from || src[0]?.by || "").slice(0, 60), what: String(n.what).slice(0, 300), draft: String(n.draft || "").trim().slice(0, 1500), board: String(n.board || "").trim().slice(0, 400), compose: !!n.compose, quote: src.map(s => s.text).join("\n").slice(0, 500), key: src[src.length - 1]?.key || null, status: "pending" };
     S.tasks.push(t);
     notes.push(t);
   }
@@ -247,12 +249,14 @@ async function apply(out, fresh) {
     const lines = [`📌 من قروب الشكاوي — ${t.from || "—"}:`, t.quote ? `«${t.quote.slice(0, 400)}»` : "", `المطلوب: ${t.what}`];
     if (t.draft) lines.push("", `✍️ رسالة جاهزة (#${t.code}):`, t.draft, "", "رد «أرسل» وأرسلها في القروب، أو قل لي وش أعدّل.");
     if (t.board) lines.push("", "📅 وبسجّلها في جدول الأطباء (رسالتي الجاية).");
-    if (!t.draft && !t.board) lines.push("", `(#${t.code} — قل لي «خلصت» لما تسويه، وإلا بذكّرك)`);
+    if (t.compose) lines.push("", "✍️ أجهّز لك الرسالة من الجدول (رسالتي الجاية) — قل لي لو تبي تعديل، و«أرسلها في القروب» لما تكون تمام.");
+    else if (!t.draft && !t.board) lines.push("", `(#${t.code} — قل لي «خلصت» لما تسويه، وإلا بذكّرك)`);
     await (C.dm || dmAdmin)(lines.filter((l, i) => l || i).join("\n"));
     if (t.board) {
       await brainHandle({ key: { remoteJid: "" }, message: {} }, `[من قروب الشكاوي — ${t.from} كتب: «${t.quote.slice(0, 300)}»]\nالمطلوب في الجدول: ${t.board}`).catch(e => C.log.warn({ err: String(e?.message || e) }, "المساعد: الجدول"));
-      if (!t.draft) { t.status = "done"; t.doneAt = Date.now(); t.doneHow = "انسجّل في الجدول"; save(); }
+      if (!t.draft && !t.compose) { t.status = "done"; t.doneAt = Date.now(); t.doneHow = "انسجّل في الجدول"; save(); }
     }
+    if (t.compose) await brainHandle({ key: { remoteJid: "" }, message: {} }, `[من قروب الشكاوي — ${t.from} كتب: «${t.quote.slice(0, 400)}»]\nجهّز لي الرسالة المطلوبة كاملة جاهزة للنسخ (${t.what}).`).catch(e => C.log.warn({ err: String(e?.message || e) }, "المساعد: تجهيز الرسالة"));
   }
 }
 
@@ -260,14 +264,16 @@ async function apply(out, fresh) {
 function block() {
   const w = weekOf(Date.now());
   const wk = S.complaints.filter(c => c.week === w);
-  return `\n## قروب الشكاوي — شكاوي هالأسبوع (الملخص يوصل أنس الخميس 10 بالليل)\n${complaintsTxt(wk)}\n\n## قروب الشكاوي — طلبات تنتظر أنس (#T)\n${tasksTxt(openTasks())}`;
+  const recent = S.log.filter(x => Date.now() - x.at < 3 * DAY).slice(-25).map(x => `${tLabel(x.at)} — ${x.by}: ${x.text.replace(/\n+/g, " ").slice(0, 220)}`).join("\n") || "—";
+  return `\n## قروب الشكاوي — آخر رسايله (3 أيام)\n${recent}\n\n## قروب الشكاوي — شكاوي هالأسبوع (الملخص يوصل أنس الخميس 10 بالليل)\n${complaintsTxt(wk)}\n\n## قروب الشكاوي — طلبات تنتظر أنس (#T)\n${tasksTxt(openTasks())}`;
 }
-const ACT = ["complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary"];
+const ACT = ["complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "group_send"];
 function checkAct(a) {
   if (!ACT.includes(a.type)) return null;
   const code = codeN(a.code);
   if (a.type === "complaint_add") return String(a.text || "").trim() ? "" : "ناقص نص الشكوى";
   if (a.type === "complaints_summary") return "";
+  if (a.type === "group_send") return !String(a.text || "").trim() ? "وش النص اللي أرسله؟" : S.jid ? "" : "ما أعرف قروب الشكاوي للحين";
   if (a.type.startsWith("complaint_")) return S.complaints.find(c => c.code === code) ? "" : `ما لقيت الشكوى #${code || "—"}`;
   const t = S.tasks.find(x => x.code === code);
   if (!t) return `ما لقيت الطلب #${code || "—"}`;
@@ -285,6 +291,7 @@ function describeAct(a) {
     case "task_done": return `• #${code} خلص${t ? ` («${t.what.slice(0, 60)}»)` : ""}`;
     case "task_drop": return `• #${code} انلغى`;
     case "complaints_summary": return "• ملخص شكاوي الأسبوع";
+    case "group_send": return `• أرسل الرسالة في قروب الشكاوي`;
   }
   return null;
 }
@@ -309,6 +316,13 @@ async function act(a) {
     catch (e) { try { await sock.sendMessage(S.jid, { text }); } catch (e2) { return { ok: false, why: String(e2?.message || e2).slice(0, 120) }; } }
     t.status = "done"; t.doneAt = Date.now(); t.doneHow = "انرسلت في القروب"; t.sent = text;
     S.log.push({ id: "bot" + Date.now(), at: Date.now(), by: "أنس (البوت)", team: "anas", text: text.slice(0, 2000), kind: "text", quoted: "", qid: "" });
+    save(); return { ok: true, note: "انرسلت" };
+  }
+  if (a.type === "group_send") {
+    const text = String(a.text).trim(), sock = C.getSock(); if (!sock) return { ok: false, why: "واتساب مو متصل" };
+    try { await sock.sendMessage(S.jid, { text }); } catch (e) { return { ok: false, why: String(e?.message || e).slice(0, 120) }; }
+    S.log.push({ id: "bot" + Date.now(), at: Date.now(), by: "أنس (البوت)", team: "anas", text: text.slice(0, 2000), kind: "text", quoted: "", qid: "" });
+    for (const t of openTasks()) if (t.draft && t.status === "pending") { t.status = "done"; t.doneAt = Date.now(); t.doneHow = "انرسلت رسالة من الخاص"; }
     save(); return { ok: true, note: "انرسلت" };
   }
   if (a.type === "complaints_summary") { const s = summaryText(weekOf(Date.now()), true); await (C.dm || dmAdmin)(s); return { ok: true, skip: true }; }

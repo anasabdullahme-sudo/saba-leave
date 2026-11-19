@@ -111,8 +111,25 @@ function summary(o) {
   if (!o.lic && !o.unread.length) return "";
   const parts = [`📋 قريت ${o.lic} ترخيص: ${[o.added ? `${o.added} جديد` : "", o.renewed ? `${o.renewed} تجدد` : "", o.same ? `${o.same} نفس المحفوظ` : ""].filter(Boolean).join("، ") || "—"}.`];
   if (o.soon) parts.push(`⚠️ ${o.soon} منها تنتهي خلال شهرين — بنبّه عنها في قروب الشكاوي (مرة وحدة لكل ترخيص).`);
+  { const mt = missingText(); if (mt) parts.push(mt); }
   if (o.unread.length) parts.push(`❓ ما قدرت أقرأ:\n${o.unread.slice(0, 10).map(x => "• " + x).join("\n")}${o.unread.length > 10 ? `\n… و${o.unread.length - 10} غيرها` : ""}`);
   return parts.join("\n");
+}
+
+/* ---------- (2.17.2) السطر المختصر: اسم الطبيب (الأول + العائلة) — تاريخ الانتهاء (العد التنازلي) ---------- */
+export function shortName(x) {
+  let ws = String(x.name || x.nameEn || "").replace(/[-–_]/g, " ").split(/\s+/).filter(w => w && !/^(بن|بنت|ابن|bin|binti)$/i.test(w));
+  if (!ws.length) return "—";
+  const first = /^(عبد|ابو|أبو)$/.test(ws[0]) && ws[1] ? ws[0] + " " + ws[1] : ws[0];
+  const usedFirst = first.split(" ").length;
+  let last = ws.length > usedFirst ? ws[ws.length - 1] : "";
+  if (last && ws.length - 1 > usedFirst && /^(عبد|ابو|أبو|ال)$/.test(ws[ws.length - 2])) last = ws[ws.length - 2] + " " + last;
+  const nm = [first, last].filter(Boolean).join(" ");
+  return /[a-z]/i.test(nm) && !/[\u0600-\u06FF]/.test(nm) ? nm.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : nm;
+}
+function shortLine(x) {
+  const n = daysTo(x.expiry);
+  return `${n < 0 ? "❌" : "⚠️"} د. ${shortName(x)} — ${dmyy(x.expiry)} (${n < 0 ? `انتهى من ${-n} يوم` : n === 0 ? "ينتهي اليوم" : `باقي ${n} يوم`})`;
 }
 
 /* ---------- التنبيه في قروب الشكاوي: مرة وحدة لكل ترخيص ---------- */
@@ -123,8 +140,7 @@ async function tick() {
   if (!jid || !sock?.user) return;
   const due = S.items.filter(x => x.expiry && x.notified !== x.expiry && daysTo(x.expiry) <= WARN_DAYS).sort((a, b) => a.expiry.localeCompare(b.expiry));
   if (!due.length) return;
-  const line = x => { const n = daysTo(x.expiry); return `${x.profession && !/طبيب|استشاري|اخصائي|أخصائي/.test(x.profession) ? x.profession + " " : "د. "}${x.name}${x.number ? ` (رقم ${x.number})` : ""} — ${n < 0 ? `انتهى ${dmyy(x.expiry)} (من ${-n} يوم)` : `ينتهي ${dmyy(x.expiry)}، باقي ${n} يوم`}`; };
-  const text = due.length === 1 ? `⚠️ ترخيص ${line(due[0])}` : `⚠️ تراخيص تنتهي خلال شهرين:\n${due.map(x => "• " + line(x)).join("\n")}`;
+  const text = `📋 تراخيص تنتهي خلال شهرين:\n${due.map(shortLine).join("\n")}`;
   try { await sock.sendMessage(jid, { text }); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التراخيص: الإرسال للقروب"); return; }
   for (const x of due) x.notified = x.expiry;
   save(); C.log.info({ n: due.length }, "التراخيص: تنبيه في قروب الشكاوي");
@@ -142,15 +158,16 @@ function block() {
   const near = S.items.filter(x => x.expiry && daysTo(x.expiry) <= 120).sort((a, b) => a.expiry.localeCompare(b.expiry));
   return `\n\n## تراخيص الممارسين (${S.items.length} محفوظ) — اللي تنتهي خلال 4 شهور (#الرمز | الاسم | الرقم | ينتهي)\n${near.map(x => `#${x.code} | ${x.name} | ${x.number || "—"} | ${x.expiry}`).join("\n") || "—"}`;
 }
-const ACT = ["license_renew", "license_list"];
+const ACT = ["license_renew", "license_list", "license_missing"];
 function checkAct(a) {
   if (!ACT.includes(a.type)) return null;
-  if (a.type === "license_list") return "";
+  if (a.type === "license_list" || a.type === "license_missing") return "";
   const x = find(a.code, a.name); if (!x) return `ما لقيت ترخيص ${a.code ? "#" + String(a.code).replace(/^#/, "") : "«" + (a.name || "—") + "»"} — قل لي الاسم كامل`;
   return ISO(a.end_date) ? "" : "لين متى الترخيص الجديد؟ (تاريخ الانتهاء)";
 }
 function describeAct(a) {
   if (a.type === "license_list") return "• التراخيص اللي بتنتهي";
+  if (a.type === "license_missing") return "• الأطباء اللي ما وصلني ترخيصهم";
   if (a.type !== "license_renew") return null;
   const x = find(a.code, a.name); return `• ترخيص ${x ? x.name : a.name || "—"} تجدد لين ${dmyy(a.end_date)}`;
 }
@@ -158,20 +175,40 @@ async function act(a) {
   if (!ACT.includes(a.type)) return null;
   if (a.type === "license_list") {
     const list = S.items.filter(x => x.expiry).sort((p, q) => p.expiry.localeCompare(q.expiry)).filter(x => daysTo(x.expiry) <= 120);
-    await C.dm(list.length ? `📋 تراخيص تنتهي خلال 4 شهور:\n${list.map(x => `• ${x.name}${x.number ? " (" + x.number + ")" : ""} — ${dmyy(x.expiry)} (باقي ${daysTo(x.expiry)} يوم)`).join("\n")}` : `ما فيه ترخيص ينتهي خلال 4 شهور (محفوظ ${S.items.length}).`);
+    await C.dm(list.length ? `📋 تراخيص منتهية أو تنتهي خلال 4 شهور:\n${list.map(x => daysTo(x.expiry) <= WARN_DAYS ? shortLine(x) : `✅ د. ${shortName(x)} — ${dmyy(x.expiry)} (باقي ${daysTo(x.expiry)} يوم)`).join("\n")}` : `ما فيه ترخيص ينتهي خلال 4 شهور (محفوظ ${S.items.length}).`);
     return { ok: true, skip: true };
   }
+  if (a.type === "license_missing") { await C.dm(missingText() || "ما قدرت أقرأ جدول الأطباء."); return { ok: true, skip: true }; }
   const x = find(a.code, a.name);
   x.expiry = a.end_date; delete x.notified; x.updated = Date.now(); save();
   return { ok: true };
 }
+/* ---------- (2.17.2) أطباء الجدول اللي ما وصلني ترخيصهم ---------- */
+const tok = s => norm(s).split(" ").map(w => w.replace(/^ال(?=\S{3})/, "").replace(/ي$/, "ى").replace(/ى$/, "ي")).filter(w => w.length > 1 && !/^(اخصائي|اخصائيه|استشاري|استشاريه|طبيب|طبيبه|عام|اسنان|د|dr|بن|بنت|ابن)$/.test(w));
+function lev1(a, b) { if (a === b) return true; if (Math.abs(a.length - b.length) > 1 || a.length < 4) return false; let i = 0, j = 0, e = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++e > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } } return e + (a.length - i) + (b.length - j) <= 1; }
+// الطبيب في الجدول (اسمه المختصر: «نشوى السقا») ↔ الترخيص (الاسم الكامل): الاسم الأول + العائلة لازم يطابقون
+function sameDoc(d, lic) {
+  const names = [d.name, ...(d.aliases || [])];
+  const L = [...tok(lic.name), ...tok(lic.nameEn || "")];
+  return names.some(n => { const T = tok(n); if (T.length < 2) return T.length === 1 && L[0] && lev1(T[0], L[0]); return lev1(T[0], L[0] || "") && T.slice(1).every(w => L.some(x => lev1(w, x))); })
+    || names.some(n => { const T = tok(n); return T.length >= 2 && T.every(w => L.some(x => lev1(w, x))); });
+}
+function missingDocs() {
+  const docs = (C.doctors?.() || []).filter(d => d?.name);
+  return docs.filter(d => !S.items.some(x => sameDoc(d, x)));
+}
+function missingText() {
+  const all = C.doctors?.() || [], miss = missingDocs();
+  if (!all.length) return "";
+  return miss.length ? `🩺 أطباء البوادي اللي ما وصلني ترخيصهم (${miss.length} من ${all.length}):\n${miss.map(d => "• د. " + d.name).join("\n")}` : `✅ كل أطباء البوادي (${all.length}) وصلني ترخيصهم.`;
+}
+
 // (2.17.1) «تراخيص» في قروب الشكاوي → القائمة كاملة، من الأقرب انتهاءً
 function groupText() {
   const list = S.items.filter(x => x.expiry).sort((p, q) => p.expiry.localeCompare(q.expiry));
   if (!list.length) return "📋 ما فيه تراخيص محفوظة عندي للحين.";
-  const row = x => { const n = daysTo(x.expiry), who = `${x.profession && !/طبيب|استشاري|اخصائي|أخصائي/.test(x.profession) ? "" : "د. "}${x.name}${x.profession && !/طبيب|استشاري|اخصائي|أخصائي/.test(x.profession) ? ` (${x.profession})` : ""}`;
-    return `${n < 0 ? "❌" : n <= WARN_DAYS ? "⚠️" : "•"} ${who} — ${n < 0 ? `انتهى ${dmyy(x.expiry)}` : `${dmyy(x.expiry)}${n <= WARN_DAYS ? ` (باقي ${n} يوم)` : ""}`}`; };
+  const row = x => { const n = daysTo(x.expiry); return n <= WARN_DAYS ? shortLine(x) : `✅ د. ${shortName(x)} — ${dmyy(x.expiry)} (باقي ${n} يوم)`; };
   return `📋 تراخيص الممارسين (${list.length}):\n${list.map(row).join("\n")}`;
 }
 export function licGroupNote() { return S.items.length; }
-const api = { ingest, summary, isPdf, groupText, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S } };
+const api = { ingest, summary, isPdf, groupText, missingText, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S, sameDoc, missingDocs } };
