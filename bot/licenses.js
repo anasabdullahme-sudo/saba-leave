@@ -165,5 +165,13 @@ async function act(a) {
   x.expiry = a.end_date; delete x.notified; x.updated = Date.now(); save();
   return { ok: true };
 }
+// (2.17.1) «تراخيص» في قروب الشكاوي → القائمة كاملة، من الأقرب انتهاءً
+function groupText() {
+  const list = S.items.filter(x => x.expiry).sort((p, q) => p.expiry.localeCompare(q.expiry));
+  if (!list.length) return "📋 ما فيه تراخيص محفوظة عندي للحين.";
+  const row = x => { const n = daysTo(x.expiry), who = `${x.profession && !/طبيب|استشاري|اخصائي|أخصائي/.test(x.profession) ? "" : "د. "}${x.name}${x.profession && !/طبيب|استشاري|اخصائي|أخصائي/.test(x.profession) ? ` (${x.profession})` : ""}`;
+    return `${n < 0 ? "❌" : n <= WARN_DAYS ? "⚠️" : "•"} ${who} — ${n < 0 ? `انتهى ${dmyy(x.expiry)}` : `${dmyy(x.expiry)}${n <= WARN_DAYS ? ` (باقي ${n} يوم)` : ""}`}`; };
+  return `📋 تراخيص الممارسين (${list.length}):\n${list.map(row).join("\n")}`;
+}
 export function licGroupNote() { return S.items.length; }
-const api = { ingest, summary, isPdf, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S } };
+const api = { ingest, summary, isPdf, groupText, ext: { block, checkAct, describeAct, act }, count: () => S.items.length, _t: { upsert, tick, S: () => S } };

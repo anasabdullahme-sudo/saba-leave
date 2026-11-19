@@ -110,6 +110,11 @@ export async function onAssistGroup(m) {
   else if (g.stickerMessage) return;
   else if (g.locationMessage || g.contactMessage) text = text || (g.locationMessage ? "[موقع]" : "[جهة اتصال]");
   if (!text) return;
+  // (2.17.1) الرسالة كلها «تراخيص» (بس — مو داخل جملة) → قائمة التراخيص في القروب، لأي أحد
+  if (kind === "text" && /^\s*تراخيص\s*[.!؟?،]*\s*$/.test(text.replace(/ـ/g, "")) && C.licText) {
+    try { await C.getSock().sendMessage(m.key.remoteJid, { text: C.licText() }, { quoted: m }); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "المساعد: قائمة التراخيص"); }
+    return;
+  }
   S.log.push({ id, at, by, phone, team: team || "", text: text.slice(0, 2000), kind, quoted, qid, key: { remoteJid: m.key.remoteJid, id, participant: m.key.participant || undefined }, fresh: true });
   S.log.sort((a, b) => a.at - b.at);
   save();

@@ -22,7 +22,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.17.0";
+const VERSION = "2.17.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1218,7 +1218,7 @@ async function main() {
     ports.forEach((pt, i) => { const sv = i ? http.createServer(globalThis.__sabaHttp.listeners("request")[0]) : globalThis.__sabaHttp; sv.requestTimeout = 15 * 60e3; sv.on("error", e => log.warn({ err: String(e?.message || e), pt }, "سيرفر")); sv.listen(pt, () => log.info({ port: pt }, "سيرفر البانوراما شغّال")); });
   }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
-  initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage });
+  initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage, licText: () => LIC?.groupText() || "" });
   LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin }); setAssist(LIC.ext);   // (2.17.0) التراخيص
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)
