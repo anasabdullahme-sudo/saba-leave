@@ -303,42 +303,55 @@
   const SKIP_DEP = /جلد|طبيعي|تغذي|بيوتي|تجميل/;
   let av = null, avBox = null, avOpen = "", avSig = "", avAnchor = null;
   const short = n => String(n || "").split(/\s*[–-]\s*/)[0].trim();
+  // (1.10.1) مكانه: فوق زر «فواتير ملغاة» (سطر عنوان «كشف جديد») — سطر واحد، بعيد عن الأزرار
   function findAnchor() {
     if (avAnchor && document.documentElement.contains(avAnchor) && avAnchor.getBoundingClientRect().width) return avAnchor;
     avAnchor = null;
-    for (const cb of document.querySelectorAll("input[type=checkbox]")) {
-      const lab = cb.closest("label") || (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.parentElement;
-      if (lab && norm(lab.textContent) === "موعد") { avAnchor = lab; break; }
-    }
-    if (!avAnchor) for (const el of document.querySelectorAll("label, span, b, strong")) if (norm(el.textContent) === "موعد" && el.children.length < 3) { avAnchor = el; break; }
+    for (const el of document.querySelectorAll("a, button, .btn, li, span"))
+      if (norm(el.textContent) === "فواتير ملغاه" && el.getBoundingClientRect().width < 260) { avAnchor = el.closest("a, button, .btn") || el; break; }
     return avAnchor;
   }
+  const SHORT_DEP = [[/انف|اذن|حنجر/, "الأنف والأذن"], [/نساء|ولاده/, "النساء"], [/مسالك/, "المسالك"], [/اسره|عائل/, "طب الأسرة"], [/طبيب العام|طب عام/, "الطبيب العام"]];
+  const depLabel = n => { const k = norm(n); const hit = SHORT_DEP.find(([re]) => re.test(k)); return hit ? hit[1] : short(n); };
   function ensureAv() {
     if (av && document.documentElement.contains(av)) return;
     document.getElementById("saba-athir-avail")?.remove();
     av = document.createElement("div"); av.id = "saba-athir-avail";
     av.style.cssText = "all:initial;position:fixed;z-index:1030;display:none";
     const root = av.attachShadow({ mode: "open" });
-    const CSS = `.w{direction:rtl;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;width:380px;text-align:right}
-      .chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-      .t{font-size:12px;font-weight:700;color:#0077A8;margin-inline-end:2px}
-      .c{font:600 11.5px inherit;font-family:inherit;border:1px solid #9BB3C4;border-radius:99px;padding:2px 9px;background:#fff;color:#1d2a36;cursor:pointer}
+    const CSS = `.w{direction:rtl;font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif;text-align:right;position:relative}
+      .chips{display:flex;flex-wrap:nowrap;gap:4px;align-items:center;white-space:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding:1px 0}
+      .chips::-webkit-scrollbar{display:none}
+      .t{font-size:11.5px;font-weight:700;color:#0077A8;margin-inline-end:2px;flex:none}
+      .c{flex:none;font:600 11px inherit;font-family:inherit;border:1px solid #9BB3C4;border-radius:99px;padding:2px 9px;background:#fff;color:#1d2a36;cursor:pointer}
       .c:hover{border-color:#00A6E2}.c.on{background:#00A6E2;color:#fff;border-color:#00A6E2}
-      .list{margin-top:5px;max-width:300px;background:#fff;border:1px solid #00A6E2;border-radius:8px;box-shadow:0 8px 20px -8px rgba(0,55,101,.45);padding:2px 9px}
+      .list{position:absolute;top:calc(100% + 5px);min-width:230px;max-width:320px;background:#fff;border:1px solid #00A6E2;border-radius:8px;box-shadow:0 8px 20px -8px rgba(0,55,101,.45);padding:2px 9px}
       .r{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid #E1E9EF}.r:last-child{border:0}
       .r b{font-weight:600;color:#1d2a36}.r span{color:#5B7690;white-space:nowrap}
       .none{font-size:11.5px;color:#5B7690}`;
     try { const sh = new CSSStyleSheet(); sh.replaceSync(CSS); root.adoptedStyleSheets = [sh]; root.innerHTML = '<div class="w"></div>'; } catch { root.innerHTML = `<style>${CSS}</style><div class="w"></div>`; }
     avBox = root.querySelector(".w");
     avBox.addEventListener("click", e => { const b = e.target.closest?.("[data-dep]"); if (!b) return; avOpen = avOpen === b.dataset.dep ? "" : b.dataset.dep; avSig = ""; availTick(); });
+    avBox.addEventListener("wheel", e => { const c = avBox.querySelector(".chips"); if (!c || c.scrollWidth <= c.clientWidth) return; c.scrollLeft += (e.deltaY || e.deltaX); e.preventDefault(); avSig = avSig.replace(/\|L.*$/, ""); placeList(); }, { passive: false });
     document.documentElement.append(av);
   }
   addEventListener("click", e => { if (avOpen && av && !e.composedPath().includes(av)) { avOpen = ""; avSig = ""; availTick(); } }, true);
+  // القائمة تحت التخصص المفتوح (داخل حدود الصندوق)
+  function placeList() {
+    const L = avBox?.querySelector(".list"), b = avBox?.querySelector(".c.on"); if (!L || !b) return;
+    const wr = avBox.getBoundingClientRect(), br = b.getBoundingClientRect();
+    L.style.right = Math.max(0, Math.min(wr.right - br.right, wr.width - L.offsetWidth)) + "px";
+  }
   function availTick() {
     if (!isExam() || !board) { if (av) av.style.display = "none"; return; }
     const a = findAnchor(); if (!a) { if (av) av.style.display = "none"; return; }
     const ar = a.getBoundingClientRect();
     if (!ar.width || covered(null)) { if (av) av.style.display = "none"; return; }
+    // المساحة: من طرف «فواتير ملغاة» اليمين لين بداية الصندوق اللي فيه الصفحة (بعد علامتي التصغير/الإغلاق)
+    const box = a.closest(".portlet, .panel, .box, .card, .x_panel, .ibox, section") || null, bl = box ? box.getBoundingClientRect().left : 0;
+    const leftLimit = Math.max(4, bl + 60), width = Math.min(900, ar.right - leftLimit);
+    const H = 24, top = ar.top - H - 8;
+    if (width < 180 || top < 2) { if (av) av.style.display = "none"; return; }   // ما فيه مكان → نختفي ولا نغطي الأزرار
     ensureAv();
     const t = nowR(), groups = [];
     for (const dep of board.departments || []) {
@@ -349,17 +362,18 @@
     if (avOpen && !groups.some(g => g.id === avOpen)) avOpen = "";
     const sig = t.m + "|" + avOpen + "|" + groups.map(g => g.id + ":" + g.here.map(d => d.id).join(",")).join(";");
     if (sig !== avSig) {
+      const keep = avBox.querySelector(".chips")?.scrollLeft || 0;
       avSig = sig;
       const fl = d => board.floorNames?.[d.fl] || FLOOR_DEF[d.fl] || (d.fl ? "الدور " + d.fl : "");
       const open = groups.find(g => g.id === avOpen);
-      avBox.innerHTML = `<div class="chips"><span class="t">👨‍⚕️ المتواجدين الحين:</span>${groups.length ? groups.map(g => `<button class="c${g.id === avOpen ? " on" : ""}" data-dep="${esc(g.id)}">${esc(short(g.name))}${g.id === avOpen ? " ▾" : ""}</button>`).join("") : '<span class="none">ما فيه أحد متواجد الحين</span>'}</div>`
+      avBox.innerHTML = `<div class="chips"><span class="t">👨‍⚕️ المتواجدين الحين:</span>${groups.length ? groups.map(g => `<button class="c${g.id === avOpen ? " on" : ""}" data-dep="${esc(g.id)}">${esc(depLabel(g.name))}${g.id === avOpen ? " ▾" : ""}</button>`).join("") : '<span class="none">ما فيه أحد متواجد الحين</span>'}</div>`
         + (open ? `<div class="list">${open.here.map(d => `<div class="r"><b>د. ${esc(short(d.name))}</b><span>${esc([fl(d), d.room ? "عيادة " + d.room : ""].filter(Boolean).join(" · "))}</span></div>`).join("")}</div>` : "");
+      const c = avBox.querySelector(".chips"); if (c) c.scrollLeft = keep;
     }
     av.style.display = "block";
-    const w = av.offsetWidth || 380;
-    let left = ar.left - w - 10, top = ar.top - 4;
-    if (left < 4) { left = Math.max(4, ar.right - w); top = ar.bottom + 6; }    // ما فيه مكان يسار «موعد» → تحتها
-    av.style.left = left + "px"; av.style.top = Math.max(4, top) + "px";
+    avBox.style.width = width + "px";
+    av.style.left = (ar.right - width) + "px"; av.style.top = top + "px";
+    placeList();
   }
 
   const alive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
