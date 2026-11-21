@@ -99,6 +99,8 @@ th{font-size:12px;color:var(--muted);font-weight:600;text-align:right;padding:8p
 td{padding:9px 12px;border-top:1px solid #EDF4F9;vertical-align:top}
 td.nm{font-weight:600}
 td .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
+td .today-sh{display:block;color:var(--blue);font-weight:700}
+td .sub.tmp{color:#b45309}
 .num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-inline-end:6px;vertical-align:1px;background:#C9D6E0}
 .dot.on{background:var(--ok)}.dot.vac{background:var(--amber)}
@@ -313,6 +315,17 @@ const shTxt = l => l.map(s => `${hm(s.s)} – ${hm(s.e)}`).join("  و  ");
 // دوام مختلف لأيام معيّنة (مثلاً الأحد والأربعاء 9ص–1م)
 const shiftsFor = (d, wd) => d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []);
 const shiftTxt = d => ((d.shifts || []).length ? shTxt(d.shifts) : "الدوام ما تحدد") + (d.alt?.days?.length ? ` · ${WEEK.filter(i => d.alt.days.includes(i)).map(i => WD[i]).join(" و")}: ${shTxt(d.alt.shifts || []) || "—"}` : "");
+// (2.19.0) الجدول مربوط: دوام اليوم من القروب يطلع في عمود الدوام، والدوام المؤقت مكتوب لين متى
+const dmS = iso => iso ? iso.slice(8, 10) + "/" + iso.slice(5, 7) : "";
+const docName = id => { for (const p of S.board?.departments || []) for (const x of p.doctors || []) if (x.id === id) return String(x.name).split(" –")[0]; return ""; };
+function shiftCell(d, t) {
+  const s = stOf(d), base = esc(shiftTxt(d));
+  let h = base;
+  if (s && s.kind === "starts" && s.from != null) h = `<b class="today-sh">اليوم: ${hm(s.from)}${s.until != null ? " – " + hm(s.until) : ""}</b><span class="sub">الثابت: ${base}</span>`;
+  else if (s && s.kind === "present" && s.until != null) h = `<b class="today-sh">اليوم لين ${hm(s.until)}</b><span class="sub">الثابت: ${base}</span>`;
+  const tp = d.tmp ? (d.tmp.until ? `مؤقت لين ${dmS(d.tmp.until)}` : d.tmp.back ? `مؤقت لين يرجع د. ${docName(d.tmp.back) || "—"}` : "مؤقت") : "";
+  return h + (tp ? `<span class="sub tmp">⏳ ${esc(tp)}${d.tmp?.base?.shifts?.length ? " · بعدها " + esc(shTxt(d.tmp.base.shifts)) : ""}</span>` : "");
+}
 const daysTxt = w => { const k = WEEK.filter(i => w.includes(i)); return k.length === 6 ? "السبت – الخميس" : k.map(i => WD[i]).join("، ") || "—"; };
 const prevDay = wd => (wd + 6) % 7;
 // متواجد الحين؟ (الشفت اللي يعدّي نص الليل يحسب على يوم بدايته)
@@ -462,7 +475,7 @@ function render() {
       ${g.items.map(d => { const vac = onVacation(d, t.iso), on = !vac && liveOn(d, t), ch = chip(d, t);
         return `<tr><td class="nm"><i class="dot ${vac ? "vac" : on ? "on" : ""}"></i>د. ${esc(d.name)}${vac ? ' <span class="tag amber">إجازة</span>' : ch || (on ? ' <span class="tag green">متواجد</span>' : "")}${vac ? "" : soonVac(d, t)}${S.by === "floor" && d.dep.notes ? `<span class="sub">${esc(d.dep.notes)}</span>` : ""}</td>
         <td data-l="${S.by === "floor" ? "القسم" : "الدور"}">${esc(S.by === "floor" ? d.dep.name : floorName(d.fl))}</td>
-        <td class="num" data-l="الدوام">${esc(shiftTxt(d))}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}${d.away && Object.keys(d.away).length ? `<span class="sub">${WEEK.filter(i => d.away[i]).map(i => `${WD[i]}: فرع ${esc(d.away[i])}`).join(" · ")}</span>` : ""}</td>
+        <td class="num" data-l="الدوام">${shiftCell(d, t)}</td><td data-l="الأيام">${esc(daysTxt(d.workdays))}${d.away && Object.keys(d.away).length ? `<span class="sub">${WEEK.filter(i => d.away[i]).map(i => `${WD[i]}: فرع ${esc(d.away[i])}`).join(" · ")}</span>` : ""}</td>
         <td class="num" data-l="غرفة">${esc(d.room || "—")}</td><td class="num" data-l="تحويلة">${esc(d.ext || "—")}</td><td class="num" data-l="كشفية">${d.fee ? esc(d.fee) + " ريال" : "—"}</td>
         ${S.edit ? `<td class="edit-col"><button class="mini" data-doc="${esc(d.id)}">تعديل</button></td>` : ""}</tr>`; }).join("")}
       </tbody></table></section>`;
@@ -554,6 +567,7 @@ $("#dSave").onclick = async () => {
     const p = b.departments.find(x => x.id === depId);
     const nd = { ...(old || {}), id, ...rec, floor: fl !== p.floor ? fl : "" };
     if (altDays.length) nd.alt = { days: altDays, shifts: altShifts }; else delete nd.alt;
+    if (old?.tmp && JSON.stringify((old.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(shifts.map(x => [x.s, x.e]))) delete nd.tmp;   // عدّلت الدوام بيدك → ما عاد مؤقت
     p.doctors.push(nd);
     return b;
   }, `${editDoc.id ? "عدّل" : "أضاف"} د. ${name}`);

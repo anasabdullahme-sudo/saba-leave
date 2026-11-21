@@ -1,7 +1,8 @@
 // قروب «For information saba 1»: البوت يقرأ رسايل الاستقبال عن الأطباء (وقف، فاضي، غائب، متأخر…)
 // ويحدّث صفحة أطباء البوادي + يطلع تنبيه في كروم. ما يكتب أي رد في القروب — بس ✅ على الرسالة اللي فهمها.
 import { FieldValue } from "firebase-admin/firestore";
-import { initBrain, handle as brainHandle, noteOut, bootFixes } from "./brain.js";
+import { initBrain, handle as brainHandle, noteOut, bootFixes, setAssist } from "./brain.js";
+import { initShifts } from "./shifts.js";
 
 const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
@@ -31,6 +32,8 @@ export function initGroup(opts) {
   db.doc("bot/group_log").get().then(d => { gLog.unshift(...(d.data()?.items || []).filter(g => Date.now() - g.at < 48 * 3600e3)); }).catch(() => {});
   initBrain({ db, log, getSock, gemini, models, FieldValue, docs, getBoard: () => board, getToday: () => today, groupLog: () => gLog, shortName, norm, hm, hhmm, nowR, isoPlus, uid, findDep,
     apply, updateSchedules, endVacations, removeDoctor, restorePrev, applyOption, addDoctor, askAdmin, aiParse, dmAdmin, setReports: on => { reportsOn = on; db.doc("bot/prefs").set({ reports: on }, { merge: true }).catch(() => {}); } });
+  // (2.19.0) المؤقت يرجع لحاله، سؤال الرجوع من الإجازة، وجدول الجمعة كل خميس
+  setAssist(initShifts({ db, log, FieldValue, docs, getBoard: () => board, nowR, isoPlus, hm, hhmm, shortName, norm, uid, dmAdmin, updateSchedules, ready: () => !!board && !!getSock()?.user && admins.length > 0 }).ext);
   // تصحيحات 7/11: بعد ما يتصل واتساب ويوصل الجدول (عشان التقرير يوصل لأنس)
   let tries = 0; const go = setInterval(() => { if (++tries > 120) return clearInterval(go); if (!board || !getSock()?.user || !admins.length) return; clearInterval(go); bootFixes().catch(e => log.warn({ err: String(e?.message || e) }, "تصحيحات 7/11")); }, 5000);
 }
@@ -468,7 +471,7 @@ async function resetExpired() {
 
 async function apply(evs, ctx) {
   const t = nowR(), applied = [];
-  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [], asks = [], hourAsks = [];
+  const inbox = [], vacs = [], upd = [], newDocs = [], plans = [], backs = [], leavers = [], heres = [], asks = [], hourAsks = [], durAsks = [];
   await db.runTransaction(async tx => {
     const ref = db.doc("board/bawadi_today");
     const cur = fresh((await tx.get(ref)).data(), t.iso);
@@ -578,7 +581,7 @@ async function apply(evs, ctx) {
         const raw = e.kind === "leaves_at" ? (toMin(e.at_time) ?? toMin(e.until_time)) : toMin(e.until_time), sh0 = shiftsOn(d, t.wd)[0];
         if (raw != null && sh0) {
           let u = fitMin(raw, d, t.wd); if (u <= sh0.s && u + 1440 - sh0.s < 720) u += 1440;   // دوام يعدّي نص الليل
-          e.kind = "starts_at"; atMin = sh0.s; untilMin = u;
+          e.kind = "starts_at"; atMin = sh0.s; untilMin = u; e.__conv = true;
         }
       }
       const name = d ? shortName(d.name) : e.name, dep = d ? d.dep : (e.dept || "");
@@ -611,7 +614,9 @@ async function apply(evs, ctx) {
       }
       else if (e.kind === "starts_at") { const ap = cur.scheduled.find(x => x.key === key && x.kind === "appt"); cur.st[key] = { kind: "starts", from: atMin, until: untilMin, at, by: ctx.by, ...(ap ? { apptFrom: ap.min } : {}) };
         if (untilMin != null && untilMin > t.m && untilMin < 1440) { cur.scheduled = cur.scheduled.filter(x => !(x.key === key && x.kind === "off")); cur.scheduled.push({ id: uid(), min: untilMin, key, kind: "off", name, dep, by: ctx.by }); }   // بعد نهايته: «غير متواجد»
-        info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : ""; }
+        info = atMin != null ? `اليوم من ${hm(atMin)}${untilMin != null ? " إلى " + hm(untilMin) : ""}` : "";
+        // (2.19.0) «د أكرامي من 12 لين 8» بدون اليوم/ثابت/مدة → انطبق على اليوم، ونسأل أنس لمدة كم (اليوم بس / بكرة / ثابت / مدة)
+        if (d && !e.__conv && atMin != null && untilMin != null && !ctx.confirmed && !ctx.fix && !ctx.planned && !ctx.admin && !ctx.exact && admins.length && !noDurAsk(ctx.text) && !durAsks.some(x => x.d.id === d.id)) durAsks.push({ d, from: atMin % 1440, until: untilMin % 1440 }); }
       else if (e.kind === "present") {
         cur.st[key] = { kind: "present", until: untilMin, at, by: ctx.by }; info = untilMin != null ? `موجود لين ${hm(untilMin)}` : "";
         // (2.9.13) «موجود الحين» وهو برا دوامه بالجدول (لسى ما بدا / خلص / ما عنده دوام اليوم) → نسأل المسؤول من كم لكم دوامه اليوم
@@ -659,6 +664,10 @@ async function apply(evs, ctx) {
   for (const x of leavers) await askRemove(x.d, x.e, ctx);
   for (const a of asks) await askOptions(a, ctx).catch(err => log.warn({ err: String(err?.message || err) }, "خيارات الدوام"));
   for (const a of hourAsks) await askHours(a, ctx).catch(err => log.warn({ err: String(err?.message || err) }, "سؤال الدوام"));
+  if (durAsks.length && durAsks.length <= 3) for (const a of durAsks) await askDur(a, ctx).catch(err => log.warn({ err: String(err?.message || err) }, "سؤال المدة"));
+  else if (durAsks.length) await dmAdmin(`ℹ️ ${ctx.by} كتب دوام ${durAsks.length} أطباء في القروب بدون ما يقول اليوم ولا ثابت — طبّقته على اليوم بس.
+${durAsks.map(x => `• د. ${shortName(x.d.name)}: ${hm(x.from)} – ${hm(x.until)}`).join("\n")}
+لو فيه شي ثابت أو لمدة قل لي.`);
   for (const x of newDocs) await askAdmin(x, ctx);
   return applied;
 }
@@ -692,23 +701,56 @@ function buildOptions(d, e, text, t) {
   opts.push({ label: `كل أيامه (${wd.map(i => DAYN[i]).join("، ")}) صارت ${T(shifts)}`, act: { type: "set", shifts } });
   if (named.length >= 2 && JSON.stringify(named.slice().sort()) !== JSON.stringify(wd)) opts.push({ label: `أيام دوامه صارت ${named.map(i => DAYN[i]).join("، ")} بس · ${T(shifts)}`, act: { type: "setdays", days: named, shifts } });
   if (PERMANENT.test(n) && !EVERY.test(n)) { const i = opts.findIndex(o => o.act.type === "set"); if (i > 0) opts.unshift(...opts.splice(i, 1)); }   // «دائم/من الحين» → الكل أول
+  if (!named.length) for (const mate of vacMates(d, fut || t.iso)) opts.push({ label: mateLabel(mate), act: { type: "tmp", shifts, back: mate.d.id } });
   opts.push({ label: "ولا شي — تجاهلها", act: { type: "none" } });
+  opts.__dur = { shifts, start: fut || t.iso };
   return opts;
 }
 async function askOptions({ d, e }, ctx) {
   const t = nowR(), opts = buildOptions(d, e, ctx.text, t);
   if (!opts) { if (ctx.m) await askClarify(ctx.m, ctx.text, ctx.by, Object.assign([e], { question: `ما فهمت وقت الدوام الجديد لد. ${shortName(d.name)} — اكتبه لي` })); return; }
   const code = "S" + code3().slice(0, 2);
-  const item = { code, at: Date.now(), text: ctx.text.slice(0, 600), by: ctx.by, doctorId: d.id, name: shortName(d.name), opts, key: ctx.m?.key ? { remoteJid: ctx.m.key.remoteJid, id: ctx.m.key.id, participant: ctx.m.key.participant || "" } : null };
+  const item = { code, at: Date.now(), text: ctx.text.slice(0, 600), by: ctx.by, doctorId: d.id, name: shortName(d.name), opts: [...opts], dur: opts.__dur || null, key: ctx.m?.key ? { remoteJid: ctx.m.key.remoteJid, id: ctx.m.key.id, participant: ctx.m.key.participant || "" } : null };
   const ref = db.doc("bot/pending_clarify");
   await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: [...(c.items || []).filter(i => Date.now() - i.at < 24 * 3600e3), item].slice(-20) }); });
   const nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"];
-  await dmAdmin([`🤔 ${ctx.by} كتب في القروب:  #${code}`, `«${ctx.text.slice(0, 300)}»`, "", `د. ${shortName(d.name)} — وش المقصود؟`, ...opts.map((o, i) => `${nums[i] || i + 1 + "."} ${o.label}`), "", "رد برقم الخيار، أو اكتب الصح بكلامك."].join("\n"));
+  await dmAdmin([`🤔 ${ctx.by} كتب في القروب:  #${code}`, `«${ctx.text.slice(0, 300)}»`, "", `د. ${shortName(d.name)} — وش المقصود؟`, ...opts.map((o, i) => `${nums[i] || i + 1 + "."} ${o.label}`), "", "رد برقم الخيار، أو اكتب الصح بكلامك.", DUR_HINT].join("\n"));
+}
+// (2.19.0) زميل بنفس القسم عليه إجازة ذاك اليوم → خيار «لين يرجع د. فلان»
+function vacMates(d, iso) {
+  const out = [];
+  for (const x of docs()) {
+    if (x.id === d.id || x.dep !== d.dep) continue;
+    const v = (board?.vacations || []).find(v => (v.doctorId === x.id || (x.code && String(v.code) === String(x.code))) && v.start <= iso && (!v.end || v.end >= iso));
+    if (v) out.push({ d: x, ret: v.end ? isoPlus(v.end, 1) : "" });
+  }
+  return out.slice(0, 2);
+}
+const mateLabel = m => `لين يرجع د. ${shortName(m.d.name)}${m.ret ? ` (يرجع ${DAYN[new Date(m.ret + "T12:00:00Z").getUTCDay()]} ${dm(m.ret)})` : " (إجازته مفتوحة)"}`;
+const DUR_HINT = "أو اكتب المدة: أسبوع / 3 أيام / لين 30/11 / من الأحد لين الخميس / لين يرجع د. فلان";
+const noDurAsk = text => { const n = norm(text); return TODAYW.test(n) || !!dayOf(text) || !!textDay(text) || PERMANENT.test(n) || EVERY.test(n) || /(^|\s)(الحين|الان|بس|فقط|مؤقت|مؤقتا|يغطي|تغطي|تغطيه|بدال|بدل|عن)(\s|$)/.test(n); };
+async function askDur({ d, from, until }, ctx) {
+  const t = nowR(), tm = isoPlus(t.iso, 1), shifts = [{ s: from, e: until }];
+  const opts = [{ label: "اليوم بس (طبّقته)", act: { type: "keep" } }, { label: `بكرة ${DAYN[new Date(tm + "T12:00:00Z").getUTCDay()]} كمان`, act: { type: "plan", date: tm, at: hhmm(from), until: hhmm(until) } }, { label: "ثابت (كل أيامه)", act: { type: "set", shifts } }];
+  for (const mate of vacMates(d, t.iso)) opts.push({ label: mateLabel(mate), act: { type: "tmp", shifts, back: mate.d.id } });
+  const code = "S" + code3().slice(0, 2);
+  const item = { code, at: Date.now(), text: ctx.text.slice(0, 600), by: ctx.by, doctorId: d.id, name: shortName(d.name), opts, dur: { shifts, start: t.iso }, key: ctx.m?.key ? { remoteJid: ctx.m.key.remoteJid, id: ctx.m.key.id, participant: ctx.m.key.participant || "" } : null };
+  const ref = db.doc("bot/pending_clarify");
+  await db.runTransaction(async tx => { const c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: [...(c.items || []).filter(i => Date.now() - i.at < 24 * 3600e3), item].slice(-20) }); });
+  const nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"];
+  await dmAdmin([`🤔 ${ctx.by} كتب في القروب:  #${code}`, `«${ctx.text.slice(0, 300)}»`, "", `د. ${shortName(d.name)} — ${hm(from)} – ${hm(until)}: طبّقته على اليوم. لمدة كم؟`, ...opts.map((o, i) => `${nums[i]} ${o.label}`), DUR_HINT].join("\n"));
 }
 async function applyOption(it, o) {
   const d = docs().find(x => x.id === it.doctorId); if (!d) return { ok: false, why: "الدكتور ما عاد موجود في الجدول" };
   const a = o.act, by = it.by + " (اختيار المسؤول)";
   if (a.type === "none") return { ok: true, none: true };
+  if (a.type === "keep") return { ok: true };
+  if (a.type === "tmp") {
+    await updateSchedules([{ d, sch: { days: [], shifts: a.shifts, tmp: { from: nowR().iso, until: a.until || "", back: a.back || "" } } }], { by });
+    await new Promise(r => setTimeout(r, 1200));
+    const b = (await db.doc("board/bawadi").get()).data(), x = (b?.departments || []).flatMap(p => p.doctors || []).find(y => y.id === d.id);
+    return { ok: !!x?.tmp && JSON.stringify((x.shifts || []).map(y => [y.s, y.e])) === JSON.stringify(a.shifts.map(y => [y.s, y.e])) };
+  }
   if (a.type === "alt" || a.type === "set" || a.type === "setdays") {
     const sch = a.type === "alt" ? { days: a.days, shifts: a.shifts, altOnly: true } : a.type === "set" ? { days: [], shifts: a.shifts } : { days: a.days, shifts: a.shifts };
     await updateSchedules([{ d, sch }], { by });
@@ -728,7 +770,8 @@ async function applyOption(it, o) {
 }
 
 /* ---------- تعديل دوام طبيب موجود (من القروب) ---------- */
-const schedTxt = sch => [sch.days?.length ? sch.days.map(i => DAYN[i]).join("، ") : "", sch.shifts ? sch.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") : ""].filter(Boolean).join(" · ");
+const tmpTxt = tp => !tp ? "" : tp.until ? `مؤقت لين ${tp.until.slice(8, 10)}/${tp.until.slice(5, 7)}` : tp.back ? `مؤقت لين يرجع د. ${shortName(docs().find(x => x.id === tp.back)?.name || "—")}` : "مؤقت";
+const schedTxt = sch => [sch.days?.length ? sch.days.map(i => DAYN[i]).join("، ") : "", sch.shifts ? sch.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") : "", tmpTxt(sch.tmp)].filter(Boolean).join(" · ");
 async function updateSchedules(list, ctx) {
   const done = [];
   await db.runTransaction(async tx => {
@@ -746,8 +789,12 @@ async function updateSchedules(list, ctx) {
         } else t.alt = { days: [...new Set([...(t.alt?.days || []), ...sch.days])].sort((x, y) => x - y), shifts: sch.shifts };
         done.push({ name: shortName(t.name), sch }); continue;
       }
+      // (2.19.0) دوام مؤقت: نحفظ الدوام الثابت (أول مرة بس) ويرجع له لحاله لما تخلص المدة. أي تغيير ثابت بعدها يشيل «مؤقت»
+      if (sch.tmp) { const base = t.tmp?.base || { shifts: t.shifts || [], workdays: t.workdays || [], ...(t.alt ? { alt: t.alt } : {}) }; t.tmp = { base, from: sch.tmp.from || nowR().iso, until: sch.tmp.until || "", back: sch.tmp.back || "", by: ctx.by || "", at: Date.now() }; }
+      else if (sch.shifts || sch.days?.length) delete t.tmp;
       if (sch.days?.length) t.workdays = sch.days;
       if (sch.shifts) { t.shifts = sch.shifts; delete t.alt; }
+      if ("alt" in sch) { if (sch.alt) t.alt = sch.alt; else delete t.alt; }      // (2.19.0) رجوع لدوام ما قبل الإجازة (مع الأيام المختلفة)
       for (const f of ["room", "ext", "fee"]) if (sch[f]) t[f] = sch[f];
       done.push({ name: shortName(t.name), sch });
     }

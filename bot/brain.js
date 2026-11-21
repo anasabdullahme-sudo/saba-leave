@@ -7,10 +7,13 @@
 let A = null;                                   // أدوات group.js (تنمرّر من initBrain)
 const chat = [];                                // آخر كلامنا {role: user|model, text, at}
 let saveT = null, proposal = null;              // اقتراح ينتظر موافقته
+let durQ = null;                                // (2.19.0) تغيير دوام ينتظر «لمدة كم؟»
 const EXT = [];                                 // (2.16.0) مساعد قروب الشكاوي (assist.js) + (2.17.0) التراخيص (licenses.js)
 export function setAssist(api) { if (api && !EXT.includes(api)) EXT.push(api); }
 const AS = { block: () => EXT.map(e => e.block()).join(""), checkAct: a => { for (const e of EXT) { const w = e.checkAct(a); if (w != null) return w; } return null; },
-  describeAct: a => { for (const e of EXT) { const x = e.describeAct(a); if (x) return x; } return null; }, act: async a => { for (const e of EXT) { const r = await e.act(a); if (r) return r; } return null; } };
+  describeAct: a => { for (const e of EXT) { const x = e.describeAct(a); if (x) return x; } return null; }, act: async a => { for (const e of EXT) { const r = await e.act(a); if (r) return r; } return null; },
+  pre: async x => { for (const e of EXT) if (e.pre) { const r = await e.pre(x); if (r) return r; } return null; },          // (2.19.0) رد على سؤال (رجوع من إجازة) قبل الذكاء
+  after: async acts => { for (const e of EXT) if (e.after) await e.after(acts).catch(() => {}); } };
 
 export function initBrain(api) {
   A = api;
@@ -18,12 +21,13 @@ export function initBrain(api) {
     const old = (d.data()?.msgs || []).filter(x => Date.now() - x.at < 24 * 3600e3);
     chat.unshift(...old); chat.sort((a, b) => a.at - b.at); trim();
     proposal = d.data()?.proposal && Date.now() - d.data().proposal.at < 6 * 3600e3 ? d.data().proposal : null;
+    durQ = d.data()?.durQ && Date.now() - d.data().durQ.at < 24 * 3600e3 ? d.data().durQ : null;
   }).catch(() => {});
 }
 const trim = () => { while (chat.length > 24) chat.shift(); };
 function persist() {
   clearTimeout(saveT);
-  saveT = setTimeout(() => A.db.doc("bot/admin_chat").set({ msgs: chat.slice(-24), proposal: proposal || null, at: Date.now() }).catch(() => {}), 3000);
+  saveT = setTimeout(() => A.db.doc("bot/admin_chat").set({ msgs: chat.slice(-24), proposal: proposal || null, durQ: durQ || null, at: Date.now() }).catch(() => {}), 3000);
 }
 // كل رسالة تطلع لأنس (تقارير، أسئلة، ردود) تنحفظ في المحادثة عشان الذكاء يعرف وش قال البوت
 export function noteOut(text) { chat.push({ role: "model", text: String(text).slice(0, 1500), at: Date.now() }); trim(); persist(); }
@@ -107,7 +111,11 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - في reply قل وش فهمت بالضبط (الطبيب، اليوم والتاريخ، الوقت) ووش بتسوي — بصيغة المستقبل («بعدّل…»، «بحط…»)، مو الماضي، لأن التنفيذ يصير بعد ردك.
 - قبل أي فعل شيك على حالات اليوم والخطط والجدول: لو الشي المطلوب موجود أصلاً قل له إنه موجود وبدون أفعال.
 - «فقط/بس السبت» أو «هذا السبت» أو يوم معيّن بدون «كل/دائم/ثابت» = يوم واحد (status)، مو دوام ثابت.
-- الشي واضح؟ حط الأفعال في actions وطبّق على طول. مو متأكد من شي يغيّر النتيجة (مين الطبيب، أي يوم، الوقت، ليوم واحد ولا دائم)؟ اسأله سؤال واحد واضح و actions فاضية.
+- الشي واضح؟ حط الأفعال في actions وطبّق على طول. مو متأكد من شي يغيّر النتيجة (مين الطبيب، أي يوم، الوقت)؟ اسأله سؤال واحد واضح و actions فاضية.
+- (2.19.0) مدة تغيير الدوام: لو قال يوم معيّن (اليوم/بكرة/الإثنين) بدون ثابت → status. لكن «بداية من / ابتداءً من / اعتباراً من / من يوم الإثنين …» = بداية تغيير (schedule مع start_date)، مو يوم واحد. لو قال ثابت/دائم/كل يوم → schedule بدون end_date. لو قال مدة → schedule مع end_date (آخر يوم بالمؤقت: «أسبوع» من البداية = البداية+6، «3 أيام» = البداية+2، «لين 30/11» = 2026-11-30، «من الأحد لين الخميس» = start_date الأحد و end_date الخميس) أو until_return_of = doctor_id الطبيب اللي «لين يرجع/ترجع من إجازته». بعد المؤقت يرجع لدوامه الثابت لحاله.
+  ما قال مدة أبداً («د سارة من 5 لين 1»، «سيتم تغيير شفتها»)؟ لا تسأل أنت ولا تختار — حط schedule بدون end_date (و start_date لو قال «بداية من …») والنظام يسأله عن المدة بخيارات.
+- دوام بفترتين («من 11ص لين 2م و من 5:30م لين 10:30م») → shifts فيها الفترتين كل وحدة start_time و end_time (مو فترة وحدة). نفس دوامه المسجّل بالضبط؟ قل «نفس دوامه» وبدون أفعال.
+- «فلان نفس دوامه / بشفته الطبيعي» = ما يتغيّر شي (إلا لو هو في إجازة ويرجع → end_vacation).
 - تغيير كبير (دوام ثابت، إضافة/حذف طبيب، تراجع) وأنت فاهمه من كلامه الصريح → طبّق. لو فاهمه من استنتاجك أو من رسالة قروب محوّلة بس → confirm_first = true و actions = اللي بتسويه، واسأله «أطبّق؟».
 - لو عندك «اقتراح ينتظر موافقته» ووافق («ايوه/طبق/تمام») → use_proposal = true. لو عدّل عليه → اكتب الأفعال الجديدة كاملة.
 - سؤال (متى دوامه؟ ليش سويت كذا؟ وش صار؟) → جاوب من البيانات بس، بدون أفعال. لو أخطأت قبل، اعترف بجملة واقترح التصحيح.
@@ -125,7 +133,7 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 كل الأوقات في start_time / end_time / at_time بصيغة "HH:MM" أرقام إنجليزية 24 ساعة (مثل "12:00" و "20:00") — لا تحطها في reply بس، لازم في الحقول.
 - status: حالة ليوم واحد (اليوم أو يوم جاي خلال أسبوعين). kind واحد من: starts_at (دوام ذاك اليوم: start_time و end_time — الاثنين لازم)، present (موجود، end_time اختياري)، leaves_at (يطلع الساعة end_time)، late (يوصل الساعة at_time أو delay_minutes)، stop (وقف استقبال، at_time لو بوقت جاي)، free، appointments_only (at_time = من متى مواعيد فقط)، busy، absent_today (غير متواجد ذاك اليوم)، clear (يشيل حالة اليوم ويرجع لجدوله). date = YYYY-MM-DD.
 - cancel_plan: يلغي كل الخطط المحفوظة لطبيب في date.
-- schedule: دوام ثابت (start_time و end_time). mode = all_days (كل أيامه صارت هالوقت) / only_days (الأيام days بس بدوام مختلف، الباقي زي ما هو) / set_days (أيام دوامه صارت days بهالوقت). start_date لو يبدأ يوم جاي.
+- schedule: دوام ثابت أو مؤقت (start_time و end_time، أو shifts لو أكثر من فترة). mode = all_days (كل أيامه صارت هالوقت) / only_days (الأيام days بس بدوام مختلف، الباقي زي ما هو) / set_days (أيام دوامه صارت days بهالوقت). start_date لو يبدأ يوم جاي. مؤقت: end_date (آخر يوم) أو until_return_of (doctor_id).
 - info: room / ext / fee.
 - vacation: start_date و end_date (آخر يوم إجازة).
 - end_vacation: return_date = يوم المباشرة.
@@ -165,13 +173,14 @@ const SCHEMA = { type: "OBJECT", properties: {
   understood: { type: "STRING" },
   reply: { type: "STRING" }, confirm_first: { type: "BOOLEAN" }, use_proposal: { type: "BOOLEAN" },
   actions: { type: "ARRAY", items: { type: "OBJECT", properties: {
-    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list", "license_missing", "license_branch", "group_send"] },
+    type: { type: "STRING", enum: ["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "add_doctor", "move_doctor", "remove_doctor", "restore_doctor", "branch_day", "alias", "remove_alias", "pending_doctor", "option", "resolve", "undo", "reports", "complaint_add", "complaint_resolve", "complaint_reopen", "task_send", "task_done", "task_drop", "complaints_summary", "license_renew", "license_list", "license_missing", "license_branch", "group_send", "friday_unit", "friday_draft"] },
     text: { type: "STRING" }, how: { type: "STRING" }, patient: { type: "STRING" }, about: { type: "STRING" },
     doctor_id: { type: "STRING" }, kind: { type: "STRING" }, date: { type: "STRING" },
     start_time: { type: "STRING" }, end_time: { type: "STRING" }, until_next_day: { type: "BOOLEAN" }, at_time: { type: "STRING" }, delay_minutes: { type: "INTEGER" },
     mode: { type: "STRING" }, days: { type: "ARRAY", items: { type: "INTEGER" } }, start_date: { type: "STRING" }, end_date: { type: "STRING" }, return_date: { type: "STRING" },
     name: { type: "STRING" }, dept: { type: "STRING" }, room: { type: "STRING" }, ext: { type: "STRING" }, fee: { type: "STRING" }, alias: { type: "STRING" },
-    branch: { type: "STRING" }, clear: { type: "BOOLEAN" }, code: { type: "STRING" }, decision: { type: "STRING" }, n: { type: "INTEGER" }, on: { type: "BOOLEAN" } }, required: ["type"] } } },
+    branch: { type: "STRING" }, clear: { type: "BOOLEAN" }, code: { type: "STRING" }, decision: { type: "STRING" }, n: { type: "INTEGER" }, on: { type: "BOOLEAN" },
+    shifts: { type: "ARRAY", items: { type: "OBJECT", properties: { start_time: { type: "STRING" }, end_time: { type: "STRING" } } } }, until_return_of: { type: "STRING" } }, required: ["type"] } } },
   required: ["understood", "reply"], propertyOrdering: ["understood", "reply", "confirm_first", "use_proposal", "actions"] };
 
 async function callAI(system, contents, { models, temp = 0.3 } = {}) {
@@ -218,15 +227,22 @@ async function buildCtx() {
 // الأفعال من رد الذكاء + تعبئة الناقص من الكلام نفسه (الرسالة المقتبسة، ردّه، وفهمه)
 function prepActs(o, txt, quoted) {
   const R = [o.understood, o.reply].filter(Boolean).join("\n"), T2 = [quoted, txt].filter(Boolean).join("\n");
-  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt)));
+  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillShifts(a, T2)).map(a => fillBack(a)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt)));
 }
 
 export async function handle(m, text, { forwarded = false } = {}) {
   if (!A?.gemini) return false;
   const ci = m.message?.extendedTextMessage?.contextInfo || {};
   const q = ci.quotedMessage, quoted = (q?.conversation || q?.extendedTextMessage?.text || q?.imageMessage?.caption || "").trim();
-  const { system, pdocs, pclar } = await buildCtx();
   const user = (forwarded ? "[رسالة محوّلة من قروب الاستقبال]\n" : "") + (quoted ? `[يرد على: «${quoted.slice(0, 2500)}»]\n` : "") + text;
+  // (2.19.0) جواب على سؤال جاهز (المدة، الرجوع من الإجازة) → بدون الذكاء
+  if (!forwarded) {
+    const pr = await AS.pre({ text, quoted, lastOut: lastModel() }).catch(e => { A.log.warn({ err: String(e?.message || e) }, "رد سؤال"); return null; });
+    if (pr) { noteIn(user); await A.dmAdmin(pr.msg || "تمام."); return true; }
+    const dq = await durPre(text, quoted).catch(e => { A.log.warn({ err: String(e?.message || e) }, "رد المدة"); return null; });
+    if (dq) { noteIn(user); await A.dmAdmin(dq); return true; }
+  }
+  const { system, pdocs, pclar } = await buildCtx();
   const hist = chat.filter(x => Date.now() - x.at < 24 * 3600e3).slice(-16).map(x => ({ role: x.role, parts: [{ text: x.text }] }));
   while (hist.length && hist[0].role !== "user") hist.shift();
   const contents = []; for (const h of hist) { if (contents.length && contents[contents.length - 1].role === h.role) contents[contents.length - 1].parts[0].text += "\n" + h.parts[0].text; else contents.push(h); }
@@ -259,6 +275,19 @@ export async function handle(m, text, { forwarded = false } = {}) {
   let reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
   if (actions.length) for (const [a, b] of TENSE) reply = reply.replace(a, b);   // التنفيذ بعد الرد — ما نقول «عدّلت» قبل ما ينحفظ
   if (actions.some(a => a.type === "remove_doctor") && !out.use_proposal) out.confirm_first = true;   // (2.13.0) الحذف دايم بتأكيد
+  // (2.19.0) تغيير دوام بدون مدة (لا ثابت ولا يوم ولا مدة) → نسأله «لمدة كم؟» بخيارات بدل ما نطبّقه ثابت
+  let held = [];
+  if (!out.use_proposal) {
+    const ctxT = nn([quoted, text, ...chat.filter(x => x.role === "user" && Date.now() - x.at < 20 * 60e3).slice(-3).map(x => x.text)].join("\n"));
+    const dur = durOf(text, null);
+    actions = actions.map(a => {
+      if (a.type !== "schedule" || a.mode === "only_days" || ISO(a.end_date) || a.until_return_of || check(a)) return a;
+      if (dur) return { ...a, ...(dur.start && !ISO(a.start_date) ? { start_date: dur.start } : {}), ...(dur.until ? { end_date: dur.until } : {}), ...(dur.back ? { until_return_of: dur.back } : {}) };
+      const d = docOf(a.doctor_id);
+      if (PERMW.test(ctxT) || (d && !d.tmp && sameSh(shiftsOf(a), d.shifts))) return a;
+      held.push(a); return null;
+    }).filter(Boolean);
+  }
   if (out.confirm_first && actions.length && !out.use_proposal) {
     const bad = actions.map(a => check(a)).filter(Boolean);
     if (bad.length) { await A.dmAdmin(`${reply}\n\n⚠️ ${bad.join("\n⚠️ ")}`); return true; }
@@ -266,11 +295,98 @@ export async function handle(m, text, { forwarded = false } = {}) {
     await A.dmAdmin(`${reply}\n\nاللي بسويه لو وافقت:\n${proposal.summary}`);
     return true;
   }
-  if (!actions.length) { await A.dmAdmin(reply || "تمام."); return true; }
+  const ask = held.length ? askDurText(held) : "";
+  if (!actions.length) { await A.dmAdmin([reply || (ask ? "" : "تمام."), ask].filter(Boolean).join("\n\n")); return true; }
   proposal = null; persist();
   const lines = await execute(actions, pclar, pdocs);
-  await A.dmAdmin([reply, lines.join("\n")].filter(Boolean).join("\n\n"));
+  await A.dmAdmin([reply, lines.join("\n"), ask].filter(Boolean).join("\n\n"));
+  await AS.after(actions);
   return true;
+}
+const lastModel = () => [...chat].reverse().find(x => x.role === "model")?.text || "";
+
+/* ---------- (2.19.0) «لمدة كم؟» ---------- */
+const nn = s => lat(String(s || "")).replace(/[ً-ْ]/g, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").toLowerCase();
+const PERMW = /ثابت|دائم|دايم|كل يوم|كل الايام|كل ايام|على طول|من الحين وطالع|من اليوم وطالع|بشكل دائم|المعتاد|نهائي|للايام القادمه|الايام الجايه|الايام القادمه/;
+const WDW = [["احد", 0], ["اثنين", 1], ["ثلاثا", 2], ["اربعا", 3], ["خميس", 4], ["جمع", 5], ["سبت", 6]];
+const wdW = w => (WDW.find(([k]) => String(w || "").includes(k)) || [])[1];
+const nextOn = (wd, from) => A.isoPlus(from, (wd - new Date(from + "T12:00:00Z").getUTCDay() + 7) % 7);
+// المدة من كلام أنس → { start?, until? } أو { back } (لين يرجع د. فلان)
+function durOf(text, start) {
+  const s = nn(text); let m;
+  if ((m = /(لين|الين|الى|حتى|لغايه|لحد|ل)\s*(ما\s+)?(يرجع|ترجع|رجوع|عوده|يجي|تجي|يباشر|تباشر)\s+(من\s+\S+\s+)?(د\.?\s*|دكتور\S*\s+)?([\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+)?)/.exec(s))) {
+    const w = m[6].replace(/\s+(من|بعد|من اجازته|من اجازتها)$/, "");
+    const d = findDocLoose(w) || findDocLoose(w.split(" ")[0]); if (d) return { back: d.id };
+  }
+  const base = start || A.nowR().iso;
+  if (/(^|\s)اسبوعين/.test(s)) return { until: A.isoPlus(base, 13) };
+  if (/(^|\s)(لمده\s+)?اسبوع(\s|$)/.test(s)) return { until: A.isoPlus(base, 6) };
+  if (/(^|\s)(لمده\s+)?شهر(\s|$)/.test(s)) return { until: A.isoPlus(base, 29) };
+  if (/(^|\s)يومين(\s|$)/.test(s)) return { until: A.isoPlus(base, 1) };
+  if ((m = /(?<![\d\/:.-])(\d{1,2})\s*(ايام|يوم)(\s|$)/.exec(s)) && +m[1] > 0 && +m[1] <= 60) return { until: A.isoPlus(base, +m[1] - 1) };
+  for (const [w, k] of [["ثلاث", 3], ["ثلاثه", 3], ["اربع", 4], ["اربعه", 4], ["خمس", 5], ["خمسه", 5], ["ست", 6], ["سته", 6], ["سبع", 7], ["سبعه", 7], ["عشر", 10], ["عشره", 10]]) if (new RegExp(`(^|\\s)${w}\\s+(ايام|يوم)`).test(s)) return { until: A.isoPlus(base, k - 1) };
+  const ds = [...s.matchAll(/(?<![\d:])(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?(?![\d:])/g)].map(x => toISO(x[0])).filter(Boolean);
+  if (ds.length >= 2) return { start: ds[0], until: ds[1] };
+  if (ds.length === 1 && /(لين|الين|الى|حتى|لغايه|لحد)\s*(يوم\s+)?(\S+\s+)?\d/.test(s)) return { until: ds[0] };
+  if ((m = /من\s+(يوم\s+)?(\S+)\s+(لين|الين|الى|حتى)\s*(يوم\s+)?(\S+)/.exec(s)) && wdW(m[2]) != null && wdW(m[5]) != null) { const st = nextOn(wdW(m[2]), A.nowR().iso); return { start: st, until: nextOn(wdW(m[5]), st) }; }
+  if ((m = /(لين|الين|الى|حتى|لغايه|لحد)\s*(يوم\s+)?(\S+)/.exec(s)) && wdW(m[3]) != null) return { until: nextOn(wdW(m[3]), base) };
+  if ((m = /(لين|الين|الى|حتى|لغايه|لحد)\s*(\d{1,2}\s+[\u0600-\u06FFa-z]+)/.exec(s))) { const v = toISO(m[2]); if (v) return { until: v }; }
+  return null;
+}
+function askDurText(acts) {
+  const t = A.nowR(), start = acts.map(a => ISO(a.start_date) && a.start_date > t.iso ? a.start_date : t.iso).sort()[0];
+  const opts = start === t.iso ? [{ k: "one", date: t.iso, label: "اليوم بس" }, { k: "one", date: A.isoPlus(t.iso, 1), label: `بكرة ${dayName(A.isoPlus(t.iso, 1))} بس` }] : [{ k: "one", date: start, label: `${dayName(start)} ${dmy(start)} بس` }];
+  opts.push({ k: "perm", label: "ثابت" });
+  for (const a of acts) {                                                     // زميل بنفس القسم عليه إجازة → «لين يرجع»
+    const d = docOf(a.doctor_id); if (!d) continue;
+    for (const mate of A.docs().filter(x => x.id !== d.id && x.dep === d.dep && (A.getBoard()?.vacations || []).some(v => v.doctorId === x.id && v.start <= start && (!v.end || v.end >= start))))
+      if (!opts.some(o => o.id === mate.id) && opts.length < 6) opts.push({ k: "back", id: mate.id, label: `لين يرجع د. ${A.shortName(mate.name)} (${backInfo(mate.id)})` });
+  }
+  durQ = { code: "W" + String(Date.now() % 100).padStart(2, "0"), at: Date.now(), acts, start, opts }; persist();
+  const nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"];
+  return [`⏳ لمدة كم؟  #${durQ.code}`, ...acts.map(a => describe(a).replace("دوام ثابت", "دوام")), ...opts.map((o, i) => `${nums[i]} ${o.label}${acts.length > 1 ? " (للكل)" : ""}`), "أو اكتب المدة: أسبوع / 3 أيام / لين 30/11 / من الأحد لين الخميس / لين يرجع د. فلان"].join("\n");
+}
+// الأفعال بعد ما عرفنا المدة
+function withDur(acts, o, dur) {
+  return acts.map(a => {
+    if (o?.k === "perm") return a;
+    if (o?.k === "back") return { ...a, until_return_of: o.id };
+    if (o?.k === "one") {
+      const sh = shiftsOf(a) || [];
+      if (sh.length === 1) return { type: "status", doctor_id: a.doctor_id, kind: "starts_at", date: o.date, from: A.hhmm(sh[0].s), until: A.hhmm(sh[0].e), ...(sh[0].e <= sh[0].s ? { until_next_day: true } : {}) };
+      return { ...a, start_date: o.date, end_date: o.date };
+    }
+    return { ...a, ...(dur.start ? { start_date: dur.start } : {}), ...(dur.until ? { end_date: dur.until } : {}), ...(dur.back ? { until_return_of: dur.back } : {}) };
+  });
+}
+function pickOpt(text, opts) {
+  const raw = lat(text).replace(/[️⃣.!،,]/g, "").trim(), n = nn(raw).trim();
+  const num = /^([1-9])$/.exec(raw)?.[1]; if (num) return opts[+num - 1] || null;
+  const t = A.nowR();
+  if (/^(اليوم)(\s+(بس|فقط))?$/.test(n)) return { k: "one", date: t.iso };
+  if (/^(بكره|بكرا|غدا|باكر)(\s+(بس|فقط))?$/.test(n)) return { k: "one", date: A.isoPlus(t.iso, 1) };
+  { const m = /^(يوم\s+)?(ال)?(\S+)(\s+(بس|فقط))?$/.exec(n); if (m && wdW(m[3]) != null) return { k: "one", date: nextOn(wdW(m[3]), t.iso) }; }
+  if (PERMW.test(n) && n.split(/\s+/).length <= 4) return { k: "perm" };
+  return null;
+}
+async function durPre(text, quoted) {
+  const qc = /#([A-Z]\d{2}|[A-Z][A-Z0-9]{2})\b/.exec(quoted || "")?.[1], lo = lastModel();
+  // 1) سؤال «لمدة كم؟» من الخاص
+  if (durQ && Date.now() - durQ.at < 24 * 3600e3 && (qc ? qc === durQ.code : lo.includes("#" + durQ.code))) {
+    const o = pickOpt(text, durQ.opts), dur = o ? null : durOf(text, durQ.start);
+    if (o || dur) { const acts = withDur(durQ.acts, o, dur); durQ = null; persist(); const out = (await execute(acts, [], [])).join("\n"); await AS.after(acts); return out; }
+    return null;
+  }
+  // 2) خيارات تغيير دوام من قروب الاستقبال (#S…) وأنس كتب مدة أو رقم
+  if (!/#S[A-Z0-9]{2}/.test((quoted || "") + "\n" + lo)) return null;
+  const items = ((await A.db.doc("bot/pending_clarify").get()).data()?.items || []).filter(i => i.opts && Date.now() - i.at < 24 * 3600e3);
+  const it = qc ? items.find(i => i.code === qc) : items.find(i => lo.includes("#" + i.code));
+  if (!it) return null;
+  const raw = lat(text).replace(/[️⃣.!،,]/g, "").trim();
+  if (/^[1-9]$/.test(raw) && it.opts[+raw - 1]) return (await execute([{ type: "option", code: it.code, n: +raw }], items, [])).join("\n");
+  const dur = it.dur?.shifts?.length ? durOf(text, it.dur.start) : null; if (!dur) return null;
+  const sh = it.dur.shifts, base = { type: "schedule", doctor_id: it.doctorId, mode: "all_days", shifts: sh.map(x => ({ start_time: A.hhmm(x.s), end_time: A.hhmm(x.e) })), from: A.hhmm(sh[0].s), until: A.hhmm(sh[0].e), ...(it.dur.start > A.nowR().iso ? { start_date: it.dur.start } : {}) };
+  return (await execute([...withDur([base], null, dur), { type: "resolve", code: it.code }], items, [])).join("\n");
 }
 
 const TENSE = [[/(^|\s)(عدّلت|عدلت)(?=\s|$)/g, "$1بعدّل"], [/(^|\s)(أضفت|اضفت|ضفت)(?=\s|$)/g, "$1بضيف"], [/(^|\s)(حطيت)(?=\s|$)/g, "$1بحط"], [/(^|\s)(شلت)(?=\s|$)/g, "$1بشيل"],
@@ -414,7 +530,7 @@ function timesFor(d, txt) {
   return [];
 }
 function fillTimes(a, reply, user, many = false) {
-  if (!NEEDS_T(a) || (a.from && a.until)) return a;
+  if (!NEEDS_T(a) || (a.from && a.until) || (a.type === "schedule" && (shiftsOf(a) || []).length)) return a;
   const own = timesFor(a.doctor_id ? docOf(a.doctor_id) : null, (user || "") + "\n" + (reply || ""));
   if (own.length >= 2) return { ...a, from: a.from || own[0], until: a.until || own.find(x => x !== (a.from || own[0])) || own[1] };
   if (many) return a;                                                        // أكثر من طبيب: لا ناخذ أوقات طبيب ثاني — الأحسن يقول «ناقص» من إنه يحفظ غلط
@@ -427,6 +543,36 @@ function fillTimes(a, reply, user, many = false) {
   }
   return a;
 }
+// (2.19.0) فترات الدوام: shifts من الذكاء (فترتين) أو from/until (فترة وحدة) → [{s, e}] بالدقايق
+const tmn = v => typeof v === "number" ? v : toMin(v);
+function shiftsOf(a) {
+  if (Array.isArray(a.shifts) && a.shifts.length) {
+    const L = a.shifts.map(x => ({ s: tmn(x.start_time ?? x.from ?? x.s), e: tmn(x.end_time ?? x.until ?? x.e) })).filter(x => x.s != null && x.e != null && x.s !== x.e);
+    if (L.length) return L.sort((x, y) => x.s - y.s);
+  }
+  const f = toMin(a.from), u = toMin(a.until); return f != null && u != null && f !== u ? [{ s: f, e: u }] : null;
+}
+const sameSh = (x, y) => JSON.stringify((x || []).map(z => [z.s, z.e])) === JSON.stringify((y || []).map(z => [z.s, z.e]));
+// الذكاء كتب فترة وحدة والسطر فيه فترتين («سحر 11 am الى 2 pm و من 5:30 pm الى 10:30 pm») → نكمّلها من سطر الطبيب نفسه
+function fillShifts(a, user) {
+  if (a.type !== "schedule" || a.mode === "only_days") return a;
+  const d = a.doctor_id ? docOf(a.doctor_id) : null; if (!d) return a;
+  for (const seg of segsFor(d, user)) {
+    const ts = timesIn(seg[0] || ""); if (ts.length < 4 || ts.length % 2) continue;
+    const pairs = []; for (let i = 0; i < ts.length; i += 2) pairs.push({ start_time: ts[i], end_time: ts[i + 1] });
+    if ((shiftsOf(a) || []).length < pairs.length) return { ...a, shifts: pairs, from: pairs[0].start_time, until: pairs[0].end_time };
+    return a;
+  }
+  return a;
+}
+// «لين يرجع أكرامي»: الذكاء ممكن يكتب الاسم بدل الـ id
+const findDocLoose = v => { if (!v) return null; const x = docOf(v); if (x) return x; const n = A.norm(String(v).replace(/^(د|دكتور|دكتوره)\.?\s+/, "")); return n.length < 3 ? null : A.docs().find(d => A.norm(A.shortName(d.name)).includes(n) || (d.aliases || []).some(y => A.norm(y).includes(n)) || nameKeys(d).some(k => nameHit(n.split(" ")[0], k))) || null; };
+function fillBack(a) {
+  if (a.type !== "schedule" || !a.until_return_of) return a;
+  const d = findDocLoose(a.until_return_of); return d ? { ...a, until_return_of: d.id } : { ...a, __bad: `«لين يرجع ${a.until_return_of}» — ما عرفت مين الطبيب` };
+}
+const backInfo = id => { const v = (A.getBoard()?.vacations || []).filter(x => x.doctorId === id && (!x.end || x.end >= A.nowR().iso)).sort((p, q) => p.start.localeCompare(q.start))[0]; return v ? (v.end ? `يرجع ${dayName(A.isoPlus(v.end, 1))} ${dmy(A.isoPlus(v.end, 1))}` : "إجازته مفتوحة") : "مو مسجّل عليه إجازة"; };
+const tmpLabel = a => ISO(a.end_date) ? `مؤقت لين ${dayName(a.end_date)} ${dmy(a.end_date)}` : a.until_return_of ? `مؤقت لين يرجع د. ${A.shortName(docOf(a.until_return_of)?.name || "—")} (${backInfo(a.until_return_of)})` : "";
 // القسم ناقص في نقل/إضافة → من رد الذكاء («لقسم الأطفال») أو من كلام أنس
 function fillDept(a, reply, user) {
   if (!["move_doctor", "add_doctor"].includes(a.type) || A.findDep(a.dept)) return a;
@@ -478,7 +624,9 @@ function check(a) {
     if (!["starts_at", "present", "leaves_at", "late", "stop", "free", "appointments_only", "busy", "absent_today", "clear"].includes(a.kind)) return `نوع حالة غريب (${a.kind})`;
   }
   if (a.type === "schedule" && a.mode === "set_days" && !(a.days || []).length) return `د. ${A.shortName(d.name)}: أي أيام؟ (set_days بدون أيام)`;
-  if (a.type === "schedule" && (toMin(a.from) == null || toMin(a.until) == null) && (a.mode !== "set_days" || a.from || a.until)) return `د. ${A.shortName(d.name)}: وش وقت دوامه؟ (مثلاً «9ص–5م»)`;
+  if (a.type === "schedule" && !shiftsOf(a) && (a.mode !== "set_days" || a.from || a.until || (a.shifts || []).length)) return `د. ${A.shortName(d.name)}: وش وقت دوامه؟ (مثلاً «9ص–5م»)`;
+  if (a.type === "schedule" && ISO(a.end_date) && a.end_date < (ISO(a.start_date) ? a.start_date : t.iso)) return `د. ${A.shortName(d.name)}: نهاية المؤقت (${a.end_date}) قبل بدايته`;
+  if (a.type === "schedule" && a.until_return_of && a.until_return_of === a.doctor_id) return "لين يرجع مين؟ (نفس الطبيب)";
   if (a.type === "vacation" && (!ISO(a.start_date) || !ISO(a.end_date))) return `د. ${A.shortName(d.name)}: من متى لين متى الإجازة؟ (مثلاً «من 23 لين 25»)`;
   if (a.type === "end_vacation" && !ISO(a.return_date)) return "ناقص يوم المباشرة";
   if (a.type === "add_doctor" && !String(a.name || "").trim()) return "ناقص اسم الطبيب";
@@ -499,7 +647,7 @@ function describe(a) {
   switch (a.type) {
     case "status": return `• ${n} — ${when}: ` + ({ starts_at: `دوام من ${f != null ? H(f) : "؟"}${u != null ? " لين " + uTxt : ""}`, present: `موجود${u != null ? " لين " + uTxt : ""}`, leaves_at: `يطلع ${uTxt || (at != null ? H(at) : "")}`, late: `متأخر${at != null ? " يوصل " + H(at) : a.delay_minutes ? " " + a.delay_minutes + " دقيقة" : ""}`, stop: `وقف استقبال${at != null ? " الساعة " + H(at) : ""}`, free: "فاضي — دخّلوا له", appointments_only: `مواعيد فقط${at != null ? " من " + H(at) : ""}`, busy: "زحمة", absent_today: "غير متواجد", clear: "شلت حالته — يرجع لجدوله" }[a.kind] || a.kind);
     case "cancel_plan": return `• ${n} — ألغيت المحفوظ ليوم ${dayName(a.date || date)} ${dmy(a.date || date)}`;
-    case "schedule": return `• ${n} — دوام ثابت: ${a.mode === "only_days" ? "كل " + (a.days || []).map(i => WD[i]).join(" و") + " " : a.mode === "set_days" ? "أيامه " + (a.days || []).map(i => WD[i]).join("، ") + " " : "كل أيامه "}${f != null && u != null ? H(f) + " – " + H(u) : ""}${ISO(a.start_date) ? " (من " + dmy(a.start_date) + ")" : ""}`;
+    case "schedule": { const sh = shiftsOf(a), tl = tmpLabel(a); return `• ${n} — ${tl ? "دوام مؤقت" : "دوام ثابت"}: ${a.mode === "only_days" ? "كل " + (a.days || []).map(i => WD[i]).join(" و") + " " : a.mode === "set_days" ? "أيامه " + (a.days || []).map(i => WD[i]).join("، ") + " " : "كل أيامه "}${sh ? sh.map(x => H(x.s) + " – " + H(x.e)).join(" و ") : ""}${ISO(a.start_date) ? " (من " + dayName(a.start_date) + " " + dmy(a.start_date) + ")" : ""}${tl ? " — " + tl.replace(/^مؤقت /, "") + "، وبعدها يرجع لدوامه الثابت" : ""}`; }
     case "info": return `• ${n} — ${[a.fee ? "كشفية " + a.fee : "", a.room ? "غرفة " + a.room : "", a.ext ? "تحويلة " + a.ext : ""].filter(Boolean).join(" · ")}`;
     case "vacation": return `• ${n} — إجازة ${dmy(a.start_date)} → ${dmy(a.end_date)}`;
     case "end_vacation": return `• ${n} — يباشر ${dayName(a.return_date)} ${dmy(a.return_date)}`;
@@ -609,9 +757,13 @@ async function run(a, t, pclar, pdocs) {
     return { ok: !items.some(i => i.doctorId === id && i.date === date && i.kind !== "remove_doctor") };
   }
   if (a.type === "schedule") {
-    const f = toMin(a.from), u = toMin(a.until), shifts = f != null && u != null ? [{ s: f, e: u }] : null;
+    const shifts = shiftsOf(a);
     const days = (a.days || []).filter(x => x >= 0 && x <= 6 && x !== 5);
     const sch = a.mode === "only_days" ? { days, shifts, altOnly: true } : a.mode === "set_days" ? { days, shifts } : { days: [], shifts };
+    const from0 = ISO(a.start_date) && a.start_date > t.iso ? a.start_date : t.iso;
+    if (a.mode !== "only_days" && (ISO(a.end_date) || a.until_return_of)) sch.tmp = { from: from0, until: ISO(a.end_date) ? a.end_date : "", back: ISO(a.end_date) ? "" : a.until_return_of };
+    // نفس دوامه المسجّل بالضبط (وثابت) → ما نلمس شي
+    if (!sch.tmp && !d.tmp && !sch.altOnly && sameSh(shifts, d.shifts) && (!days.length || JSON.stringify([...days].sort()) === JSON.stringify([...(d.workdays || [])].sort()))) return { ok: true, note: "نفس دوامه المسجّل — ما تغيّر شي" };
     if (ISO(a.start_date) && a.start_date > t.iso) {
       await A.db.doc("board/bawadi_plan").set({ items: A.FieldValue.arrayUnion({ id: A.uid(), date: a.start_date, doctorId: id, kind: "set_schedule", sch, by: BY }), at: Date.now() }, { merge: true });
       await sleep(800); return { ok: (await readPlan()).some(i => i.doctorId === id && i.date === a.start_date && i.kind === "set_schedule"), note: "ينطبق يومها" };
@@ -621,7 +773,8 @@ async function run(a, t, pclar, pdocs) {
     const J = v => JSON.stringify((v || []).map(y => [y.s, y.e]));
     if (sch.altOnly) return { ok: !!x.alt && days.every(i => x.alt.days.includes(i)) && J(x.alt.shifts) === J(shifts) || (J(x.shifts) === J(shifts) && !(x.alt?.days || []).some(i => days.includes(i))) };
     if (!shifts && !days.length) return { ok: false, why: "ما فيه شي يتغيّر" };
-    return { ok: (!shifts || J(x.shifts) === J(shifts)) && (!days.length || JSON.stringify([...x.workdays].sort()) === JSON.stringify([...days].sort())), why: `المحفوظ ${(x.shifts || []).map(y => A.hm(y.s) + "–" + A.hm(y.e)).join("، ")}` };
+    const tmpOk = !sch.tmp || (!!x.tmp && (x.tmp.until || "") === sch.tmp.until && (x.tmp.back || "") === (sch.tmp.back || ""));
+    return { ok: tmpOk && (!shifts || J(x.shifts) === J(shifts)) && (!days.length || JSON.stringify([...x.workdays].sort()) === JSON.stringify([...days].sort())), why: `المحفوظ ${(x.shifts || []).map(y => A.hm(y.s) + "–" + A.hm(y.e)).join("، ")}${sch.tmp && !x.tmp ? " (بدون «مؤقت»)" : ""}` };
   }
   if (a.type === "info") {
     const sch = { days: [], shifts: null, room: a.room || "", ext: a.ext || "", fee: String(a.fee || "").replace(/\D/g, "") };
@@ -894,12 +1047,23 @@ export async function bootFixes() {
   }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
+  // 12) (2.19.0) مراجعة لمرة وحدة: الجدول الثابت مقابل اللي انقال في القروبين (المحفوظ عندي) — بدون ما نغيّر شي
+  if (!doneIds.has("au2119") && A.gemini) {
+    await sleep(20000);
+    const { system } = await buildCtx();
+    const q = "[النظام — مراجعة لمرة وحدة، مو كلام أنس] قارن «جدول أطباء البوادي» (عمود الدوام الثابت) بكل اللي انقال في «آخر رسايل القروب» و«قروب الشكاوي» و«حالات اليوم» و«الخطط». اكتب في reply قائمة الأطباء اللي دوامهم الثابت بالجدول يختلف عن اللي انقال (كل طبيب سطر: د. الاسم — بالجدول: … — انقال: … (مين ومتى)). لا تحط الأطباء اللي الكلام عنهم ليوم واحد بس واضح. لو ما فيه اختلاف قل كذا. actions فاضية.";
+    const out = await callAI(system, [{ role: "user", parts: [{ text: q }] }], { temp: 0 }).catch(() => null);
+    if (out?.reply) {
+      await A.dmAdmin(`🔎 مراجعة الجدول مقابل رسايل القروبين (اللي محفوظ عندي: آخر يومين تقريباً من قروب الاستقبال و3 أيام من قروب الشكاوي):\n\n${String(out.reply).slice(0, 1800)}\n\nلو تبغى أعدّل أحد قل لي اسمه ودوامه (ولمدة كم).`);
+      await ref.set({ ids: [...doneIds, ...mark, "au2119"], at: Date.now() }, { merge: true });
+    }
+  }
 }
 
 /* ---------- (2.16.1) اختبار الفهم: البوت يجرّب نفسه على رسايل صعبة بعد كل تحديث — بدون ما يحفظ شي ---------- */
 // كل حالة: نص (و«يرد على» لو فيه) + المتوقّع. النتيجة تنحفظ في board/bawadi_selftest (بدون بيانات مراجعين) وسطر واحد لأنس.
 function selfCases() {
-  const t = A.nowR(), D = n => A.isoPlus(t.iso, n), wd = w => D(((w - t.wd + 7) % 7) || 7);
+  const t = A.nowR(), D = n => A.isoPlus(t.iso, n), wd = w => D(((w - t.wd + 7) % 7) || 7), WDA = ["الاحد", "الاثنين", "الثلاثاء", "الاربعاء", "الخميس", "الجمعه", "السبت"];
   const R6Q = `✅ قريت رسالة #R6Q  Majed:\n«سابا 1\nمن غدا الثلاثاء ستكون عيادة الطب العام كالاتي :\nد.مجدي نصيف ٩-٥\nد.سارة الشوربجي ١٢م-٨م\nد.اكرامي الشرقاوي من ٥-١\nد.اشرف السنجيدي من ١ص-٩ص»\n\nاللي سويته:\n📅 د. مجدي نصيف — بكرة: دوامه من 9ص إلى 5م\n📅 د. سارة الجارحي — بكرة: دوامه من 12م إلى 8م\n📅 د. أكرامي الشرقاوي — بكرة: دوامه من 5م إلى 1ص\n📅 د. أشرف السنجيدي — بكرة: دوامه من 1ص إلى 9ص`;
   return [
     { q: "اكرا وقف", all: [{ doc: "كرامي", type: "status", kind: ["stop"], date: D(0) }] },
@@ -929,6 +1093,11 @@ function selfCases() {
     { q: "اسامه يوسف السبت مايجي", all: [{ doc: "أسامة", type: "status", kind: ["absent_today"], date: wd(6) }] },
     { q: "منال دوامها صار من ٨ الصبح لين ٤ العصر كل يوم", all: [{ doc: "منال", type: "schedule", from: "08:00", until: "16:00" }] },
     { q: "[رسالة محوّلة من قروب الاستقبال]\nد.مجدي نصيف بكره ٩ص-٥م", all: [{ doc: "مجدي", type: "status", kind: ["starts_at"], date: D(1), from: "09:00", until: "17:00" }] },
+    // (2.19.0) فترتين + مؤقت + «بداية من»
+    { q: "د سحر دوامها ثابت من 9 am الى 1 pm و من 5 pm الى 9 pm", all: [{ doc: "سحر", type: "schedule", shifts: [["09:00", "13:00"], ["17:00", "21:00"]] }] },
+    { q: "منال من ٨ الصبح لين ٤ العصر لمدة اسبوع", all: [{ doc: "منال", type: "schedule", from: "08:00", until: "16:00", endIn: D(6) }] },
+    { q: "د ساره من 5 pm الى 1 am لين يرجع اكرامي", all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", back: "كرامي" }] },
+    { q: `بداية من يوم ${WDA[(t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7]}\nد ساره من 5 pm الى 1 am`, all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", startIn: wd((t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7) }] },
     { q: "جهز لي رساله التغييرات ليوم الجمعه وتغييرات الاسبوع القادم", draft: true },
     { q: "جهز لي رساله بدوام الجمعه", draft: true },
     { q: "شكرا", none: true },
@@ -945,6 +1114,10 @@ function hitSpec(a, sp) {
   if (sp.from && toMin(a.from) !== toMin(sp.from)) return false;
   if (sp.until && toMin(a.until) !== toMin(sp.until)) return false;
   if (sp.at && toMin(a.at) !== toMin(sp.at)) return false;
+  if (sp.shifts && JSON.stringify((shiftsOf(a) || []).map(x => [x.s, x.e])) !== JSON.stringify(sp.shifts.map(([f, u]) => [toMin(f), toMin(u)]))) return false;
+  if (sp.back) { const bd = A.docs().find(x => A.norm(x.name).includes(A.norm(sp.back))); if (!bd || a.until_return_of !== bd.id) return false; }
+  if (sp.endIn && a.end_date !== sp.endIn) return false;
+  if (sp.startIn && a.start_date !== sp.startIn) return false;
   return true;
 }
 export async function selfTest(version) {
@@ -970,3 +1143,4 @@ export async function selfTest(version) {
   await ref.set({ version, at: Date.now(), pass: n, total: res.length, results: res });
   await A.dmAdmin(`🧪 جرّبت فهمي بعد التحديث على ${res.length} رسالة صعبة (بدون ما أحفظ شي): فهمت ${n} صح.${n < res.length ? "\nاللي ما فهمتها انحفظت لـ Claude يصلّحها:\n" + res.filter(r => !r.ok).slice(0, 6).map(r => "• " + r.q.split("\n").pop().slice(0, 70)).join("\n") : ""}`);
 }
+export const _t = { durOf, shiftsOf, fillShifts, prepActs, pickOpt, withDur, check, describe, askDurText, timesIn, fillBack };
