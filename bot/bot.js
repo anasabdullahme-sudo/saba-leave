@@ -22,7 +22,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.19.0";
+const VERSION = "2.19.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -187,7 +187,8 @@ async function drainWa() {
    من الجوال: أنس أو ماجد يرسلون ملف للبوت → يطلع في اللوحة «📥 ملفات واردة» وينحذف بعد 7 أيام. */
 const DAY_MS = 864e5, TEAM_PART = 900000, TEAM_MAX = 25 * 1024 * 1024, TEAM_KEEP = 7 * DAY_MS;
 const p9 = x => String(x || "").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\D/g, "").replace(/^(00)?966/, "").replace(/^0/, "");
-const TEAM = { anas: { name: "أنس", phone: p9(String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0]) }, majed: { name: "ماجد", phone: p9(process.env.MAJED_PHONE) } };
+// (2.19.1) ماجد انشال من كل شي — الفريق أنس بس (ملفات اللوحة القديمة اللي كانت لماجد تروح لأنس)
+const TEAM = { anas: { name: "أنس", phone: p9(String(process.env.ADMIN_PHONE || "").split(/[,\s]+/)[0]) } };
 const teamOf = phone => { const d = p9(phone); return d ? Object.keys(TEAM).find(k => TEAM[k].phone && TEAM[k].phone === d) || null : null; };
 const teamQueue = new Set(); let teamBusy = false;
 async function sendTeamOne(id) {
@@ -195,7 +196,7 @@ async function sendTeamOne(id) {
   const o = await db.runTransaction(async tx => { const d = await tx.get(ref); if (!d.exists || d.get("sendStatus") !== "queued") return null; tx.update(ref, { sendStatus: "sending" }); return d.data(); });
   if (!o) return;
   try {
-    const t = TEAM[o.to]; if (!t?.phone) throw new Error(o.to === "majed" ? "رقم ماجد مو مضاف في Railway (MAJED_PHONE)" : "رقم أنس مو مضاف (ADMIN_PHONE)");
+    const t = TEAM[o.to] || TEAM.anas; if (!t?.phone) throw new Error("رقم أنس مو مضاف (ADMIN_PHONE)");
     const [w] = await sock.onWhatsApp("966" + t.phone); if (!w?.exists) throw new Error("الرقم ما عليه واتساب");
     const cap = [`📎 من لوحة سابا${o.by ? " — " + o.by : ""}`, String(o.text || "").trim().slice(0, 1500)].filter(Boolean).join("\n");
     if (o.parts) {
@@ -591,7 +592,6 @@ function bufferIncoming(m) {
       const who = teamOf(ph);
       if (who && await ecgDM(m, who).catch(e => { log.warn({ err: String(e?.message || e) }, "ECG ملف"); return false; })) return;   // شيت ECG / تصدير دردشة ECG
       if (who && msg.imageMessage && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT) && await hrImage(m, who).catch(e => { log.warn({ err: String(e?.message || e) }, "إجازة الموارد"); return false; })) return;   // صورة إجازة معتمدة → صفحة الأطباء
-      if (who === "majed") return saveTeamFile(m, who);                                  // ماجد: أي ملف يروح للموقع
       // أنس: رد (سحب) على رسالة أو «P7KQ …» = رد على استفسار مراجع → للمراجع، غير كذا نسأله يرفعه للموقع؟
       if (who === "anas" && !ctxQ && !/^#?P[A-Z0-9]{3}\b/i.test(capT)) return askAdminFile(m);
       return bufferIncoming(m);
@@ -648,15 +648,8 @@ async function onIncoming(m) {
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   const senderPhone = await senderPhoneOf(m);
   const team = teamOf(senderPhone), admin = team === "anas" || isAdminPhone(senderPhone);
-  // رد أنس/ماجد على تنبيه «صورة ECG بدون رقم»
+  // رد أنس على تنبيه «صورة ECG بدون رقم» أو رقم صورة ناقصة
   if ((team || admin) && text && !media && await ecgDM(m, team || "anas", text).catch(e => { log.warn({ err: String(e?.message || e) }, "ECG رد"); return false; })) return;
-  // ماجد: ما ينعامل كمراجع أبداً — ملف = للموقع، كلام = نطلب الملف
-  if (team === "majed") {
-    if (media) await saveTeamFile(m, "majed");
-    else if (text && await handleMajedMessage(m, text)) { /* رد على سؤال البوت عن رسالته في القروب */ }
-    else if (now - (lastReply.get(jid + "#majed") || 0) > 60e3) { lastReply.set(jid + "#majed", now); await sock.sendMessage(jid, { text: "الرجاء إرسال الملف لإرفاقه بالموقع 📎" }).catch(() => {}); }
-    return;
-  }
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
   if (admin && text && await answerAdminFile(m, text).catch(e => { log.warn({ err: String(e?.message || e) }, "ملف المسؤول"); return false; })) return;   // «نعم/لا» على «أحط الملف في الموقع؟»
   // (2.18.4) أنس رد (سحب) على ملف/صورة أرسلها هو: «هذا امجد» → ربط الترخيص بالطبيب (بدل ما يروح للمساعد ويفهمه غلط)
@@ -1235,7 +1228,7 @@ async function main() {
     const ports = [...new Set([+process.env.PORT || 8080, 8080])];                     // Railway: المنفذ اللي يحدده، و8080 احتياط
     ports.forEach((pt, i) => { const sv = i ? http.createServer(globalThis.__sabaHttp.listeners("request")[0]) : globalThis.__sabaHttp; sv.requestTimeout = 15 * 60e3; sv.on("error", e => log.warn({ err: String(e?.message || e), pt }, "سيرفر")); sv.listen(pt, () => log.info({ port: pt }, "سيرفر البانوراما شغّال")); });
   }
-  initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: process.env.MAJED_PHONE || "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
+  initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
   initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage, licText: () => LIC?.groupText() || "" });
   LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin, doctors: () => boardDoctorList(), db }); setAssist(LIC.ext);   // (2.17.0) التراخيص
 

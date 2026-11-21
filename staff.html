@@ -314,8 +314,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who" title="اسم هالجهاز"></span>
       <button class="bot-pill team" data-team="anas" title="أرسل رسالة أو ملف لأنس على الواتساب">💬 أنس</button>
-      <button class="bot-pill team" data-team="majed" title="أرسل رسالة أو ملف لماجد على الواتساب">💬 ماجد</button>
-      <button class="bot-pill team" id="inBtn" title="ملفات أرسلها أنس أو ماجد للبوت">📥 الوارد<b id="inN" hidden></b></button>
+      <button class="bot-pill team" id="inBtn" title="ملفات أرسلها أنس للبوت">📥 الوارد<b id="inN" hidden></b></button>
       <button class="bot-pill" id="botPill" title="بوت الواتساب لطلبات التعديل"><i></i><span>واتساب</span></button>
       <button class="admin-btn" id="btnClean" hidden>تنظيف الصور</button>
       <button class="icon-btn on" id="btnSound" title="صوت التنبيه" aria-label="صوت التنبيه"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
@@ -459,7 +458,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="modal" id="inModal" hidden>
   <div class="box" role="dialog" aria-modal="true" aria-labelledby="inTtl" style="width:min(560px,100%)">
     <h3 id="inTtl">📥 ملفات واردة</h3>
-    <p style="margin:0;color:var(--muted);font-size:13.5px">أرسلها أنس أو ماجد لرقم البوت. تنحذف لحالها بعد 7 أيام.</p>
+    <p style="margin:0;color:var(--muted);font-size:13.5px">أرسلها أنس لرقم البوت. تنحذف لحالها بعد 7 أيام.</p>
     <div id="inList" style="max-height:60vh;overflow:auto"></div>
     <div class="btn-row"><button class="btn btn-ghost" id="inClose">إغلاق</button></div>
   </div>
@@ -1055,7 +1054,7 @@ $("#waSend").onclick = async () => {
 };
 
 /* ---------- رسالة/ملف لأنس أو ماجد + الملفات الواردة منهم ---------- */
-const TEAM_NAME = { anas: "أنس", majed: "ماجد" };
+const TEAM_NAME = { anas: "أنس" };
 let tmTo = null, tmFile = null, tmUnsub = null, tmTimer = 0;
 const kb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " ميجا" : Math.max(1, Math.round(n / 1024)) + " كيلو";
 function openTeam(to) {

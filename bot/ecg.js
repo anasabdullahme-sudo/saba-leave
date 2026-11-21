@@ -123,10 +123,17 @@ async function addImage({ id, at, by, who, buf, num, how, imp = false }) {
 
 /* ---------- الذكاء: تخطيط ولا فاتورة؟ ورقم الملف ---------- */
 async function classify(it, buf) {
-  if (!C.gemini) return;
-  const prompt = `صورة من قروب واتساب في عيادة يرسلون فيه صور تخطيط القلب (ECG) لمرضى.
-حدد نوعها: "ecg" لو فيها ورقة تخطيط قلب (حتى لو فيه فاتورة جنبها)، "invoice" لو فاتورة/إيصال بس بدون تخطيط، "other" غير كذا.
-file_no: رقم الملف الطبي للمريض (7 أرقام، مكتوب "Patient ID" أو "رقم الملف الطبي" أو File No) لو مكتوب في الصورة، وإلا "".
+  const o = await readEcg(buf); if (!o) return;
+  it.kind = o.kind || "";
+  const n = fileNums(o.file_no || "")[0] || "";
+  if (n) it.read = n;                                          // الرقم المقروء من الصورة (فاتورة أو ورقة)
+  if (o.date) it.rdate = String(o.date).slice(0, 16);
+}
+async function readEcg(buf) {
+  if (!C.gemini) return null;
+  const prompt = `صورة من عيادة فيها تخطيط قلب (ECG) لمريض — ورقة مصوّرة أو تقرير مصدَّر من جهاز التخطيط («12Channel Rhythm Report»)، أو فاتورة.
+حدد نوعها: "ecg" لو فيها ورقة/تقرير تخطيط قلب (حتى لو فيه فاتورة جنبها)، "invoice" لو فاتورة/إيصال بس بدون تخطيط، "other" غير كذا.
+file_no: رقم الملف الطبي للمريض (7 أرقام، مكتوب "ID :" فوق يسار التقرير، أو "Patient ID" أو "رقم الملف الطبي" أو File No) لو مكتوب في الصورة، وإلا "".
 date: تاريخ الإصدار/الفحص المكتوب "YYYY-MM-DD HH:MM" لو موجود، وإلا "".`;
   for (const model of C.models) {
     try {
@@ -135,14 +142,11 @@ date: تاريخ الإصدار/الفحص المكتوب "YYYY-MM-DD HH:MM" ل�
         body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: buf.toString("base64") } }] }],
           generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: { type: "OBJECT", properties: { kind: { type: "STRING", enum: ["ecg", "invoice", "other"] }, file_no: { type: "STRING" }, date: { type: "STRING" } }, required: ["kind"] } } }) });
       clearTimeout(tm); if (!r.ok) continue;
-      const j = await r.json(), o = JSON.parse((j?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("") || "{}");
-      it.kind = o.kind || "";
-      const n = fileNums(o.file_no || "")[0] || "";
-      if (n) it.read = n;                                          // الرقم المقروء من الصورة (فاتورة أو ورقة)
-      if (o.date) it.rdate = String(o.date).slice(0, 16);
-      return;
+      const j = await r.json();
+      return JSON.parse((j?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").join("") || "{}");
     } catch {}
   }
+  return null;
 }
 
 /* ---------- بعد 5 دقايق: صورة بدون رقم ---------- */
@@ -168,7 +172,7 @@ function numFor(it, items) {
 async function alertTeam(it) {
   const [f] = await bucket().file(it.path).download();
   it.code = short(); it.alertIds = [];
-  for (const who of ["anas", "majed"]) {
+  for (const who of ["anas"]) {                                                    // (2.19.1) ماجد انشال — لأنس بس
     const jid = jidOf(who); if (!jid) continue;
     const s = await C.getSock().sendMessage(jid, { image: f, caption: `🫀 صورة ECG بدون رقم ملف #E${it.code}\nمن ${it.by} — ${hm(it.at)}\nرد (اسحب) على هذي الرسالة برقم الملف، أو «تجاهل» لو مو تخطيط.` }).catch(() => null);
     if (s?.key?.id) it.alertIds.push(s.key.id);
@@ -182,7 +186,7 @@ async function sendTo(who, content) { const j = jidOf(who); if (!j) return true;
 const OUT = "outbox/";
 let flushing = false, outFailAt = 0;
 async function sendBoth(content, exclude = "") {
-  const to = ["anas", "majed"].filter(w => w !== exclude && jidOf(w));
+  const to = ["anas"].filter(w => w !== exclude && jidOf(w));                     // (2.19.1) ماجد انشال — لأنس بس
   if (!content.document) {                                                         // نص: 5 محاولات بالخلفية
     (async () => { for (const w of to) for (let i = 0; i < 5; i++) { try { await sendTo(w, content); break; } catch (e) { C.log.warn({ err: String(e?.message || e), w, i }, "ECG: إرسال نص"); await new Promise(r => setTimeout(r, 30e3)); } } })();
     return;
@@ -211,13 +215,81 @@ async function flushOutbox() {
 }
 async function outboxCount() { try { const [f] = await bucket().getFiles({ prefix: OUT }); return f.filter(x => x.name.endsWith(".json")).length; } catch { return 0; } }
 
-/* ---------- الخاص: أنس / ماجد ---------- */
+/* ---------- (2.19.1) صور ECG الناقصة: أنس يرسلها خاص بعد الشيت → تنضاف لآخر ملف والشيت يتعلّم عليه ---------- */
+const LAST = "ecg_last/";
+async function saveLast(meta, zipBuf) {
+  await bucket().file(LAST + "last.zip").save(zipBuf);
+  await bucket().file(LAST + "last.json").save(Buffer.from(JSON.stringify(meta)));
+}
+async function readLast() { try { return JSON.parse((await bucket().file(LAST + "last.json").download())[0].toString()); } catch { return null; } }
+const lastOpen = m => m && Date.now() - m.at < 14 * 864e5 && (m.missRows || []).some(r => !r.done);
+const noNum = new Map();                                  // id رسالة الصورة → { buf, at } (ما انقرا رقمها أو مو من الناقصين)
+let addQ = [], addT = null;
+function queueAdd(x, say, ack = true) {
+  if (ack && !addQ.length) say("⏳ وصلت — أجمّع صور الناقصين وأرسل لك الملف بعد دقيقة من آخر صورة.");
+  addQ.push(x); clearTimeout(addT);
+  addT = setTimeout(() => { const L = addQ; addQ = []; addMissing(L).then(say).catch(async e => { C.log.error({ err: String(e?.stack || e) }, "ECG: الناقصة"); await say("❌ ما قدرت أضيف الصور: " + String(e?.message || e).slice(0, 120)); }); }, 60e3);
+}
+async function addMissing(list) {
+  const meta = await readLast(); if (!meta) return "❌ ما لقيت آخر ملف — أرسل الشيت من جديد.";
+  const [zb] = await bucket().file(LAST + "last.zip").download();
+  const zip = await JSZip.loadAsync(zb), sf = zip.file(meta.sheetName); if (!sf) return "❌ الشيت مو موجود داخل آخر ملف — أرسل الشيت من جديد.";
+  const wb = await loadWb(await sf.async("nodebuffer")), ws = wb.worksheets[0];
+  const added = [], dup = [];
+  for (const x of list) {
+    const row = meta.missRows.find(r => r.num === x.num && !r.done);
+    if (!row) { dup.push(x.num); continue; }
+    let name = `${x.num}.jpg`; for (let i = 2; zip.file("ECG/" + name); i++) name = `${x.num}_${i}.jpg`;
+    const img = await stamp(x.buf, x.num);
+    zip.file("ECG/" + name, img); mark(ws, row.r, meta.sc, "ok", "تم"); row.done = true; added.push(x.num);
+    // نحفظها مع صور الشهر بعد (لو انطلب شيت ثاني فيه نفس الرقم)
+    addImage({ id: "dm" + x.id, at: x.at, by: "أنس (خاص)", who: "anas", buf: x.buf, num: x.num, how: "dm" }).catch(() => {});
+    // البانوراما لسا ما وصلت → نحدّث طلبها بعد عشان الملف الكامل اللي يجي بعدين فيه الصور الجديدة
+    if (pjob && pjob.fileName === meta.fileName) await patchJob(name, img, row, meta.sc).catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: تحديث طلب البانوراما"));
+  }
+  const rem = meta.missRows.filter(r => !r.done).map(r => r.num);
+  if (!added.length) return `ℹ️ ما انضاف شي — ${dup.length ? `الأرقام (${dup.join("، ")}) مو من الناقصين في «${meta.fileName}» أو انضافت قبل` : "ما فيه صور"}.${rem.length ? `\nالناقصين: ${rem.join("، ")}` : ""}`;
+  zip.file(meta.sheetName, Buffer.from(await wb.xlsx.writeBuffer()));
+  const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+  await saveLast(meta, out);
+  await sendBoth({ document: out, mimetype: "application/zip", fileName: meta.zipName, caption: [`📎 ${meta.fileName} (بعد الصور الناقصة)`, `✅ انضافت ${added.length}: ${added.join("، ")}`, rem.length ? `❌ باقي بدون صورة (${rem.length}): ${rem.join("، ")}` : "🎉 ما بقى ولا سطر بدون صورة", dup.length ? `ℹ️ مو من الناقصين: ${dup.join("، ")}` : "", meta.panoPending ? "🦷 البانوراما لسا ما وصلت — الملف الكامل يجيك لما ترجع" : ""].filter(Boolean).join("\n") });
+  return "";
+}
+async function patchJob(name, img, row, sc) {
+  const [sb] = await bucket().file(pjob.sheetPath).download();
+  const wb = await loadWb(sb); mark(wb.worksheets[0], row.r, sc, "ok", "تم");
+  await bucket().file(pjob.sheetPath).save(Buffer.from(await wb.xlsx.writeBuffer()));
+  let ez = new JSZip(); if (pjob.ecgPath) { try { ez = await JSZip.loadAsync((await bucket().file(pjob.ecgPath).download())[0]); } catch { /* جديد */ } }
+  ez.file(name, img);
+  const ecgPath = pjob.ecgPath || `pano/${pjob.id}-ecg.zip`;
+  await bucket().file(ecgPath).save(await ez.generateAsync({ type: "nodebuffer", compression: "STORE" }));
+  if (!pjob.ecgPath) { pjob.ecgPath = ecgPath; await C.db.doc("bot/pano_job").set(pjob).catch(() => {}); }
+}
+// صورة من أنس خاص: تخطيط؟ ورقمه من الناقصين في آخر شيت؟
+async function dmImage(m, g, say) {
+  const img = g.imageMessage, doc = g.documentMessage;
+  if (!img && !(doc && /^image\//i.test(String(doc.mimetype || "")))) return false;
+  const meta = await readLast(); if (!lastOpen(meta)) return false;              // ما فيه شيت فيه ناقصين → مو لنا (ترخيص/وارد…)
+  let buf; try { buf = await (C.download || downloadMediaMessage)({ ...m, message: g }, "buffer", {}, { logger: C.log, reuploadRequest: C.getSock().updateMediaMessage }); } catch { return false; }
+  const cap = fileNums(String((img || doc)?.caption || ""))[0];
+  const o = cap ? { kind: "ecg", file_no: cap } : await readEcg(buf);
+  if (!o || o.kind !== "ecg") return false;                                       // مو تخطيط → يكمل (ترخيص، إجازة، وارد)
+  const num = cap || fileNums(o.file_no || "")[0] || "", id = m.key.id, at = Date.now();
+  const miss = meta.missRows.filter(r => !r.done).map(r => r.num);
+  if (num && miss.includes(num)) { queueAdd({ id, num, buf, at }, say); return true; }
+  noNum.set(id, { buf, at }); for (const [k, v] of noNum) if (at - v.at > 6 * 3600e3) noNum.delete(k);
+  await say(num ? `🫀 رقم ${num} مو من الأسطر الناقصة في «${meta.fileName}».\nلو الرقم غلط رد (اسحب) على الصورة بالرقم الصح.\nالناقصين: ${miss.join("، ")}` : "🫀 ما قدرت أقرأ رقم الملف من الصورة — رد (اسحب) عليها بالرقم.");
+  return true;
+}
+
+/* ---------- الخاص: أنس ---------- */
 // يرجع true لو الرسالة لـ ECG (رد على تنبيه، شيت xlsx، تصدير دردشة zip)
 export async function onTeamDM(m, who, text = "") {
   const g = unwrap(m), jid = m.key.remoteJid;
   const doc = g.documentMessage;
   const name = String(doc?.fileName || ""), mime = String(doc?.mimetype || "");
-  const say = t => C.getSock().sendMessage(jid, { text: t }, { quoted: m }).catch(() => {});
+  const say = t => t ? C.getSock().sendMessage(jid, { text: t }, { quoted: m }).catch(() => {}) : null;
+  if (await dmImage(m, g, say).catch(e => { C.log.warn({ err: String(e?.message || e) }, "ECG: صورة خاص"); return false; })) return true;
   if (!doc && /حال[هة]\s*(ال)?بانورا|pano\s*status/i.test(text)) {                 // (2.15.3) «حالة البانوراما»
     const ago = ms => { const mn = Math.round((Date.now() - ms) / 60e3); return !ms ? "ولا مرة" : mn < 1 ? "قبل أقل من دقيقة" : mn < 90 ? `قبل ${mn} دقيقة` : `قبل ${Math.round(mn / 60)} ساعة`; };
     const ob = await outboxCount();
@@ -248,6 +320,13 @@ export async function onTeamDM(m, who, text = "") {
   }
   // رد على تنبيه «صورة بدون رقم»
   const q = g.extendedTextMessage?.contextInfo?.stanzaId || "", qt = String(g.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage?.caption || "");
+  if (q && noNum.has(q)) {                                                         // (2.19.1) رقم لصورة ناقصة أرسلها خاص
+    const n = fileNums(text)[0]; if (!n) { await say("اكتب رقم الملف (7 أرقام) ردّاً على الصورة."); return true; }
+    const meta = await readLast(), miss = (meta?.missRows || []).filter(r => !r.done).map(r => r.num);
+    if (!miss.includes(n)) { await say(`رقم ${n} مو من الناقصين.${miss.length ? " الناقصين: " + miss.join("، ") : ""}`); return true; }
+    const x = noNum.get(q); noNum.delete(q);
+    queueAdd({ id: q, num: n, buf: x.buf, at: x.at }, say, false); await say(`تمام — ${n}. أجمّع الصور وأرسل الملف بعد دقيقة.`); return true;
+  }
   const code = (/#E([A-Z0-9]{4})/.exec(qt) || /#E([A-Z0-9]{4})/i.exec(text) || [])[1];
   if (!q && !code) return false;
   await loadMonth(monthOf(Date.now()));
@@ -350,7 +429,7 @@ function mark(ws, r, sc, kind, text) {
 }
 async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
   const now = Date.now(), base = fileName.replace(/\.xlsx?$/i, ""), byName = C.team[who]?.name || who;
-  const ecgFiles = [], miss = [];
+  const ecgFiles = [], miss = [], missRows = [];
   if (rows.length) {
     const first = Math.min(...rows.map(r => r.at || now));
     // الشهور: من أول فاتورة لين الحين (الصور اللي تتأخر تنحسب على شهر إرسالها)
@@ -366,14 +445,14 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
     const seq = {};
     for (let ri = 0; ri < rows.length; ri++) {
       const r = rows[ri], x = got.get(ri);
-      if (!x) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); continue; }
+      if (!x) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); missRows.push({ r: r.r, num: r.num }); continue; }
       try {
         const [buf] = await bucket().file(x.path).download();
         seq[r.num] = (seq[r.num] || 0) + 1;
         ecgFiles.push({ name: `${r.num}${per[r.num] > 1 ? "_" + seq[r.num] : ""}.jpg`, buf: await stamp(buf, r.num) });
         const d = dayOf(x.at);
         if (r.at && d !== dayOf(r.at)) mark(ws, r.r, sc, "near", `تم — صورة ${+d.slice(8)}/${+d.slice(5, 7)}`); else mark(ws, r.r, sc, "ok", "تم");
-      } catch (e) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); C.log.warn({ err: String(e?.message || e), path: x.path }, "ECG: صورة"); }
+      } catch (e) { mark(ws, r.r, sc, "none", "لا توجد صورة"); miss.push(r.num); missRows.push({ r: r.r, num: r.num }); C.log.warn({ err: String(e?.message || e), path: x.path }, "ECG: صورة"); }
     }
   }
   const ecgCap = rows.length ? `🫀 ECG: ✅ ${rows.length - miss.length} من ${rows.length} لقيت صورهم${miss.length ? `\n❌ بدون صورة (${miss.length}): ${miss.join("، ")}` : ""}` : "";
@@ -400,7 +479,9 @@ async function processSheet({ wb, ws, rows, prows = [], sc }, fileName, who) {
     zip.file(fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
     const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
     const cap = [`📎 ${fileName}`, ecgCap, pano && pano.cap, prows.length && !pano && "🦷 البانوراما: جهاز الأشعة ما رد للحين — ترسل لحالها أول ما يرد.", `طلبه: ${byName}`].filter(Boolean).join("\n");
-    await sendBoth({ document: out, mimetype: "application/zip", fileName: `${base} - ${[rows.length && "ECG", pano && "بانوراما"].filter(Boolean).join(" + ")}.zip`, caption: cap });
+    const zipName = `${base} - ${[rows.length && "ECG", pano && "بانوراما"].filter(Boolean).join(" + ")}.zip`;
+    await sendBoth({ document: out, mimetype: "application/zip", fileName: zipName, caption: cap });
+    if (rows.length) await saveLast({ at: now, fileName, zipName, sheetName: fileName.replace(/[\\/:*?"<>|]/g, "_"), sc, missRows, panoPending: !!(prows.length && !pano) }, out).catch(e => C.log.warn({ err: String(e?.message || e) }, "ECG: حفظ آخر ملف"));
   } else await sendBoth({ text: `🦷 ${fileName}: ${prows.length} سطر بانوراما — جهاز الأشعة ما رد للحين، ترسل لحالها أول ما يرد.\nطلبه: ${byName}` });
   // الحذف: شيت شهر خلص → بعد يوم تنحذف صور ذاك الشهر
   if (rows.length) {
@@ -484,6 +565,8 @@ async function finishLate(result) {
   for (const f of pano.files) zip.file("PANORAMIC/" + f.name, f.buf);
   zip.file(job.fileName.replace(/[\\/:*?"<>|]/g, "_"), Buffer.from(await wb.xlsx.writeBuffer()));
   const out = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+  const lastM = await readLast();
+  if (lastM && lastM.fileName === job.fileName) await saveLast({ ...lastM, zipName: `${job.fileName.replace(/\.xlsx?$/i, "")} - ${nEcg ? "ECG + " : ""}بانوراما.zip`, panoPending: false }, out).catch(() => {});
   await sendBoth({ document: out, mimetype: "application/zip", fileName: `${job.fileName.replace(/\.xlsx?$/i, "")} - ${nEcg ? "ECG + " : ""}بانوراما.zip`, caption: [`📎 ${job.fileName} (الملف كامل)`, nEcg ? job.ecgCap : "", pano.cap, `طلبه: ${C.team[job.who]?.name || job.who}`].filter(Boolean).join("\n") });
   if (job.ecgPath) await bucket().file(job.ecgPath).delete().catch(() => {});
   await dropPanoJob(job.id);
