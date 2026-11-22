@@ -231,7 +231,7 @@ async function buildCtx() {
 // الأفعال من رد الذكاء + تعبئة الناقص من الكلام نفسه (الرسالة المقتبسة، ردّه، وفهمه)
 function prepActs(o, txt, quoted) {
   const R = [o.understood, o.reply].filter(Boolean).join("\n"), T2 = [quoted, txt].filter(Boolean).join("\n");
-  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillShifts(a, T2, R)).map(a => fillBack(a)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt)));
+  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillShifts(a, T2, R)).map(a => lineTimes(a, T2)).map(a => fillBack(a)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt))).filter(a => !a.__drop);
 }
 
 export async function handle(m, text, { forwarded = false } = {}) {
@@ -288,7 +288,7 @@ export async function handle(m, text, { forwarded = false } = {}) {
   let held = [];
   if (!out.use_proposal) {
     const ctxT = nn([quoted, text, ...chat.filter(x => x.role === "user" && Date.now() - x.at < 20 * 60e3).slice(-3).map(x => x.text)].join("\n"));
-    const dur = durOf(text, null);
+    const dur = shortMsg(text) ? durOf(text, null) : null;                    // (2.19.6) رسالة طويلة فيها تواريخ كثيرة (تعميم) → ما ناخذ منها «مدة»
     actions = actions.map(a => {
       if (a.type !== "schedule" || a.mode === "only_days" || ISO(a.end_date) || a.until_return_of || check(a)) return a;
       if (dur) return { ...a, ...(dur.start && !ISO(a.start_date) ? { start_date: dur.start } : {}), ...(dur.until ? { end_date: dur.until } : {}), ...(dur.back ? { until_return_of: dur.back } : {}) };
@@ -338,13 +338,14 @@ function durOf(text, start) {
   if ((m = /(?<![\d\/:.-])(\d{1,2})\s*(ايام|يوم)(\s|$)/.exec(s)) && +m[1] > 0 && +m[1] <= 60) return { until: A.isoPlus(base, +m[1] - 1) };
   for (const [w, k] of [["ثلاث", 3], ["ثلاثه", 3], ["اربع", 4], ["اربعه", 4], ["خمس", 5], ["خمسه", 5], ["ست", 6], ["سته", 6], ["سبع", 7], ["سبعه", 7], ["عشر", 10], ["عشره", 10]]) if (new RegExp(`(^|\\s)${w}\\s+(ايام|يوم)`).test(s)) return { until: A.isoPlus(base, k - 1) };
   const ds = [...s.matchAll(/(?<![\d:])(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?(?![\d:])/g)].map(x => toISO(x[0])).filter(Boolean);
-  if (ds.length >= 2) return { start: ds[0], until: ds[1] };
+  if (ds.length >= 2 && s.split(/\n+/).some(l => /من\s*(يوم\s+)?\S*\s*\d{1,2}[\/\-.]\d{1,2}.*(لين|الين|الى|حتى|لغايه|لحد)\s*(يوم\s+)?\S*\s*\d{1,2}[\/\-.]\d{1,2}/.test(l))) return { start: ds[0], until: ds[1] };
   if (ds.length === 1 && /(لين|الين|الى|حتى|لغايه|لحد)\s*(يوم\s+)?(\S+\s+)?\d/.test(s)) return { until: ds[0] };
   if ((m = /من\s+(يوم\s+)?(\S+)\s+(لين|الين|الى|حتى)\s*(يوم\s+)?(\S+)/.exec(s)) && wdW(m[2]) != null && wdW(m[5]) != null) { const st = nextOn(wdW(m[2]), A.nowR().iso); return { start: st, until: nextOn(wdW(m[5]), st) }; }
   if ((m = /(لين|الين|الى|حتى|لغايه|لحد)\s*(يوم\s+)?(\S+)/.exec(s)) && wdW(m[3]) != null) return { until: nextOn(wdW(m[3]), base) };
   if ((m = /(لين|الين|الى|حتى|لغايه|لحد)\s*(\d{1,2}\s+[\u0600-\u06FFa-z]+)/.exec(s))) { const v = toISO(m[2]); if (v) return { until: v }; }
   return null;
 }
+const shortMsg = t => String(t || "").length <= 140 && String(t || "").split(/\n+/).filter(l => l.trim()).length <= 3;
 function askDurText(acts) {
   const t = A.nowR(), start = acts.map(a => ISO(a.start_date) && a.start_date > t.iso ? a.start_date : t.iso).sort()[0];
   const opts = start === t.iso ? [{ k: "one", date: t.iso, label: "اليوم بس" }, { k: "one", date: A.isoPlus(t.iso, 1), label: `بكرة ${dayName(A.isoPlus(t.iso, 1))} بس` }] : [{ k: "one", date: start, label: `${dayName(start)} ${dmy(start)} بس` }];
@@ -554,6 +555,23 @@ function fillTimes(a, reply, user, many = false) {
     return o;
   }
   return a;
+}
+// (2.19.6) سطر الطبيب نفسه هو المرجع: «نفس دوامه» = ما نسوي له status/schedule، ووقت مكتوب في سطره (فترة وحدة) يغلب وقت الذكاء
+const SAMEW = /نفس\s*(دوام|شفت|الدوام|الشفت)|زي\s*ما\s*هو|مثل\s*ما\s*هو|ما\s*تغير|بدون\s*تغيير/;
+function lineTimes(a, user) {
+  if (!["status", "schedule"].includes(a.type) || !a.doctor_id) return a;
+  const d = docOf(a.doctor_id); if (!d) return a;
+  const segs = segsFor(d, user); if (!segs.length) return a;
+  const line = segs[0][0] || "";
+  if (SAMEW.test(A.norm(line))) return { ...a, __drop: true };                 // «د اشرف نفس دوامه (1ص – 9ص)» → ولا شي
+  if (a.type === "status" && a.kind !== "starts_at") return a;
+  const ts = timesIn(line); if (ts.length !== 2) return a;
+  if (a.type === "schedule" && (shiftsOf(a) || []).length > 1) return a;
+  const f = toMin(ts[0]), u = toMin(ts[1]);
+  if (toMin(a.from) === f && toMin(a.until) === u) return a;
+  const o = { ...a, from: ts[0], until: ts[1] }; if (a.type === "schedule") delete o.shifts;
+  if (a.type === "status") { if (u <= f) o.until_next_day = true; else delete o.until_next_day; }
+  return o;
 }
 // (2.19.0) فترات الدوام: shifts من الذكاء (فترتين) أو from/until (فترة وحدة) → [{s, e}] بالدقايق
 const tmn = v => typeof v === "number" ? v : toMin(v);
@@ -1090,6 +1108,22 @@ export async function bootFixes() {
       if (okPlan || okNow) mark.push("fx2195sahar");
     }
     lines.push(msg);
+  }
+  // 12) (2.19.6) رسالة التعميم اللي انرسلت للبوت 8:49: «مؤقت لين الخميس» لسحر وعبدالصمد + «لين 11م» لأشرف ومجدي وسارة → نشيلها
+  if (!doneIds.has("fx2196mon")) {
+    const BAD = new Set(["knkwf0iw", "bmq7w3l8", "pn75xfo6", "jmmw9wsl", "kfybetst"]);
+    const pref = A.db.doc("board/bawadi_plan");
+    const isBad = i => i.date === "2026-11-23" && (BAD.has(i.id) || (i.kind === "set_schedule" && i.sch?.tmp?.until === "2026-11-26") || (i.kind === "starts_at" && (i.until_time === "23:00" || i.until_min === 1380)));
+    const gone = await A.db.runTransaction(async tx => {
+      const c = (await tx.get(pref)).data() || {}; const bad = (c.items || []).filter(isBad);
+      if (bad.length) tx.set(pref, { ...c, items: (c.items || []).filter(i => !isBad(i)), at: Date.now() });
+      return bad.map(i => A.shortName(docOf(i.doctorId)?.name || i.doctorId));
+    });
+    await sleep(1200);
+    const left = ((await pref.get()).data()?.items || []).filter(isBad);
+    const keep = ((await pref.get()).data()?.items || []).filter(i => i.date === "2026-11-23").map(i => `${A.shortName(docOf(i.doctorId)?.name || "")} (${i.kind === "set_schedule" ? (i.sch?.tmp ? "مؤقت" : "ثابت") : i.kind === "remove_doctor" ? "يتشال" : i.kind})`);
+    lines.push(left.length ? `❌ ما قدرت أشيل ${left.length} من تغييرات الإثنين الغلط — قل لي` : `✅ شلت تغييرات الإثنين الغلط (${gone.length}): ${[...new Set(gone)].join("، ") || "—"}\nالباقي للإثنين: ${[...new Set(keep)].join("، ")}`);
+    if (!left.length) mark.push("fx2196mon");
   }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
