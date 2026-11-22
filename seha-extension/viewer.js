@@ -1,4 +1,4 @@
-// صورة تقرير الطلب المفتوح في صحة (من لوحة سابا) — تكبير وتدوير
+// صورة تقرير الطلب المفتوح في صحة (من لوحة الموظفين) — تكبير وتدوير
 let rot = 0;
 const m = document.getElementById("m");
 chrome.storage.local.get(["sabaReqImg", "sabaReq"], ({ sabaReqImg: x, sabaReq: r }) => {

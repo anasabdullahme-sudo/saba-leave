@@ -1,5 +1,5 @@
 /* ==========================================================================
-   سابا ← صحة : لوحة عائمة داخل منصة صحة تعبّي نموذج الإجازة من طلب سابا
+   موظفين ← صحة : لوحة عائمة داخل منصة صحة تعبّي نموذج الإجازة من طلب سابا
    - ما يضغط "تحقق" ولا "حفظ" أبداً (كل طلب يخصم نقاط) — الموظف يضغطها بنفسه
    - يعبّي الخانات الفاضية بس، وما يكتب فوق شي عدّله الموظف
    ========================================================================== */
@@ -119,7 +119,7 @@
     idNumber: "رقم الهوية", fileNo: "رقم الملف", dob: "تاريخ الميلاد", patientName: "اسم المريض", patientNameEn: "الاسم بالإنجليزي", phone: "الجوال",
     leaveStart: "بداية الإجازة", entryDate: "تاريخ الدخول", visitType: "نوع الزيارة", entryTime: "وقت الدخول", exitTime: "وقت الخروج", exitDate: "تاريخ الخروج", leaveEnd: "نهاية الإجازة", leaveDays: "عدد الأيام", visitDate: "تاريخ الحضور",
     companionName: "اسم المرافق", companionId: "هوية المرافق", companionDob: "ميلاد المرافق", relationship: "صلة القرابة",
-    doctorName: "الطبيب", doctorAr: "الطبيب المرخّص", stampDoctor: "ختم الطبيب", reason: "السبب", nationality: "الجنسية", gender: "الجنس", ref: "رقم طلب سابا",
+    doctorName: "الطبيب", doctorAr: "الطبيب المرخّص", stampDoctor: "ختم الطبيب", reason: "السبب", nationality: "الجنسية", gender: "الجنس", ref: "رقم الطلب",
   };
 
   // ---------- إيجاد الخانة من عنوانها ----------
@@ -709,7 +709,7 @@
     .note{font-size:12px;color:#8A5A12;background:#FFF7EA;border-radius:8px;padding:6px 8px}
   </style>
   <div class="p" id="p">
-    <div class="h" id="hd" title="اسحب لتحريك اللوحة — اضغط للتصغير"><span class="grip">⋮⋮</span><span class="dot"></span><b>سابا ← صحة<span class="cnt" id="cnt" hidden></span></b><button id="min" title="تصغير">–</button></div>
+    <div class="h" id="hd" title="اسحب لتحريك اللوحة — اضغط للتصغير"><span class="grip">⋮⋮</span><span class="dot"></span><b>موظفين ← صحة<span class="cnt" id="cnt" hidden></span></b><button id="min" title="تصغير">–</button></div>
     <div class="b" id="body"></div>
     <div class="ft" id="foot" hidden></div>
   </div>`;
@@ -717,7 +717,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COPY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 
-  let reqImg = null;                       // صورة التقرير للطلب المفتوح (تجي من لوحة سابا)
+  let reqImg = null;                       // صورة التقرير للطلب المفتوح (تجي من لوحة الموظفين)
   let req = null, auto = true, minimized = false, queue = [], queueAt = 0, hidden = {}, showFields = false, fixOpen = false, sehaAlert = null, fxType = null, fxChecked = [], fxNoteVal = "";
   const FIX_FIELDS = [
     { k: "patientName", ar: "الاسم" }, { k: "idNumber", ar: "الهوية" }, { k: "dob", ar: "الميلاد" }, { k: "phone", ar: "الجوال" },
@@ -726,7 +726,7 @@
     { k: "companionDob", ar: "ميلاد المرافق", types: ["companion"] }, { k: "relationship", ar: "القرابة", types: ["companion"] },
     { k: "photo", ar: "صورة التقرير" },
   ];
-  // الطلب «نشط» لما يكون انرسل من لوحة سابا قريب — غير كذا الإضافة ما تتحرك لحالها (عشان لو دخلت صحة بس تتأكد من سكليف)
+  // الطلب «نشط» لما يكون انرسل من لوحة الموظفين قريب — غير كذا الإضافة ما تتحرك لحالها (عشان لو دخلت صحة بس تتأكد من سكليف)
   const reqAge = () => req ? Date.now() - (req.sentAt || 0) : Infinity;
   const navActive = () => !!req && reqAge() < 5 * 60000;
   const fillActive = () => !!req && reqAge() < 60 * 60000;
@@ -769,9 +769,9 @@
   function openReq(q) { chrome.storage.local.set({ sabaReq: { ...q, sentAt: Date.now() }, sabaNavFor: "", sabaAddFor: "", sabaSwFor: "" }); }
   // قبل ما نفتح طلب من القائمة: نسأل صفحة الموظفين تتأكد من قاعدة البيانات إنه ما انرفع (من جهاز ثاني) — عشان ما ينرفع مرتين
   let checking = null;
-  // (1.9.8) «افتح الطلب للتأكيد»: نفتح الطلب نفسه في لوحة سابا (التبويب المفتوح، أو تبويب جديد)
+  // (1.9.8) «افتح الطلب للتأكيد»: نفتح الطلب نفسه في لوحة الموظفين (التبويب المفتوح، أو تبويب جديد)
   function openOnBoard(id) {
-    try { chrome.runtime.sendMessage({ type: "SABA_OPEN_REQ", id }); toastLocal("فتحت الطلب في لوحة سابا — أكّد التاريخ وارجع هنا"); }
+    try { chrome.runtime.sendMessage({ type: "SABA_OPEN_REQ", id }); toastLocal("فتحت الطلب في لوحة الموظفين — أكّد التاريخ وارجع هنا"); }
     catch { toastLocal("حدّث الصفحة (F5) وجرّب"); }
   }
   function useReq(q) {
@@ -817,7 +817,7 @@
     if (keys.length) chrome.storage.local.remove(keys);
     return got;
   }
-  // «تم رفعه مسبقاً» (من لوحة سابا): تنبيه أحمر فوق لين الموظف يضغط «فهمت»
+  // «تم رفعه مسبقاً» (من لوحة الموظفين): تنبيه أحمر فوق لين الموظف يضغط «فهمت»
   let dupInfo = null;
   const dupHtml = () => {
     if (!dupInfo || Date.now() - dupInfo.at > 30 * 60000) return "";
@@ -840,8 +840,8 @@
         ${free.length ? `<button class="btn pri" id="nextReq" style="flex:none">▶ الطلب التالي: ${esc(free[0].patientName || "")}</button>` : ""}
         <div class="qh">الطلبات اللي تنتظر الرفع (${pend.length})</div>
         <div class="ql">${pend.map(q => `<button class="qi ${q.lockedBy ? "lk" : here(q) ? "here" : ""}" data-id="${esc(q.id)}"><b>${esc(q.patientName || "—")}${q.lockedBy ? ` <i class="lkb">🔒 عند ${esc(q.lockedBy)}</i>` : ""}${sameId(q) ? ` <i class="lkb" style="background:#EEE9FF;color:#5B3CC4">🔁 نفس المراجع — طلب ثاني</i>` : ""}${q.dateLock ? ` <i class="lkb" style="background:#FFE8CC;color:#8A4B00">🔒 تعديل تاريخ — أكّده في اللوحة</i>` : q.dateFlag ? ` <i class="lkb" style="background:#FDECEC;color:#9B1C1C">${/🙋/.test(q.dateFlag) ? "🙋 تعديل تاريخ" : "⚠ تاريخ"}</i>` : ""}</b><span>${esc(TYPE_AR[q.type] || q.type)} · ${esc(q.account?.key || q.branch || "")}${here(q) ? " · حسابك الحالي" : ""}</span></button>`).join("")
-          || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة سابا عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
-        ${queueStale() && !queueAt ? "" : queueStale() ? "" : hh ? `<div class="tiny">آخر تحديث من لوحة سابا: ${hh}</div>` : ""}
+          || `<div class="empty">${queueAt && !queueStale() ? "ما فيه طلبات تنتظر ✓" : queueAt ? "ما فيه طلبات (حسب آخر قائمة وصلت)" : "افتح لوحة الموظفين عشان تظهر الطلبات هنا، أو اضغط زر صحة من الطلب."}</div>`}</div>
+        ${queueStale() && !queueAt ? "" : queueStale() ? "" : hh ? `<div class="tiny">آخر تحديث من لوحة الموظفين: ${hh}</div>` : ""}
         <details><summary>لصق طلب يدوي</summary><textarea id="paste" placeholder="الصق هنا (Ctrl+V)"></textarea></details>`;
       const nx = $("#nextReq"); if (nx) nx.onclick = () => useReq(free[0]);
       root.querySelectorAll(".qi").forEach(el => el.onclick = () => {
@@ -876,10 +876,10 @@
         ${reqImg?.id === req.id ? `<button class="thumb" id="viewImg" title="افتح صورة التقرير">${reqImg.pdf ? '<span class="pdf">PDF</span>' : '<img alt="">'}<i>🔍</i></button>` : ""}
         <div><div class="nm">${esc(req.patientName)}</div>
         <div class="meta"><span>${esc(TYPE_AR[req.type] || req.type)}</span><span class="ltr">${esc(req.idNumber)}</span><span>${esc(req.ref || "")}</span></div>
-        ${reqImg?.id === req.id ? `<button class="lnk" id="viewImg2">📄 صورة التقرير — كبّرها</button>` : `<div class="tiny">صورة التقرير تطلع هنا لما تكون لوحة سابا مفتوحة</div>`}</div>
+        ${reqImg?.id === req.id ? `<button class="lnk" id="viewImg2">📄 صورة التقرير — كبّرها</button>` : `<div class="tiny">صورة التقرير تطلع هنا لما تكون لوحة الموظفين مفتوحة</div>`}</div>
       </div>
       ${alertHtml}
-      ${req.dateLock ? `<div class="acc wrong" style="font-weight:600;background:#FFF4E5;color:#8A4B00;border-color:#F3C178">🔒 <b>المراجع قال التاريخ غلط</b>${req.dateFix ? ` — كتب: <span class="ltr">${esc(req.dateFix)}</span>` : ""}<br><span style="font-weight:500">ما تقدر تعبّي لين تأكّد التاريخ من صورة التقرير في لوحة سابا.</span></div>` : ""}
+      ${req.dateLock ? `<div class="acc wrong" style="font-weight:600;background:#FFF4E5;color:#8A4B00;border-color:#F3C178">🔒 <b>المراجع قال التاريخ غلط</b>${req.dateFix ? ` — كتب: <span class="ltr">${esc(req.dateFix)}</span>` : ""}<br><span style="font-weight:500">ما تقدر تعبّي لين تأكّد التاريخ من صورة التقرير في لوحة الموظفين.</span></div>` : ""}
       ${req.dateFlag && !req.dateLock ? `<div class="acc wrong" style="font-weight:600;background:#FDECEC;color:#9B1C1C;border-color:#F5B5B5">${/🙋/.test(req.dateFlag) ? "🙋 <b>المراجع يقول التاريخ غلط</b>" : "⚠ <b>انتبه للتاريخ</b>"}<br><span style="font-weight:500">${esc(req.dateFlag.replace(/^🙋 المراجع يقول التاريخ غلط( — )?/, ""))}</span><br><span style="font-weight:400;font-size:12px">تأكد من التاريخ من صورة التقرير قبل الرفع</span></div>` : ""}
       <div class="acc ${acc.state}">${accTxt}</div>
       <div class="row">${req.dateLock ? `<button class="btn pri" id="toBoard" style="background:#E07B12">افتح الطلب للتأكيد</button>` : `<button class="btn pri" id="fill">تعبئة الخانات</button><button class="btn sec" id="goForm" title="الخدمات ← الإجازات المرضية ← إضافة">افتح النموذج</button>`}</div>
@@ -896,7 +896,7 @@
       <div class="tiny">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     const foot = $("#foot"); foot.hidden = false;
-    foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة سابا</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
+    foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة الموظفين</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
     $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
     bindDup();
     const ao = $("#alertOk"); if (ao) ao.onclick = () => { sehaAlert = null; chrome.storage.local.remove("sabaAlert"); render(); };
@@ -916,10 +916,10 @@
           const l = (ch, area) => { const v = ch.sabaFixRes?.newValue; if (area === "local" && v && v.at === at) { clearTimeout(tm); chrome.storage.onChanged.removeListener(l); resolve(v); } };
           chrome.storage.onChanged.addListener(l);
         });
-        if (!res) { btn.disabled = false; btn.textContent = "أرسل للمريض"; return toastLocal("لوحة سابا لازم تكون مفتوحة في تبويب ثاني"); }
+        if (!res) { btn.disabled = false; btn.textContent = "أرسل للمريض"; return toastLocal("لوحة الموظفين لازم تكون مفتوحة في تبويب ثاني"); }
         if (!res.ok) { btn.disabled = false; btn.textContent = "أرسل للمريض"; return toastLocal(res.msg || "ما انرسل"); }
         fixOpen = false;
-        toastLocal(res.auto ? "✓ البوت بيرسل للمريض — الطلب صار «معلّق»" : "البوت مو متصل — أرسلها من لوحة سابا");
+        toastLocal(res.auto ? "✓ البوت بيرسل للمريض — الطلب صار «معلّق»" : "البوت مو متصل — أرسلها من لوحة الموظفين");
         if (!res.auto && res.wa) window.open(res.wa, "_blank");
         chrome.storage.local.set({ sabaHidden: hideId(r0.id) }, () => chrome.storage.local.remove("sabaReq"));
       };
@@ -958,7 +958,7 @@
       const at = Date.now(), d = { id: req.id, ref: req.ref, psl, at };
       chrome.storage.local.set({ ["sabaDone_" + at]: d, sabaDone: d, sabaHidden: hideId(req.id), sabaDoneLog: logDone(req.id, req.reopenN) }, () => {
         chrome.storage.local.remove("sabaReq");
-        toastLocal("تم ✓ — بيتحدث الطلب في لوحة سابا");
+        toastLocal("تم ✓ — بيتحدث الطلب في لوحة الموظفين");
       });
     };
     root.querySelectorAll(".cp").forEach(btn => btn.onclick = async () => {
@@ -979,7 +979,7 @@
       const t = (e.clipboardData || window.clipboardData).getData("text");
       const m = /SABA_SEHA:(\{[\s\S]*\})/.exec(t || "");
       e.preventDefault();
-      if (!m) return toastLocal("هذا مو طلب من لوحة سابا");
+      if (!m) return toastLocal("هذا مو طلب من لوحة الموظفين");
       try { useReq(JSON.parse(m[1])); } catch { toastLocal("ما قدرت أقرأ الطلب"); }
     });
   }
@@ -1146,7 +1146,7 @@
     }
     if (ch.sabaReq) {
       req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
-      if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من سابا"); }
+      if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من لوحة الموظفين"); }
       else { setMin(false); render(); }                                 // (1.9.7) بعد «تم الرفع»: الأداة تظل مفتوحة على «▶ الطلب التالي» (زي 1.8.8) — ما تتصغّر
     }
     if (!TOP && ch.sabaReq) return;

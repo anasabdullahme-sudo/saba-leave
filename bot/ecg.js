@@ -110,14 +110,15 @@ export async function onGroup(m) {
   }
 }
 
-async function addImage({ id, at, by, who, buf, num, how, imp = false }) {
+async function addImage({ id, at, by, who, buf, num, how, imp = false, pre = null }) {
   const mk = monthOf(at), o = await loadMonth(mk);
   if (o.items.some(x => x.id === id)) return null;
   const path = `ecg/${mk}/${id}.jpg`;
   await bucket().file(path).save(buf, { contentType: "image/jpeg", resumable: false });
   const it = { id, at, by: String(by).slice(0, 40), who: String(who).slice(0, 60), num, how, kind: "", path, ...(imp ? { imp: true } : {}) };
+  if (pre) { it.kind = pre.kind || "ecg"; const n = fileNums(pre.file_no || "")[0]; if (n) it.read = n; if (pre.date) it.rdate = String(pre.date).slice(0, 16); }   // انقرت قبل (خاص) — ما نعيد
   o.items.push(it); await saveMonth(mk);
-  classify(it, buf).then(() => saveMonth(mk)).catch(() => {});   // فاتورة؟ رقم على الورقة؟ (بالخلفية)
+  if (!pre) classify(it, buf).then(() => saveMonth(mk)).catch(() => {});   // فاتورة؟ رقم على الورقة؟ (بالخلفية)
   return it;
 }
 
@@ -224,7 +225,7 @@ async function saveLast(meta, zipBuf) {
 async function readLast() { try { return JSON.parse((await bucket().file(LAST + "last.json").download())[0].toString()); } catch { return null; } }
 const lastOpen = m => m && Date.now() - m.at < 14 * 864e5 && (m.missRows || []).some(r => !r.done);
 const noNum = new Map();                                  // id رسالة الصورة → { buf, at } (ما انقرا رقمها أو مو من الناقصين)
-let addQ = [], addT = null;
+let addQ = [], addT = null, savedQ = [], savedT = null;
 function queueAdd(x, say, ack = true) {
   if (ack && !addQ.length) say("⏳ وصلت — أجمّع صور الناقصين وأرسل لك الملف بعد دقيقة من آخر صورة.");
   addQ.push(x); clearTimeout(addT);
@@ -269,12 +270,20 @@ async function patchJob(name, img, row, sc) {
 async function dmImage(m, g, say) {
   const img = g.imageMessage, doc = g.documentMessage;
   if (!img && !(doc && /^image\//i.test(String(doc.mimetype || "")))) return false;
-  const meta = await readLast(); if (!lastOpen(meta)) return false;              // ما فيه شيت فيه ناقصين → مو لنا (ترخيص/وارد…)
+  const meta = await readLast(), open = lastOpen(meta);
   let buf; try { buf = await (C.download || downloadMediaMessage)({ ...m, message: g }, "buffer", {}, { logger: C.log, reuploadRequest: C.getSock().updateMediaMessage }); } catch { return false; }
   const cap = fileNums(String((img || doc)?.caption || ""))[0];
-  const o = cap ? { kind: "ecg", file_no: cap } : await readEcg(buf);
+  const o = cap && open ? { kind: "ecg", file_no: cap } : await readEcg(buf);
   if (!o || o.kind !== "ecg") return false;                                       // مو تخطيط → يكمل (ترخيص، إجازة، وارد)
   const num = cap || fileNums(o.file_no || "")[0] || "", id = m.key.id, at = Date.now();
+  // (2.19.2) ما فيه شيت فيه ناقصين → نحفظها مع صور الشهر (تدخل في الشيت الجاي) — ما تروح للتراخيص ولا الوارد
+  if (!open) {
+    await addImage({ id: "dm" + id, at, by: "أنس (خاص)", who: "anas", buf, num, how: num ? "dm" : "", pre: o });
+    savedQ.push(num || "؟"); clearTimeout(savedT);
+    savedT = setTimeout(() => { const L = savedQ; savedQ = []; const unk = L.filter(x => x === "؟").length;
+      say(`🫀 حفظت ${L.length === 1 ? "صورة ECG" : L.length + " صور ECG"} مع صور الشهر${L.length - unk ? ` (${L.filter(x => x !== "؟").join("، ")})` : ""} — تدخل في الشيت الجاي.\nما عندي شيت فيه ناقصين${meta ? ` (آخر شيت «${meta.fileName}» ما بقى فيه ناقص أو قديم)` : ""}. لو تبغاها تنضاف لشيت أرسلته قبل، أرسل الشيت مرة ثانية.${unk ? `\n⚠️ ${unk} ما قدرت أقرأ رقمها — بيجيك تنبيه ترد عليه بالرقم.` : ""}`); }, 15e3);
+    return true;
+  }
   const miss = meta.missRows.filter(r => !r.done).map(r => r.num);
   if (num && miss.includes(num)) { queueAdd({ id, num, buf, at }, say); return true; }
   noNum.set(id, { buf, at }); for (const [k, v] of noNum) if (at - v.at > 6 * 3600e3) noNum.delete(k);

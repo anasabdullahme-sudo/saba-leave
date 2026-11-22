@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cut">
 <meta name="theme-color" content="#F3FAFE">
-<title>سابا | رفع الإجازات</title>
+<title>موظفين | رفع الإجازات</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="preconnect" href="https://www.gstatic.com">
@@ -230,9 +230,9 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 </script>
 <script nomodule>window.__sabaBootFail("متصفحك قديم", "حدّث نظام الجوال، أو افتح الرابط من متصفح Chrome أو Safari.");</script>
 <header class="top">
-  <a class="brand" href="./" aria-label="سابا">
+  <a class="brand" href="./" aria-label="موظفين">
     <svg width="38" height="38" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
-    <span><b>سابا</b><small>بوابة رفع الإجازات</small></span>
+    <span><b>موظفين</b><small>بوابة رفع الإجازات</small></span>
   </a>
   <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
   <span class="help">للاستفسار: استقبال الفرع</span>
@@ -243,7 +243,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
   <section class="screen on" id="sHome">
     <div class="hero">
       <h1>ارفع إجازتك لمنصة صحة بصورة واحدة</h1>
-      <p>صوّر التقرير الطبي، ونقرأ بياناتك منه تلقائياً، وفريق سابا يرفعها لك على منصة صحة.</p>
+      <p>صوّر التقرير الطبي، ونقرأ بياناتك منه تلقائياً، وفريق الموظفين يرفعها لك على منصة صحة.</p>
     </div>
     <div class="choices" id="choices"></div>
     <div class="how" aria-label="الخطوات">
@@ -324,7 +324,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
       <div class="card done">
         <div class="tick"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
         <h2>وصل طلبك</h2>
-        <p>طلبك الحين عند فريق سابا، ويتم رفعه على منصة صحة في أقرب وقت.<br>احتفظ برقم الطلب للمتابعة مع الاستقبال.</p>
+        <p>طلبك الحين عند فريق الموظفين، ويتم رفعه على منصة صحة في أقرب وقت.<br>احتفظ برقم الطلب للمتابعة مع الاستقبال.</p>
         <div class="ref"><span id="refTxt"></span><button id="btnCopyRef">نسخ</button></div>
         <div id="doneWa"></div>
         <div style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn btn-ghost" id="btnDoneTrack">تابع طلبك</button><button class="btn btn-ghost" id="btnNew">طلب جديد</button></div>
@@ -348,7 +348,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261119a";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261122a";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -357,7 +357,7 @@ const ICONS = {
   attendance: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 14.5l2 2 4-4"/></svg>',
 };
 const DESC = {
-  sick: "إجازة مرضية صادرة لك من طبيب سابا",
+  sick: "إجازة مرضية صادرة لك من طبيب العيادة",
   companion: "إجازة لمرافق مريض (أب، أم، ابن…)",
   attendance: "إثبات حضورك للعيادة في تاريخ الزيارة",
 };
@@ -423,7 +423,7 @@ async function openFixPage(id) {
   await apiReady;
   let f = null; try { f = await api.getFix?.(id); } catch (e) { console.warn(e); }
   if (!f) return fxEnd("الرابط غير صحيح", "تأكد إنك فتحت الرابط كامل من رسالة الواتساب، أو كلّم استقبال الفرع.");
-  if (f.status !== "open") return fxEnd("وصلنا تعديلك", "هذا الطلب تعدّل من قبل، وفريق سابا يتابعه. إذا عندك سؤال كلّم استقبال الفرع.", true);
+  if (f.status !== "open") return fxEnd("وصلنا تعديلك", "هذا الطلب تعدّل من قبل، وفريق الموظفين يتابعه. إذا عندك سؤال كلّم استقبال الفرع.", true);
   const ftype = ["sick", "companion", "attendance"].includes(f.newType) ? f.newType : f.type;
   const clean = v => String(v || "").replace(/[<>&]/g, "");
   $("#fxSub").textContent = `${typeName(ftype)}${f.name ? " — " + f.name : ""}`;
@@ -431,7 +431,7 @@ async function openFixPage(id) {
   const CTX = { patientName: "اسم المريض", idNumber: "رقم الهوية", dob: "تاريخ الميلاد", leaveStart: "بداية الإجازة", leaveEnd: "نهاية الإجازة", visitDate: "تاريخ الحضور" };
   const ctx = f.ctx && typeof f.ctx === "object" ? Object.entries(f.ctx).filter(([k, v]) => CTX[k] && v && !(f.fields || []).includes(k)) : [];
   $("#fxNote").innerHTML = (switched ? `<b>طلبك صار «${typeName(ftype)}» بدل «${typeName(f.type)}».</b> بياناتك موجودة عندنا، كمّل الناقص بس.<br>` : "")
-    + `<b>${switched ? "المطلوب منك:" : "فريق سابا يحتاج تصحيح:"}</b> ${(f.fields || []).map(fixLabel).join("، ")}${f.note ? `<br>${clean(f.note)}` : ""}`
+    + `<b>${switched ? "المطلوب منك:" : "فريق الموظفين يحتاج تصحيح:"}</b> ${(f.fields || []).map(fixLabel).join("، ")}${f.note ? `<br>${clean(f.note)}` : ""}`
     + (ctx.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #E8C98A;font-size:13.5px">${ctx.map(([k, v]) => `${CTX[k]}: <b>${clean(v)}</b>`).join("<br>")}</div>` : "");
   $("#fxNote").classList.add("on");
   const date = { mode: "numeric", ph: "اكتب أو اختر من التقويم", max: 10, date: true, ltr: true, err: "اكتب التاريخ بالشكل 25/10/2026 أو اختره من التقويم" };
@@ -451,7 +451,7 @@ async function openFixPage(id) {
       <img id="fxShot" alt="" style="display:none;margin-top:10px;max-height:220px;border-radius:12px;border:1px solid var(--line)">
       <input type="file" id="fxInCam" accept="image/*" capture="environment" hidden><input type="file" id="fxInPick" accept="image/*,application/pdf" hidden>
       <div class="err">صوّر التقرير كامل وواضح</div></div>`;
-  h += `<label class="f"><span><i class="lb">ملاحظة لفريق سابا (اختياري)</i></span><input name="note" maxlength="250"></label>
+  h += `<label class="f"><span><i class="lb">ملاحظة لفريق الموظفين (اختياري)</i></span><input name="note" maxlength="250"></label>
         <button class="btn btn-primary submit" id="fxSend" type="submit">إرسال التعديل</button>`;
   const form = $("#fxForm"); form.innerHTML = h;
   for (const k of keys) { const i = form.querySelector(`[name="${k}"]`); if (i && f.values?.[k]) i.value = f.values[k]; }
@@ -491,7 +491,7 @@ async function openFixPage(id) {
     try {
       if (photo) { btn.textContent = "نرفع الصورة…"; ans.imagePath = await withRetry(() => api.uploadImage(photo)); }
       await withRetry(() => api.answerFix(id, ans));
-      fxEnd("وصل تعديلك ✓", "شكراً لك. فريق سابا بيكمل رفع طلبك على منصة صحة الحين.", true);
+      fxEnd("وصل تعديلك ✓", "شكراً لك. فريق الموظفين بيكمل رفع طلبك على منصة صحة الحين.", true);
     } catch (err) {
       console.error(err);
       if (err?.code === "permission-denied") return fxEnd("وصلنا تعديلك", "هذا الطلب تعدّل من قبل أو انلغى. إذا عندك سؤال كلّم استقبال الفرع.", true);
@@ -932,9 +932,9 @@ $("#trForm").addEventListener("submit", async e => {
       const dates = x.type === "attendance" ? (x.visitDate || x.leaveStart) : [x.leaveStart, x.leaveEnd].filter(Boolean).join(" ← ");
       let st, cls, extra = "";
       if (x.state === "done") { st = "✅ تم الرفع على منصة صحة"; cls = "ok"; extra = `تقدر تشوفها من تطبيق <b>صحتي</b> ← الإجازات المرضية. إذا ما ظهرت لك للحين، تكون بانتظار اعتماد الطبيب.`; }
-      else if (x.state === "held" && x.fix) { st = "✏️ يحتاج تعديل بسيط منك"; cls = "fix"; extra = "فريق سابا يحتاج تصحيح بعض البيانات قبل الرفع."; }
-      else if (x.state === "held") { st = "⏳ قيد المراجعة"; cls = "wait"; extra = "فريق سابا يراجع طلبك."; }
-      else { st = "⏳ بالانتظار"; cls = "wait"; extra = "وصلنا طلبك، وبيرفعه فريق سابا على منصة صحة."; }
+      else if (x.state === "held" && x.fix) { st = "✏️ يحتاج تعديل بسيط منك"; cls = "fix"; extra = "فريق الموظفين يحتاج تصحيح بعض البيانات قبل الرفع."; }
+      else if (x.state === "held") { st = "⏳ قيد المراجعة"; cls = "wait"; extra = "فريق الموظفين يراجع طلبك."; }
+      else { st = "⏳ بالانتظار"; cls = "wait"; extra = "وصلنا طلبك، وبيرفعه فريق الموظفين على منصة صحة."; }
       const acts = [
         x.state === "held" && x.fix ? `<a class="btn-primary" style="background:var(--blue);color:#fff" href="./?fix=${encodeURIComponent(x.fix)}">عدّل طلبك الحين</a>` : "",
         wa && x.ref ? `<a href="${waLink(wa, x.ref)}" target="_blank" rel="noopener" style="background:#25D366;color:#fff">${WA_ICON} استفسر واتساب</a>` : "",
@@ -961,7 +961,7 @@ const DONE_TXT = { h: $("#sDone h2").textContent, p: $("#sDone p").innerHTML };
 function setDone(dup) {
   $("#doneWa").innerHTML = "";
   $("#sDone h2").textContent = dup ? "طلبك وصلنا من قبل" : DONE_TXT.h;
-  $("#sDone p").innerHTML = dup ? "نفس هذا الطلب (نفس الهوية وتواريخ الإجازة) أرسلته قبل، وهو عند فريق سابا.<br>ما تحتاج ترسله مرة ثانية. إذا عندك استفسار كلّم استقبال الفرع." : DONE_TXT.p;
+  $("#sDone p").innerHTML = dup ? "نفس هذا الطلب (نفس الهوية وتواريخ الإجازة) أرسلته قبل، وهو عند فريق الموظفين.<br>ما تحتاج ترسله مرة ثانية. إذا عندك استفسار كلّم استقبال الفرع." : DONE_TXT.p;
   $("#sDone .ref").style.display = dup ? "none" : "";
 }
 function showDuplicate() { setDone(true); reset("sDone"); }

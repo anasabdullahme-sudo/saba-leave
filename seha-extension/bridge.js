@@ -85,7 +85,7 @@
   // اللوحة: القفل راح (انتهى وقتك / أخذه جهاز ثاني) أو رجع لك → الأداة في صحة تبيّنه
   listen(e => { if (e.source !== window || e.data?.type !== "SABA_LOCK" || !e.data.id || !isBoard()) return; const { id, ok, reason, by } = e.data; chrome.storage.local.set({ sabaLock: { id, ok: !!ok, reason: reason || "", by: by || "", at: Date.now() } }); });
   // تبويب اللوحة ما ينام ولا ينمسح من الذاكرة (هو اللي يوصل الأداة بقاعدة البيانات)
-  // كل صفحات سابا (اللوحة والرئيسية والأطباء) تتشارك اتصال قاعدة البيانات بالمتصفح — لو وحدة منها نامت ممكن تأخّر الباقين
+  // كل صفحات الموظفين (اللوحة والرئيسية والأطباء) تتشارك اتصال قاعدة البيانات بالمتصفح — لو وحدة منها نامت ممكن تأخّر الباقين
   const ourPage = location.hostname === "anasabdullahme-sudo.github.io" && location.pathname.startsWith("/saba-leave/");
   const keepAwake = () => { if ((isBoard() || ourPage) && alive()) try { chrome.runtime.sendMessage({ type: "SABA_BOARD_HERE" }); } catch {} };
   chrome.storage.onChanged.addListener((ch, area) => {
@@ -98,7 +98,7 @@
   timer = setInterval(() => { try { active(); } catch { alive(); } }, 120000);
   chrome.storage.onChanged.addListener((ch, area) => { const a = area === "local" && ch.sabaAlert?.newValue; if (a && isBoard()) post({ type: "SABA_SEHA_ALERT", labels: a.labels || [], at: a.at }); });
 
-  // طلب تعديل من داخل صحة → لوحة سابا (تبويب واحد بس يتكفّل فيه)
+  // طلب تعديل من داخل صحة → لوحة الموظفين (تبويب واحد بس يتكفّل فيه)
   const TAB = Math.random().toString(36).slice(2);
   chrome.storage.onChanged.addListener(async (ch, area) => {
     const fr = area === "local" && ch.sabaFixReq?.newValue; if (!fr || !isBoard()) return;

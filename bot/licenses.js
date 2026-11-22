@@ -10,7 +10,8 @@ const FILE = nodePath.join(STORE, "licenses.json");
 const DAY = 864e5, WARN_DAYS = 60;
 let C = null, S = { items: [], seq: 0, docBranch: {} }, saveT = null, pushT = null;
 // (2.18.1) فرع الترخيص: من «اسم المنشأة» في الملف أو أنس يقوله — ويتحدّث في موقع الإجازات (public/docBranches)
-const BR = [["haramain", "الحرمين", /حرمين|haramain/i], ["tala", "تالا", /تالا|tala\b/i], ["watanak", "وطنك", /وطنك|watanak/i], ["sulaimaniyah", "السليمانية", /سليماني|sulaim/i], ["bawadi", "البوادي", /بوادي|bawadi/i]];
+// (2.19.2) العرض: تالا ← «الزهراء»، وطنك ← «صفا» — والقراءة تقبل الاسمين (الترخيص مكتوب فيه الاسم القديم)
+const BR = [["haramain", "الحرمين", /حرمين|haramain/i], ["tala", "الزهراء", /تالا|زهرا|tala\b/i], ["watanak", "صفا", /وطنك|watanak|(^|[\s،,ب])(ال)?صفا(\s|$|[،,.])/i], ["sulaimaniyah", "السليمانية", /سليماني|sulaim/i], ["bawadi", "البوادي", /بوادي|bawadi/i]];
 export const branchOf = txt => (BR.find(([, , re]) => re.test(String(txt || ""))) || [""])[0];
 const brAr = id => (BR.find(b => b[0] === id) || [, ""])[1];
 const SITE = "https://anasabdullahme-sudo.github.io/saba-leave/shared.js";
@@ -229,7 +230,7 @@ const ACT = ["license_renew", "license_list", "license_missing", "license_branch
 function checkAct(a) {
   if (!ACT.includes(a.type)) return null;
   if (a.type === "license_list" || a.type === "license_missing") return "";
-  if (a.type === "license_branch") return !branchOf(a.branch) ? "أي فرع؟ (الحرمين، تالا، وطنك، السليمانية، البوادي)" : String(a.name || a.code || "").trim() ? "" : "مين الطبيب؟";
+  if (a.type === "license_branch") return !branchOf(a.branch) ? "أي فرع؟ (الحرمين، الزهراء، صفا، السليمانية، البوادي)" : String(a.name || a.code || "").trim() ? "" : "مين الطبيب؟";
   const x = find(a.code, a.name); if (!x) return `ما لقيت ترخيص ${a.code ? "#" + String(a.code).replace(/^#/, "") : "«" + (a.name || "—") + "»"} — قل لي الاسم كامل`;
   return ISO(a.end_date) ? "" : "لين متى الترخيص الجديد؟ (تاريخ الانتهاء)";
 }

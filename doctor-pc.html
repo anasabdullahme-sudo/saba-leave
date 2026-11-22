@@ -60,7 +60,7 @@ let me = null, ext = false, version = "", board = null;
 
 function renderState() {
   const el = $("#state");
-  if (!ext) { el.innerHTML = `<span class="warn">الأداة مو مثبتة على هذا الجهاز (أو تحتاج تحديث).</span><br>ثبّت أداة «سابا ← صحة» من متجر كروم، وبعدها حدّث هذي الصفحة.`; $("#pick").hidden = true; return; }
+  if (!ext) { el.innerHTML = `<span class="warn">الأداة مو مثبتة على هذا الجهاز (أو تحتاج تحديث).</span><br>ثبّت أداة «موظفين ← صحة» من متجر كروم، وبعدها حدّث هذي الصفحة.`; $("#pick").hidden = true; return; }
   $("#pick").hidden = false;
   el.innerHTML = me
     ? `<div class="st"><span class="ok">✓ هذا الجهاز مربوط بـ</span><b>د. ${esc(me.name)}</b><span style="flex:1"></span><button class="btn red" id="unlink">فك الربط</button></div>`

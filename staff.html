@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#F3FAFE">
-<title>لوحة الإجازات | سابا</title>
+<title>لوحة الإجازات | موظفين</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -291,7 +291,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
   <form class="card" id="loginForm">
     <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
     <h1>لوحة رفع الإجازات</h1>
-    <p>دخول موظفي سابا</p>
+    <p>دخول الموظفين</p>
     <label for="em">البريد الإلكتروني</label><input id="em" type="email" autocomplete="username" required>
     <label for="pw">كلمة المرور</label><input id="pw" type="password" autocomplete="current-password" required>
     <button class="btn btn-primary" type="submit">دخول</button>
@@ -304,12 +304,12 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
   <header class="bar"><div class="bar-in">
     <div class="brand">
       <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><g fill="#00A6E2"><rect x="17" y="3" width="6" height="34" rx="3"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(60 20 20)"/><rect x="17" y="3" width="6" height="34" rx="3" transform="rotate(-60 20 20)"/></g><circle cx="20" cy="20" r="4.2" fill="#003765"/></svg>
-      <span><b>سابا</b><small>لوحة رفع الإجازات</small></span>
+      <span><b>موظفين</b><small>لوحة رفع الإجازات</small></span>
     </div>
     <nav class="branches" id="branches" aria-label="الفروع"></nav>
     <div class="me">
       <a class="seha" id="sehaTop" target="_blank" rel="noopener" title="فتح منصة صحة في نافذة جديدة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>منصة صحة</a>
-      <a class="seha tool" id="toolDl" target="_blank" rel="noopener" title="إضافة «سابا ← صحة» من متجر كروم"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
+      <a class="seha tool" id="toolDl" target="_blank" rel="noopener" title="إضافة «موظفين ← صحة» من متجر كروم"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>أداة صحة <small id="toolVer"></small><i class="dot" id="toolDot" hidden></i></a>
       <a class="admin-btn" href="./doctors.html" style="display:inline-flex;align-items:center;text-decoration:none" title="جداول أطباء البوادي">جداول الأطباء</a>
       <span id="demoPill" class="demo-pill" hidden>وضع تجريبي</span>
       <span class="who" id="who" title="اسم هالجهاز"></span>
@@ -483,7 +483,7 @@ kbd{font-family:inherit;font-size:11.5px;background:var(--ice);border-radius:5px
 <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastTxt"></span><button id="toastBtn" hidden></button></div>
 
 <script type="module">
-import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261119a";
+import { BRANCHES, TYPES, branchName, typeName, DEMO, DOCTORS, backend, doctorById, timeAgo, matchDoctor, HOLD_REASONS, holdName, attachDatePicker, fmtDateInput, SEHA_URL, SEHA_ACCOUNTS, fixFieldsFor, fixLabel, fixLink, fixMessage, dupFields, doctorFits, typeSwitchFields, arNum, relayDoctorAlerts, autoUpdate, compressImage, chooseDoctor, DEFAULT_BRANCH, TEAM_MAX } from "./shared.js?v=20261122a";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -579,7 +579,7 @@ function start() {
       const seen = S.inq.get(x.id);
       if (!S.firstLoad && x.inquiryAt && x.inquiryAt !== seen && (seen !== undefined || Date.now() - x.inquiryAt < 120000)) {
         chime(); toast(`📩 ${x.patientName} يستفسر عن طلبه — ${branchName(x.branch)} · ${typeName(x.type)}${x.inquiryText ? `: «${x.inquiryText.slice(0, 60)}»` : ""}`);
-        if (document.hidden && "Notification" in window && Notification.permission === "granted") new Notification("مراجع يستفسر — سابا", { body: `${x.patientName} — ${branchName(x.branch)}`, tag: "saba-inq" });
+        if (document.hidden && "Notification" in window && Notification.permission === "granted") new Notification("مراجع يستفسر — موظفين", { body: `${x.patientName} — ${branchName(x.branch)}`, tag: "saba-inq" });
       }
       S.inq.set(x.id, x.inquiryAt || null);
     }
@@ -647,7 +647,7 @@ function renderCounts() {
   const heldIn = S.held.filter(x => x.branch === S.branch).length;
   $("#hSub").textContent = (inBranch ? `${inBranch} طلب بانتظار الرفع` : "لا توجد طلبات بانتظار الرفع") + (heldIn ? ` و ${heldIn} معلّق (كل الأنواع)` : "") + " في هذا الفرع";
   const total = S.pending.length;
-  document.title = (total ? `(${total}) ` : "") + "لوحة الإجازات | سابا";
+  document.title = (total ? `(${total}) ` : "") + "لوحة الإجازات | موظفين";
 }
 
 /* ---------- القوائم ---------- */
@@ -1397,7 +1397,7 @@ function notify(items) {
   const x = items[items.length - 1];
   toast(items.length > 1 ? `${items.length} طلبات جديدة` : `طلب جديد: ${typeName(x.type)} — ${branchName(x.branch)}`);
   if (document.hidden && "Notification" in window && Notification.permission === "granted")
-    new Notification("طلب جديد — سابا", { body: `${x.patientName} — ${typeName(x.type)} — ${branchName(x.branch)}`, tag: "saba-leave" });
+    new Notification("طلب جديد — موظفين", { body: `${x.patientName} — ${typeName(x.type)} — ${branchName(x.branch)}`, tag: "saba-leave" });
 }
 $("#btnSound").classList.toggle("on", S.sound);
 $("#btnSound").onclick = () => {
@@ -1702,7 +1702,7 @@ function fixDupMsg(e) {
     : `${e.by || "موظف ثاني"} أرسل له طلب تعديل${e.at ? " " + timeAgo(e.at) : ""} — ما نرسل مرتين`;
 }
 
-/* ---------- ربط إضافة «سابا ← صحة» ---------- */
+/* ---------- ربط إضافة «موظفين ← صحة» ---------- */
 let extVersion = null, sehaWarned = null;
 const EXT_LATEST = "1.9.7", EXT_ZIP = new URL("./saba-seha-extension.zip", location.href).href;
 const verLt = (a, b) => { const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
@@ -1716,7 +1716,7 @@ function renderExtHint() {
   $("#toolDl").title = !extVersion ? "الإضافة مو مثبتة في هالجهاز — اضغط وثبّتها من متجر كروم" : outdated ? `الإضافة في هالجهاز ${extVersion} — المثبّتة من المتجر تتحدث لحالها` : `الإضافة محدّثة (${extVersion})`;
   $("#sehaTxt").textContent = extVersion ? "افتح صحة وعبّي تلقائياً" : "افتح منصة صحة للرفع";
   const old = extVersion && verLt(extVersion, EXT_LATEST);
-  $("#extHint").innerHTML = !extVersion ? `ثبّت إضافة «سابا ← صحة» عشان تتعبى الخانات تلقائياً — <a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من متجر كروم</a>`
+  $("#extHint").innerHTML = !extVersion ? `ثبّت إضافة «موظفين ← صحة» عشان تتعبى الخانات تلقائياً — <a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من متجر كروم</a>`
     : old ? `<b style="color:var(--red)">⚠ الإضافة قديمة (${esc(extVersion)})</b> — المثبّتة من المتجر تتحدث لحالها. لو مثبّتة من ملف: شيلها من chrome://extensions و<a href="${EXT_STORE}" target="_blank" rel="noopener">ثبّتها من المتجر</a> (<a href="${EXT_ZIP}" download>أو الملف</a>)`
     : "<b>✓</b> إضافة التعبئة شغالة";
   if (old && !extWarned) { extWarned = true; toast(`إضافة صحة في هالجهاز قديمة (${extVersion}) — ثبّتها من متجر كروم (الرابط تحت زر صحة) عشان تتحدث لحالها`); }
@@ -1924,7 +1924,7 @@ function renderExtLink() {
   const dead = extVersion && extPingAt && extReadyAt < extPingAt && Date.now() - extPingAt > 5000;
   if (!dead) { if (bar) bar.hidden = true; return; }
   if (!bar) { bar = document.createElement("div"); bar.id = "extBar"; bar.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#FDECEC;color:#9B1C1C;border-top:1px solid #F5B5B5;padding:9px 14px;font-weight:600;text-align:center"; document.body.append(bar); }
-  bar.hidden = false; bar.textContent = "⚠ أداة «سابا ← صحة» انقطعت عن هالصفحة (غالباً انحدّثت) — حدّث الصفحة (F5) عشان «تم الرفع» من صحة يوصل";
+  bar.hidden = false; bar.textContent = "⚠ أداة «موظفين ← صحة» انقطعت عن هالصفحة (غالباً انحدّثت) — حدّث الصفحة (F5) عشان «تم الرفع» من صحة يوصل";
 }
 setInterval(() => { if (!extVersion) return; extPingAt = Date.now(); window.postMessage({ type: "SABA_EXT_PING" }, location.origin); setTimeout(renderExtLink, 5500); }, 60000);
 window.postMessage({ type: "SABA_EXT_PING" }, location.origin);

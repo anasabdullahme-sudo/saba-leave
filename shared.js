@@ -33,9 +33,9 @@ const LOCAL_HOST = location.protocol === "file:" || ["localhost", "127.0.0.1", "
 export const BRANCHES = [
   { id: "haramain",     ar: "الحرمين" },
   { id: "sulaimaniyah", ar: "السليمانية" },
-  { id: "tala",         ar: "تالا" },
-  { id: "bawadi",       ar: "سابا البوادي" },
-  { id: "watanak",      ar: "وطنك" },
+  { id: "tala",         ar: "الزهراء" },
+  { id: "bawadi",       ar: "البوادي" },
+  { id: "watanak",      ar: "صفا" },
 ];
 // (19/11) فرع ترخيص الطبيب من البوت (يقراه من ملف الترخيص أو أنس يقوله) — public/docBranches يغلب الجدول اللي تحت،
 // والطبيب اللي مو موجود ينضاف. كل طبيب له ترخيص واحد في فرع واحد = حساب صحة اللي تنرفع عليه إجازاته.
@@ -165,7 +165,7 @@ export function fixMessage({ name, ref, type, newType, fields, note, link }) {
   const t = TN[type] || "الإجازة", changed = newType && newType !== type;
   return [
     `السلام عليكم${name ? " " + name.split(" ")[0] : ""} 🌷`,
-    `معك عيادات سابا بخصوص طلب رفع ${t}${ref ? " رقم " + ref : ""}.`,
+    `معك فريق الموظفين بخصوص طلب رفع ${t}${ref ? " رقم " + ref : ""}.`,
     changed ? `طلبك لازم يكون «${TN[newType]}» بدل «${t}»، ونحتاج تكمّل البيانات الناقصة.` : "",
     `نحتاج تصحيح: ${fields.map(fixLabel).join("، ")}`,
     note ? `ملاحظة: ${note}` : "",

@@ -61,7 +61,7 @@ async function openReqOnBoard(id) {
     await chrome.storage.local.set({ sabaOpenReq: { id, at: Date.now() } });
   } catch { /* */ }
 }
-/* ---------- تنبيهات الأطباء بدون ما تكون صفحة سابا مفتوحة ----------
+/* ---------- تنبيهات الأطباء بدون ما تكون صفحة الموظفين مفتوحة ----------
    كل 30 ثانية (وقت الدوام بس) نشيك حالات اليوم؛ أي حدث جديد يطلع تنبيه صغير في التبويب اللي قدامك،
    ولو كروم مو قدامك (برنامج ثاني فاتح) يطلع إشعار ويندوز */
 const TODAY_URL = "https://firestore.googleapis.com/v1/projects/saba-leave/databases/(default)/documents/board/bawadi_today";
@@ -77,7 +77,7 @@ async function pollAlerts() {
     const h = riyadhHour(); if (h >= 1 && h < 7) return;                          // آخر الليل ما فيه دوام
     const st = await chrome.storage.local.get(["sabaDoctorMe", "sabaDocSeen", "sabaBoardCache", "sabaAlertsInit"]);
     if (st.sabaDoctorMe) return;                                                   // جهاز طبيب
-    // (1.9.5) توفير قراءات: لو صفحة سابا مفتوحة هي اللي توصل التنبيهات (تقرأ بس لما يتغير شي) → نقرأ بنفسنا كل 5 دقايق بس
+    // (1.9.5) توفير قراءات: لو صفحة الموظفين مفتوحة هي اللي توصل التنبيهات (تقرأ بس لما يتغير شي) → نقرأ بنفسنا كل 5 دقايق بس
     // (بدل كل 30 ثانية = 120 قراءة بالساعة لكل جهاز)
     const pages = await chrome.tabs.query({ url: "https://anasabdullahme-sudo.github.io/saba-leave/*" }).catch(() => []);
     if (pages.some(t => !t.discarded && /\/(staff|home|doctors)\.html/.test(t.url || "")) && Date.now() - lastPoll < 5 * 60000) return;
