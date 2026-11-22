@@ -117,7 +117,8 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - (2.19.0) مدة تغيير الدوام: لو قال يوم معيّن (اليوم/بكرة/الإثنين) بدون ثابت → status. لكن «بداية من / ابتداءً من / اعتباراً من / من يوم الإثنين …» = بداية تغيير (schedule مع start_date)، مو يوم واحد. لو قال ثابت/دائم/كل يوم → schedule بدون end_date. لو قال مدة → schedule مع end_date (آخر يوم بالمؤقت: «أسبوع» من البداية = البداية+6، «3 أيام» = البداية+2، «لين 30/11» = 2026-11-30، «من الأحد لين الخميس» = start_date الأحد و end_date الخميس) أو until_return_of = doctor_id الطبيب اللي «لين يرجع/ترجع من إجازته». بعد المؤقت يرجع لدوامه الثابت لحاله.
   ما قال مدة أبداً («د سارة من 5 لين 1»، «سيتم تغيير شفتها»)؟ لا تسأل أنت ولا تختار — حط schedule بدون end_date (و start_date لو قال «بداية من …») والنظام يسأله عن المدة بخيارات.
 - دوام بفترتين («من 11ص لين 2م و من 5:30م لين 10:30م»، «شفتين من ١١ ص الى ٢ م ومن ٥:٣٠ م الى ١٠:٣٠») → shifts فيها الفترتين كل وحدة start_time و end_time (مو فترة وحدة). وقت بدون ص/م بعد وقت مسائي بنفس الفترة = مسائي (٥:٣٠م الى ١٠:٣٠ = 17:30–22:30).
-- until_return_of = طبيب ثاني عليه إجازة (اللي الدوام يغطي مكانه) — مو نفس الطبيب أبداً. لو أنس ما قال «لين يرجع/ترجع فلان» لا تحطها. نفس دوامه المسجّل بالضبط؟ قل «نفس دوامه» وبدون أفعال.
+- until_return_of = طبيب ثاني عليه إجازة (اللي الدوام يغطي مكانه) — مو نفس الطبيب أبداً. لو أنس ما قال «لين يرجع/ترجع فلان» لا تحطها. رد على سؤال رجوع من إجازة (#B) فيه تغييرات لزملائه = تغييرات من يوم الرجوع (ثابت لو قال ثابت/الطبيعي/المعتاد) — مو «لين يرجع» الطبيب الراجع.
+- رسالة تبدأ بـ «لا» = رفض الاقتراح المنتظر (use_proposal = false)؛ طبّق اللي كتبه بعدها بس. نفس دوامه المسجّل بالضبط؟ قل «نفس دوامه» وبدون أفعال.
 - «فلان نفس دوامه / بشفته الطبيعي» = ما يتغيّر شي (إلا لو هو في إجازة ويرجع → end_vacation).
 - تغيير كبير (دوام ثابت، إضافة/حذف طبيب، تراجع) وأنت فاهمه من كلامه الصريح → طبّق. لو فاهمه من استنتاجك أو من رسالة قروب محوّلة بس → confirm_first = true و actions = اللي بتسويه، واسأله «أطبّق؟».
 - لو عندك «اقتراح ينتظر موافقته» ووافق («ايوه/طبق/تمام») → use_proposal = true. لو عدّل عليه → اكتب الأفعال الجديدة كاملة.
@@ -274,6 +275,11 @@ export async function handle(m, text, { forwarded = false } = {}) {
     }
   }
   blog(user, out);
+  // (2.19.5) «لا …» = رفض الاقتراح دايم (مو بيد الذكاء)، ورسالة طويلة فيها طلبات جديدة مو موافقة
+  const nt = nn(text).trim();
+  const NO = /^(لا|لاء|لأ|no|الغ|الغي|الغيه|كنسل|cancel|غلط|لا تسوي|لا تطبق|وقف)(\s|$|[،,.!؟])/i.test(nt);
+  const YES = /^(ايوه|ايوا|اي|نعم|تمام|طبق|طبقه|طبقها|موافق|اوكي|ok|okay|يلا|سو|سوه|سويه|اعتمد|صح|ابشر|زين|كمل)(\s|$|[،,.!])/i.test(nt);
+  if (NO || (out.use_proposal && !YES && nt.length > 60)) { if (out.use_proposal) A.log.warn({ text: nt.slice(0, 80) }, "use_proposal انرفض — مو موافقة"); out.use_proposal = false; if (NO) { proposal = null; persist(); } }
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
   let reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
   if (actions.length) for (const [a, b] of TENSE) reply = reply.replace(a, b);   // التنفيذ بعد الرد — ما نقول «عدّلت» قبل ما ينحفظ
@@ -583,6 +589,8 @@ function fillBack(a) {
   if (a.type !== "schedule" || !a.until_return_of) return a;
   const d = findDocLoose(a.until_return_of);
   if (d && d.id === a.doctor_id) { const { until_return_of, ...rest } = a; return rest; }   // (2.19.4) «لين يرجع» نفس الطبيب = غلط من الذكاء → نشيلها
+  // (2.19.5) «لين يرجع فلان» وفلان مو في إجازة يوم بداية التغيير (راجع قبلها أو نفس اليوم) = ما لها معنى → نشيلها
+  if (d) { const st = ISO(a.start_date) ? a.start_date : A.nowR().iso; const away = (A.getBoard()?.vacations || []).some(v => (v.doctorId === d.id || (d.code && String(v.code) === String(d.code))) && v.start <= st && (!v.end || v.end >= st)); if (!away) { const { until_return_of, ...rest } = a; return rest; } }
   return d ? { ...a, until_return_of: d.id } : { ...a, __bad: `«لين يرجع ${a.until_return_of}» — ما عرفت مين الطبيب` };
 }
 const backInfo = id => { const v = (A.getBoard()?.vacations || []).filter(x => x.doctorId === id && (!x.end || x.end >= A.nowR().iso)).sort((p, q) => p.start.localeCompare(q.start))[0]; return v ? (v.end ? `يرجع ${dayName(A.isoPlus(v.end, 1))} ${dmy(A.isoPlus(v.end, 1))}` : "إجازته مفتوحة") : "مو مسجّل عليه إجازة"; };
@@ -700,6 +708,7 @@ async function execute(actions, pclar, pdocs) {
   const allOk = !out.some(l => /^(❌|⚠️)/.test(l));
   for (const a of resolves) {
     const it = pclar.find(i => i.code === String(a.code || "").replace("#", "").toUpperCase()) || null;
+    if (!it && /^#?[BWKF]\w*$/i.test(String(a.code || ""))) continue;               // (2.19.5) سؤال رجوع/مدة/بانوراما — ينقفل من مكانه، بدون تنبيه
     if (!it) { out.push(`⚠️ ما لقيت #${a.code}`); continue; }
     if (!allOk && actions.length > 1) { out.push(`⏸ ما قفلت #${it.code} لأن فيه شي ما انحفظ`); continue; }
     await A.db.runTransaction(async tx => { const ref = A.db.doc("bot/pending_clarify"), c = (await tx.get(ref)).data() || {}; tx.set(ref, { items: (c.items || []).filter(i => i.code !== it.code) }); });
@@ -1059,6 +1068,29 @@ export async function bootFixes() {
     if (acts.length || miss.length) lines.push(`قروب الشكاوي (تامر وإلهام):\n${[...out, miss.length ? "❌ ما لقيت: " + miss.join("، ") : ""].filter(Boolean).join("\n")}`);
     if (!out.some(l => /^(❌|⚠️)/.test(l))) mark.push("fx1911tamer");
   }
+  // 11) (2.19.5) د. سحر: انحفظت «مؤقت لين يرجع عبدالصمد» بالغلط (عبدالصمد راجع نفس اليوم → كانت بترجع 2م–10م) → ثابت
+  if (!doneIds.has("fx2195sahar")) {
+    const sahar = byName("سحر محمد") || byName("سحر"), sh = [{ s: 660, e: 840 }, { s: 1050, e: 1350 }];
+    let msg = "";
+    if (!sahar) msg = "❌ ما لقيت د. سحر في الجدول";
+    else {
+      const pref = A.db.doc("board/bawadi_plan");
+      const fixedPlan = await A.db.runTransaction(async tx => {
+        const c = (await tx.get(pref)).data() || {}; let n = 0;
+        const items = (c.items || []).map(i => { if (i.doctorId === sahar.id && i.kind === "set_schedule" && i.sch?.tmp) { n++; const { tmp, ...sch } = i.sch; return { ...i, sch: { ...sch, shifts: sh } }; } return i; });
+        if (n) tx.set(pref, { ...c, items, at: Date.now() }); return n;
+      });
+      const d0 = docOf(sahar.id);
+      if (d0?.tmp) await A.updateSchedules([{ d: d0, sch: { days: [], shifts: sh } }], { by: BY });   // لو انطبق قبل
+      await sleep(1200);
+      const plan = ((await pref.get()).data()?.items || []).find(i => i.doctorId === sahar.id && i.kind === "set_schedule");
+      const okPlan = plan ? !plan.sch?.tmp && JSON.stringify((plan.sch?.shifts || []).map(x => [x.s, x.e])) === JSON.stringify(sh.map(x => [x.s, x.e])) : false;
+      const cur = docOf(sahar.id), okNow = !cur?.tmp && JSON.stringify((cur?.shifts || []).map(x => [x.s, x.e])) === JSON.stringify(sh.map(x => [x.s, x.e]));
+      msg = okPlan ? `✅ د. سحر محمد: دوامها من الإثنين ${plan.date ? "(" + plan.date + ")" : ""} صار ثابت 11ص – 2م و 5:30م – 10:30م (شلت «مؤقت لين يرجع عبدالصمد»)` : okNow ? "✅ د. سحر محمد: دوامها الثابت الحين 11ص – 2م و 5:30م – 10:30م" : fixedPlan ? "❌ د. سحر: عدّلت الخطة بس ما قدرت أتأكد منها — شيك عليها في صفحة الأطباء" : "⚠️ د. سحر: ما لقيت لها تغيير محفوظ للإثنين — اكتب لي «سحر ثابت من الاثنين ١١ص-٢م و ٥:٣٠م-١٠:٣٠م»";
+      if (okPlan || okNow) mark.push("fx2195sahar");
+    }
+    lines.push(msg);
+  }
   if (mark.length) await ref.set({ ids: [...doneIds, ...mark], at: Date.now() }, { merge: true });
   if (lines.length) await A.dmAdmin(`🔧 تصحيحات بعد التحديث:\n\n${lines.join("\n\n")}`);
   // 12) (2.19.0) مراجعة لمرة وحدة: الجدول الثابت مقابل اللي انقال في القروبين (المحفوظ عندي) — بدون ما نغيّر شي
@@ -1110,6 +1142,8 @@ function selfCases() {
     // (2.19.0) فترتين + مؤقت + «بداية من»
     { q: "د سحر دوامها ثابت من 9 am الى 1 pm و من 5 pm الى 9 pm", all: [{ doc: "سحر", type: "schedule", shifts: [["09:00", "13:00"], ["17:00", "21:00"]] }] },
     { q: "د سحر شفتين من ١٠ ص الى ١ م ومن ٥ م الى ٩:٣٠ ثابت", all: [{ doc: "سحر", type: "schedule", shifts: [["10:00", "13:00"], ["17:00", "21:30"]] }] },
+    // (2.19.5) رد على سؤال رجوع: تغيير زميل ثابت — مو «لين يرجع» الطبيب الراجع
+    { q: "1\nسحر شفتين من ١١ ص - ٢م والشفت الثاني من ٥:٣٠ م - ١٠:٣٠ م ثابت", quoted: `🔙 د. عبدالصمد العشيري يرجع بكرة ${WDA[(t.wd + 1) % 7]} من الإجازة  #B9\n1️⃣ شفته الطبيعي: 2م – 10م\n2️⃣ شفت ثاني — اكتبه لي\n\nومعه في الأطفال:\n• سحر محمد: 2م – 10م\nيكونون نفس شفتهم؟ رد «نفس» أو اكتب التغييرات.`, all: [{ doc: "سحر", type: "schedule", shifts: [["11:00", "14:00"], ["17:30", "22:30"]], noBack: true }] },
     { q: "منال من ٨ الصبح لين ٤ العصر لمدة اسبوع", all: [{ doc: "منال", type: "schedule", from: "08:00", until: "16:00", endIn: D(6) }] },
     { q: "د ساره من 5 pm الى 1 am لين يرجع اكرامي", all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", back: "كرامي" }] },
     { q: `بداية من يوم ${WDA[(t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7]}\nد ساره من 5 pm الى 1 am`, all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", startIn: wd((t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7) }] },
@@ -1132,6 +1166,7 @@ function hitSpec(a, sp) {
   if (sp.shifts && JSON.stringify((shiftsOf(a) || []).map(x => [x.s, x.e])) !== JSON.stringify(sp.shifts.map(([f, u]) => [toMin(f), toMin(u)]))) return false;
   if (sp.back) { const bd = A.docs().find(x => A.norm(x.name).includes(A.norm(sp.back))); if (!bd || a.until_return_of !== bd.id) return false; }
   if (sp.endIn && a.end_date !== sp.endIn) return false;
+  if (sp.noBack && a.until_return_of) return false;
   if (sp.startIn && a.start_date !== sp.startIn) return false;
   return true;
 }
