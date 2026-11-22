@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "موظفين ← صحة",
   "short_name": "Staff Seha",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "أداة داخلية لموظفي الاستقبال: تعبئة نموذج الإجازات في منصة صحة، تنبيهات حالة الأطباء، وبطاقة الطبيب في نظام أثير.",
   "permissions": [
     "storage",

@@ -213,6 +213,17 @@
   // ---------- التعبئة ----------
   const filledEls = new WeakSet();
   let lastReport = {};
+  // (1.10.3) «تم الرفع» يطلع بس بعد ما الأداة تعبّي خانتين على الأقل لنفس الطلب (عشان ما ينضغط وهو ما انرفع)
+  let filledIds = {};
+  const fillN = () => Object.values(lastReport).filter(v => v === "ok" || v === "check").length;
+  const canDone = () => !!req && (fillN() >= 2 || !!filledIds[req.id]);
+  function markFilled() {
+    if (!req || fillN() < 2 || filledIds[req.id]) return false;
+    filledIds[req.id] = Date.now();
+    for (const [k, t] of Object.entries(filledIds)) if (Date.now() - t > 3 * 864e5) delete filledIds[k];
+    try { chrome.storage.local.set({ sabaFilled: filledIds }); } catch { /* */ }
+    return true;
+  }
   const wroteVals = new WeakMap();                                                   // الخانة ← القيمة اللي كتبناها (عشان نعرف لو الموظف غيّرها)
   function fillPass(req, labs, report, hijriPass, explicit) {
     for (const rule of RULES) {
@@ -896,7 +907,8 @@
       <div class="tiny">الإضافة ما تضغط «تحقق» ولا «حفظ» — راجع واضغطها بنفسك.</div>
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     const foot = $("#foot"); foot.hidden = false;
-    foot.innerHTML = `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة الموظفين</button>${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
+    markFilled();
+    foot.innerHTML = `${canDone() ? `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة الموظفين</button>` : `<div class="tiny" id="noDone" style="text-align:center;padding:6px 4px;color:#8A4B00;background:#FFF4E5;border-radius:8px">عبّي الطلب أول (زر «تعبئة») — بعدها يطلع زر «تم الرفع»</div>`}${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
     $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
     bindDup();
     const ao = $("#alertOk"); if (ao) ao.onclick = () => { sehaAlert = null; chrome.storage.local.remove("sabaAlert"); render(); };
@@ -951,8 +963,8 @@
       const im = root.querySelector("#viewImg img");
       if (im) { im.onerror = () => { im.remove(); }; im.src = reqImg.url; }          // لو صحة منعت عرض الصورة هنا، الزر يفتحها في تبويب
     }
-    $("#done").onclick = () => {
-      if (!req) return;                                                            // ضغطتين ورا بعض
+    if ($("#done")) $("#done").onclick = () => {
+      if (!req || !canDone()) return;                                              // ضغطتين ورا بعض / ما تعبّى
       const psl = newestPsl || "";               // رقم PSL يُلتقط تلقائياً من صفحة صحة (بدون خانة)
       // كل «تم الرفع» في خانة لحاله (sabaDone_<وقت>) لين اللوحة تأكد إنها حفظته — كذا ضغطتين ورا بعض ما تمسح وحدة الثانية
       const at = Date.now(), d = { id: req.id, ref: req.ref, psl, at };
@@ -972,6 +984,7 @@
   }
   function updateDots() {
     root.querySelectorAll("[data-s]").forEach(d => { d.className = "s " + (lastReport[d.dataset.s] || ""); });
+    if (req && $("#noDone") && (markFilled() || canDone())) render();             // تعبّت خانتين → يطلع «تم الرفع»
   }
   function bindPaste() {
     const ta = $("#paste"); if (!ta) return;
@@ -1085,8 +1098,8 @@
 
   // ---------- تشغيل ----------
   chrome.storage.local.get("sabaReqImg", d => { reqImg = d.sabaReqImg || null; if (reqImg && req?.id === reqImg.id) render(); });
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup", "sabaDoneLog"], d => {
-    doneLog = d.sabaDoneLog || {};
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup", "sabaDoneLog", "sabaFilled"], d => {
+    doneLog = d.sabaDoneLog || {}; filledIds = d.sabaFilled || {};
     dupInfo = d.sabaDup && Date.now() - d.sabaDup.at < 30 * 60000 ? d.sabaDup : null;
     loadUnacked();
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
