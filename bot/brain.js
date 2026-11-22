@@ -101,6 +101,8 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - لو أنس قال «عدّل/ضيف/شيل/غيّر …» بعد رسالة جهزتها → رجّع الرسالة كاملة بعد التعديل (مو الجزء المعدّل بس).
 - «أرسلها في القروب» بعد رسالة جاهزة → group_send: text = الرسالة كاملة كما هي.
 - الرسالة الجاهزة ما تحتاج actions (إلا group_send لما يطلب الإرسال).
+- (2.19.4) الأوقات بنظام 12 ساعة دايم في كل ردودك والرسايل الجاهزة: «11ص – 2م»، «5:30م – 10:30م»، «9م – 9ص» — لا تكتب 14:00 ولا 22:30 أبداً (إلا داخل actions).
+- تغيير تطبّقه الحين (actions) وتحطه في رسالة جاهزة بنفس الرد: اكتبه زي ما طلب أنس بالضبط؛ والنظام يحط تنبيه فوق الرسالة لو ما انطبق.
 
 كيف تشتغل:
 - (2.16.1) أول شي اكتب في understood كلامه بصياغتك أنت، واضحة ومرتبة: كل طبيب لحاله (اسمه الكامل من الجدول) ← وش المطلوب ← اليوم بالتاريخ YYYY-MM-DD ← الوقت HH:MM.
@@ -114,7 +116,8 @@ const RULES = `أنت مساعد أنس (مشرف عيادات سابا — فر
 - الشي واضح؟ حط الأفعال في actions وطبّق على طول. مو متأكد من شي يغيّر النتيجة (مين الطبيب، أي يوم، الوقت)؟ اسأله سؤال واحد واضح و actions فاضية.
 - (2.19.0) مدة تغيير الدوام: لو قال يوم معيّن (اليوم/بكرة/الإثنين) بدون ثابت → status. لكن «بداية من / ابتداءً من / اعتباراً من / من يوم الإثنين …» = بداية تغيير (schedule مع start_date)، مو يوم واحد. لو قال ثابت/دائم/كل يوم → schedule بدون end_date. لو قال مدة → schedule مع end_date (آخر يوم بالمؤقت: «أسبوع» من البداية = البداية+6، «3 أيام» = البداية+2، «لين 30/11» = 2026-11-30، «من الأحد لين الخميس» = start_date الأحد و end_date الخميس) أو until_return_of = doctor_id الطبيب اللي «لين يرجع/ترجع من إجازته». بعد المؤقت يرجع لدوامه الثابت لحاله.
   ما قال مدة أبداً («د سارة من 5 لين 1»، «سيتم تغيير شفتها»)؟ لا تسأل أنت ولا تختار — حط schedule بدون end_date (و start_date لو قال «بداية من …») والنظام يسأله عن المدة بخيارات.
-- دوام بفترتين («من 11ص لين 2م و من 5:30م لين 10:30م») → shifts فيها الفترتين كل وحدة start_time و end_time (مو فترة وحدة). نفس دوامه المسجّل بالضبط؟ قل «نفس دوامه» وبدون أفعال.
+- دوام بفترتين («من 11ص لين 2م و من 5:30م لين 10:30م»، «شفتين من ١١ ص الى ٢ م ومن ٥:٣٠ م الى ١٠:٣٠») → shifts فيها الفترتين كل وحدة start_time و end_time (مو فترة وحدة). وقت بدون ص/م بعد وقت مسائي بنفس الفترة = مسائي (٥:٣٠م الى ١٠:٣٠ = 17:30–22:30).
+- until_return_of = طبيب ثاني عليه إجازة (اللي الدوام يغطي مكانه) — مو نفس الطبيب أبداً. لو أنس ما قال «لين يرجع/ترجع فلان» لا تحطها. نفس دوامه المسجّل بالضبط؟ قل «نفس دوامه» وبدون أفعال.
 - «فلان نفس دوامه / بشفته الطبيعي» = ما يتغيّر شي (إلا لو هو في إجازة ويرجع → end_vacation).
 - تغيير كبير (دوام ثابت، إضافة/حذف طبيب، تراجع) وأنت فاهمه من كلامه الصريح → طبّق. لو فاهمه من استنتاجك أو من رسالة قروب محوّلة بس → confirm_first = true و actions = اللي بتسويه، واسأله «أطبّق؟».
 - لو عندك «اقتراح ينتظر موافقته» ووافق («ايوه/طبق/تمام») → use_proposal = true. لو عدّل عليه → اكتب الأفعال الجديدة كاملة.
@@ -227,7 +230,7 @@ async function buildCtx() {
 // الأفعال من رد الذكاء + تعبئة الناقص من الكلام نفسه (الرسالة المقتبسة، ردّه، وفهمه)
 function prepActs(o, txt, quoted) {
   const R = [o.understood, o.reply].filter(Boolean).join("\n"), T2 = [quoted, txt].filter(Boolean).join("\n");
-  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillShifts(a, T2)).map(a => fillBack(a)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt)));
+  return uniq((Array.isArray(o.actions) ? o.actions : []).map(normA).map(a => fillDept(a, o.reply, txt)).map((a, i, all) => fillTimes(a, R, T2, all.filter(NEEDS_T).length > 1)).map(a => fillShifts(a, T2, R)).map(a => fillBack(a)).map(a => fillVac(a, R, T2)).map(a => fillDate(a, o.reply, txt)));
 }
 
 export async function handle(m, text, { forwarded = false } = {}) {
@@ -299,7 +302,10 @@ export async function handle(m, text, { forwarded = false } = {}) {
   if (!actions.length) { await A.dmAdmin([reply || (ask ? "" : "تمام."), ask].filter(Boolean).join("\n\n")); return true; }
   proposal = null; persist();
   const lines = await execute(actions, pclar, pdocs);
-  await A.dmAdmin([reply, lines.join("\n"), ask].filter(Boolean).join("\n\n"));
+  // (2.19.4) رسالة جاهزة + فعل ما انطبق → تنبيه فوق الرسالة (عشان ما تنسخ تغيير ما صار)
+  const bad = lines.filter(l => /^(⚠️ ما طبّقت|❌)/.test(String(l).trim()));
+  const warn = bad.length && String(reply).length > 150 && /السلام عليكم|جاهز|للنسخ|تعميم|تنبيهات|تغييرات/.test(reply) ? `⚠️ انتبه: الرسالة الجاهزة تحت فيها تغيير ما انطبق — لا تنسخها قبل ما تعدّله:\n${bad.map(l => "• " + String(l).replace(/^(⚠️ ما طبّقت: |❌ )/, "")).join("\n")}` : "";
+  await A.dmAdmin([warn, reply, lines.join("\n"), ask].filter(Boolean).join("\n\n"));
   await AS.after(actions);
   return true;
 }
@@ -547,18 +553,24 @@ function fillTimes(a, reply, user, many = false) {
 const tmn = v => typeof v === "number" ? v : toMin(v);
 function shiftsOf(a) {
   if (Array.isArray(a.shifts) && a.shifts.length) {
-    const L = a.shifts.map(x => ({ s: tmn(x.start_time ?? x.from ?? x.s), e: tmn(x.end_time ?? x.until ?? x.e) })).filter(x => x.s != null && x.e != null && x.s !== x.e);
+    const L = a.shifts.map(x => ({ s: tmn(x.start_time ?? x.from ?? x.s), e: tmn(x.end_time ?? x.until ?? x.e) })).filter(x => x.s != null && x.e != null && x.s !== x.e).map(pmFix);
     if (L.length) return L.sort((x, y) => x.s - y.s);
   }
-  const f = toMin(a.from), u = toMin(a.until); return f != null && u != null && f !== u ? [{ s: f, e: u }] : null;
+  const f = toMin(a.from), u = toMin(a.until); return f != null && u != null && f !== u ? [pmFix({ s: f, e: u })] : null;
 }
+// (2.19.4) «من ٥:٣٠ م الى ١٠:٣٠» → 10:30 انقرت صباح (فترة 17 ساعة) — فترة تعدّي نص الليل أطول من 12 ساعة والنهاية قبل 12 الظهر = مسائي
+function pmFix(x) { const len = (x.e - x.s + 1440) % 1440; return x.e < x.s && x.e < 720 && len > 720 && x.e + 720 > x.s ? { s: x.s, e: x.e + 720 } : x; }
 const sameSh = (x, y) => JSON.stringify((x || []).map(z => [z.s, z.e])) === JSON.stringify((y || []).map(z => [z.s, z.e]));
 // الذكاء كتب فترة وحدة والسطر فيه فترتين («سحر 11 am الى 2 pm و من 5:30 pm الى 10:30 pm») → نكمّلها من سطر الطبيب نفسه
-function fillShifts(a, user) {
+function fillShifts(a, user, reply = "") {
   if (a.type !== "schedule" || a.mode === "only_days") return a;
   const d = a.doctor_id ? docOf(a.doctor_id) : null; if (!d) return a;
+  const r = fillShiftsIn(a, d, user); if (r !== a || !reply) return r;
+  return fillShiftsIn(a, d, reply);                                               // (2.19.4) كلام أنس بدون ص/م → من رد الذكاء (يكتبها 11:00–14:00 و 17:30–22:30)
+}
+function fillShiftsIn(a, d, user) {
   for (const seg of segsFor(d, user)) {
-    const ts = timesIn(seg[0] || ""); if (ts.length < 4 || ts.length % 2) continue;
+    let ts = timesIn(seg[0] || ""); if (ts.length < 4 || ts.length % 2) continue;
     const pairs = []; for (let i = 0; i < ts.length; i += 2) pairs.push({ start_time: ts[i], end_time: ts[i + 1] });
     if ((shiftsOf(a) || []).length < pairs.length) return { ...a, shifts: pairs, from: pairs[0].start_time, until: pairs[0].end_time };
     return a;
@@ -569,7 +581,9 @@ function fillShifts(a, user) {
 const findDocLoose = v => { if (!v) return null; const x = docOf(v); if (x) return x; const n = A.norm(String(v).replace(/^(د|دكتور|دكتوره)\.?\s+/, "")); return n.length < 3 ? null : A.docs().find(d => A.norm(A.shortName(d.name)).includes(n) || (d.aliases || []).some(y => A.norm(y).includes(n)) || nameKeys(d).some(k => nameHit(n.split(" ")[0], k))) || null; };
 function fillBack(a) {
   if (a.type !== "schedule" || !a.until_return_of) return a;
-  const d = findDocLoose(a.until_return_of); return d ? { ...a, until_return_of: d.id } : { ...a, __bad: `«لين يرجع ${a.until_return_of}» — ما عرفت مين الطبيب` };
+  const d = findDocLoose(a.until_return_of);
+  if (d && d.id === a.doctor_id) { const { until_return_of, ...rest } = a; return rest; }   // (2.19.4) «لين يرجع» نفس الطبيب = غلط من الذكاء → نشيلها
+  return d ? { ...a, until_return_of: d.id } : { ...a, __bad: `«لين يرجع ${a.until_return_of}» — ما عرفت مين الطبيب` };
 }
 const backInfo = id => { const v = (A.getBoard()?.vacations || []).filter(x => x.doctorId === id && (!x.end || x.end >= A.nowR().iso)).sort((p, q) => p.start.localeCompare(q.start))[0]; return v ? (v.end ? `يرجع ${dayName(A.isoPlus(v.end, 1))} ${dmy(A.isoPlus(v.end, 1))}` : "إجازته مفتوحة") : "مو مسجّل عليه إجازة"; };
 const tmpLabel = a => ISO(a.end_date) ? `مؤقت لين ${dayName(a.end_date)} ${dmy(a.end_date)}` : a.until_return_of ? `مؤقت لين يرجع د. ${A.shortName(docOf(a.until_return_of)?.name || "—")} (${backInfo(a.until_return_of)})` : "";
@@ -1095,6 +1109,7 @@ function selfCases() {
     { q: "[رسالة محوّلة من قروب الاستقبال]\nد.مجدي نصيف بكره ٩ص-٥م", all: [{ doc: "مجدي", type: "status", kind: ["starts_at"], date: D(1), from: "09:00", until: "17:00" }] },
     // (2.19.0) فترتين + مؤقت + «بداية من»
     { q: "د سحر دوامها ثابت من 9 am الى 1 pm و من 5 pm الى 9 pm", all: [{ doc: "سحر", type: "schedule", shifts: [["09:00", "13:00"], ["17:00", "21:00"]] }] },
+    { q: "د سحر شفتين من ١٠ ص الى ١ م ومن ٥ م الى ٩:٣٠ ثابت", all: [{ doc: "سحر", type: "schedule", shifts: [["10:00", "13:00"], ["17:00", "21:30"]] }] },
     { q: "منال من ٨ الصبح لين ٤ العصر لمدة اسبوع", all: [{ doc: "منال", type: "schedule", from: "08:00", until: "16:00", endIn: D(6) }] },
     { q: "د ساره من 5 pm الى 1 am لين يرجع اكرامي", all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", back: "كرامي" }] },
     { q: `بداية من يوم ${WDA[(t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7]}\nد ساره من 5 pm الى 1 am`, all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", startIn: wd((t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7) }] },
