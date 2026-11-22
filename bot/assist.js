@@ -12,6 +12,8 @@ import nodePath from "node:path";
 import { downloadMediaMessage } from "baileys";
 import { handle as brainHandle, setAssist } from "./brain.js";
 import { dmAdmin } from "./group.js";
+import { can } from "./perms.js";
+import { addPrep } from "./prep.js";
 
 const STORE = process.env.STORE_DIR || (fs.existsSync("/data") ? "/data/store" : "./store");
 const FILE = nodePath.join(STORE, "assist.json");
@@ -100,6 +102,15 @@ export async function onAssistGroup(m) {
   let kind = "text";
   const img = g.imageMessage || (g.documentMessage && /^image\//.test(g.documentMessage.mimetype || "") ? g.documentMessage : null);
   const aud = g.audioMessage;
+  // (2.20.0) ترخيص انرسل في القروب (PDF أو صورة) → يقراه ويحدّثه ويحفظه، وسطر لأنس بالخاص
+  const pdf = g.documentMessage && /pdf/i.test(g.documentMessage.mimetype || g.documentMessage.fileName || "") ? g.documentMessage : null;
+  if ((pdf || img) && C.licIngest && can("GROUP_COMPLAINTS", "licenses")) {
+    try {
+      const o = await C.licIngest([{ ...m, message: g }]);
+      if (o?.lic) { await (C.dm || dmAdmin)(`📄 ترخيص انرسل في قروب الشكاوي (من ${by}):\n${C.licSummary(o)}`); if (pdf) return; }
+    } catch (e) { C.log.warn({ err: String(e?.message || e) }, "المساعد: ترخيص من القروب"); }
+    if (pdf) return;
+  }
   if (aud || img) {
     kind = aud ? "voice" : "image";
     let buf = null;
@@ -163,11 +174,11 @@ const TRIAGE = `أنت مساعد أنس (مشرف عيادات سابا — ف�
    «فلان يرجع/ترجع يوم كذا» = نهاية إجازة: board = «د. فلان يرجع من الإجازة يوم YYYY-MM-DD» (مو تعديل دوام).
    draft = لو المطلوب رسالة تنرسل في القروب أو للموظفين (تذكير، تعميم، رد): اكتب نصها جاهز باللهجة السعودية المهنية المختصرة، كأن أنس كاتبها. غير كذا فاضي.
    compose = true لو المطلوب رسالة فيها دوامات أو تغييرات الأطباء (دوام الجمعة، تغييرات الأسبوع، مين يداوم…) — هذي يجهّزها مساعد الخاص من الجدول، فخل draft فاضي.
-5) board_updates — (2.18.3) أي معلومة انقالت في القروب تغيّر جدول أطباء البوادي — من أي أحد (المدير، أنس، ماجد، الموظفين)، حتى لو جات كجواب على سؤال أو وسط كلام:
-   دوام طبيب اليوم/يوم معيّن، تغطية، إجازة، رجوع من إجازة («ترجع السبت» = نهاية إجازة)، غياب، تأخير، «اليوم آخر يوم».
-   كل وحدة جملة واضحة كاملة: اسم الطبيب ← التغيير ← التاريخ YYYY-MM-DD ← الوقت بصيغة ص/م.
+5) board_updates — أي معلومة انقالت في القروب عن تغيير في أطباء البوادي (غالباً جاية: «د فلان يباشر الأحد 5م»، طبيب جديد، إجازة، رجوع، تبديل شفت، دوام جديد، «آخر يوم») — من أي أحد، حتى لو جات كجواب أو وسط كلام:
+   text = جملة واضحة كاملة: اسم الطبيب ← التغيير ← الوقت بصيغة ص/م. doctor = اسم الطبيب. date = يوم التغيير YYYY-MM-DD (فاضي لو ما انقال).
+   هذي تنحفظ «محضّرة» لين تنكتب في قروب الإنفورميشن أو أنس يطلب يطبّقها — ما تنطبق من هنا.
    الوقت بدون ص/م: العيادة الصبح 8–12 والمسا 1–11 → «١-٩» = 1م–9م، «٩-٥» = 9ص–5م، «٥-١» = 5م–1ص. واللي يغطي عن طبيب ياخذ نفس دوامه لو ما انقال غير كذا.
-   هذي تنطبّق في الجدول على طول — لا تحطها task.
+   لا تحطها task.
 4) task_updates — طلب مفتوح (من «طلبات أنس المفتوحة») صار خلاص (أنس رد أو سواه أو انلغى): done = true.
 قواعد:
 - حلل الرسايل المعلّمة «جديدة» بس. القديمة سياق.
@@ -183,7 +194,7 @@ const SCHEMA = { type: "OBJECT", properties: {
   complaint_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, resolved: { type: "BOOLEAN" }, how: { type: "STRING" }, note: { type: "STRING" } }, required: ["code"] } },
   tasks: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, from: { type: "STRING" }, what: { type: "STRING" }, board: { type: "STRING" }, draft: { type: "STRING" }, compose: { type: "BOOLEAN" } }, required: ["what"] } },
   task_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { code: { type: "STRING" }, done: { type: "BOOLEAN" }, note: { type: "STRING" } }, required: ["code"] } },
-  board_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, text: { type: "STRING" } }, required: ["text"] } } } };
+  board_updates: { type: "ARRAY", items: { type: "OBJECT", properties: { ids: { type: "ARRAY", items: { type: "STRING" } }, text: { type: "STRING" }, doctor: { type: "STRING" }, date: { type: "STRING" } }, required: ["text"] } } } };
 
 const mref = x => "M" + x.id.slice(-6);
 const openTasks = () => S.tasks.filter(t => t.status === "pending");
@@ -245,6 +256,7 @@ async function apply(out, fresh) {
   }
   for (const n of out.tasks || []) {
     if (!String(n.what || "").trim()) continue;
+    if (!can("GROUP_COMPLAINTS", "tasks")) { if (String(n.board || "").trim() && can("GROUP_COMPLAINTS", "prepare")) addPrep([{ text: n.board, doctor: "", date: (/\d{4}-\d{2}-\d{2}/.exec(n.board) || [""])[0], by: n.from, quote: (n.ids || []).map(byRef).filter(Boolean).map(s => s.text).join("\n") }]); continue; }   // (2.20.0) المهام موقفة
     const src = (n.ids || []).map(byRef).filter(Boolean);
     if (src.length && src.every(s => s.team === "anas") && !n.draft) continue;          // أنس كتبها لنفسه
     const t = { code: "T" + (++S.tseq), at: Date.now(), from: String(n.from || src[0]?.by || "").slice(0, 60), what: String(n.what).slice(0, 300), draft: String(n.draft || "").trim().slice(0, 1500), board: String(n.board || "").trim().slice(0, 400), compose: !!n.compose, quote: src.map(s => s.text).join("\n").slice(0, 500), key: src[src.length - 1]?.key || null, status: "pending" };
@@ -253,12 +265,15 @@ async function apply(out, fresh) {
   }
   save();
   const bu = (out.board_updates || []).map(b => String(b.text || "").trim()).filter(Boolean);
-  if (bu.length) {
+  // (2.20.0) قروب الشكاوي: التغييرات تنحفظ «محضّرة» (ما تنطبق) — إلا لو خانته فيها apply
+  if (bu.length && !can("GROUP_COMPLAINTS", "apply")) {
+    if (can("GROUP_COMPLAINTS", "prepare")) addPrep((out.board_updates || []).filter(b => String(b.text || "").trim()).map(b => { const src = (b.ids || []).map(byRef).filter(Boolean); return { text: b.text, doctor: b.doctor || "", date: b.date || "", by: src[0]?.by || "", quote: src.map(x => `${x.by}: ${x.text}`).join("\n") }; }));
+  } else if (bu.length) {
     const src = [...new Set((out.board_updates || []).flatMap(b => (b.ids || []).map(byRef).filter(Boolean)))];
     const quote = src.map(x => `${x.by}: ${x.text}`).join("\n").slice(0, 900);
     await brainHandle({ key: { remoteJid: "" }, message: {} }, `[من قروب الشكاوي — انقال في القروب:\n«${quote}»]\nطبّق في جدول أطباء البوادي:\n${bu.map(x => "- " + x).join("\n")}`).catch(e => C.log.warn({ err: String(e?.message || e) }, "المساعد: الجدول"));
   }
-  for (const t of notes) {
+  for (const t of can("GROUP_COMPLAINTS", "tasks") ? notes : []) {
     const lines = [`📌 من قروب الشكاوي — ${t.from || "—"}:`, t.quote ? `«${t.quote.slice(0, 400)}»` : "", `المطلوب: ${t.what}`];
     if (t.draft) lines.push("", `✍️ رسالة جاهزة (#${t.code}):`, t.draft, "", "رد «أرسل» وأرسلها في القروب، أو قل لي وش أعدّل.");
     if (t.board) lines.push("", "📅 وبسجّلها في جدول الأطباء (رسالتي الجاية).");
@@ -364,12 +379,13 @@ async function tick() {
   // الخميس 10 بالليل (أو بعدها لو البوت كان طافي): ملخص الأسبوع اللي خلص
   const w = isoAdd(weekOf(Date.now()), -7);                          // آخر أسبوع خلص (خميسه)
   if (!S.lastWeek) { S.lastWeek = w; save(); }                       // أول تشغيل: ما نرسل ملخص لأسبوع ما كنا نقرا فيه
+  if (S.lastWeek < w && !can("GROUP_COMPLAINTS", "summary")) { S.lastWeek = w; save(); }      // (2.20.0) الملخص موقف
   if (S.lastWeek < w && Date.now() - S.lastAt > 3600e3 && C.getSock()?.user) {
     const txt = summaryText(w) + await themes(w);
     if (await (C.dm || dmAdmin)(txt)) { S.lastWeek = w; S.lastAt = Date.now(); save(); C.log.info({ week: w }, "المساعد: ملخص الأسبوع انرسل"); }
   }
   // تذكير مرة وحدة بعد 4 ساعات لأي طلب ما خلص (بين 9 الصبح و 11 بالليل)
-  if (t.m >= 540 && t.m <= 1380) {
+  if (t.m >= 540 && t.m <= 1380 && can("GROUP_COMPLAINTS", "tasks")) {
     const due2 = S.tasks.filter(x => x.status === "pending" && !x.reminded && Date.now() - x.at > 4 * 3600e3);
     if (due2.length) {
       for (const x of due2) x.reminded = Date.now(); save();

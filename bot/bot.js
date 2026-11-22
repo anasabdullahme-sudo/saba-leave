@@ -4,6 +4,7 @@
    - يراقب طلبات التعديل اللي ينشئها الموظفين (fixes: sendStatus = queued)
    - يرسلها للمريض واتساب، ويكتب النتيجة (sent / failed) عشان تظهر للموظف
    ========================================================================== */
+import { can, permsText } from "./perms.js";
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, downloadMediaMessage } from "baileys";
 import { initializeApp, cert, getApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -22,7 +23,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.19.6";
+const VERSION = "2.20.0";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -651,6 +652,7 @@ async function onIncoming(m) {
   if (hits.length > 5 && !(relayOn() && await openFor(jid).catch(() => null))) return;
   const senderPhone = await senderPhoneOf(m);
   const team = teamOf(senderPhone), admin = team === "anas" || isAdminPhone(senderPhone);
+  if (!team && !admin && !can("PATIENT_DM", "inquiries")) return;                    // (2.20.0) خانة خاص المراجعين
   // رد أنس على تنبيه «صورة ECG بدون رقم» أو رقم صورة ناقصة
   if ((team || admin) && text && !media && await ecgDM(m, team || "anas", text).catch(e => { log.warn({ err: String(e?.message || e) }, "ECG رد"); return false; })) return;
   if (await handleAdminRelay(m, senderPhone, text).catch(e => { log.warn({ err: String(e?.message || e) }, "رد المسؤول للمراجع"); return false; })) return;   // رد المسؤول على استفسار مراجع
@@ -1232,7 +1234,8 @@ async function main() {
     ports.forEach((pt, i) => { const sv = i ? http.createServer(globalThis.__sabaHttp.listeners("request")[0]) : globalThis.__sabaHttp; sv.requestTimeout = 15 * 60e3; sv.on("error", e => log.warn({ err: String(e?.message || e), pt }, "سيرفر")); sv.listen(pt, () => log.info({ port: pt }, "سيرفر البانوراما شغّال")); });
   }
   initGroup({ db, log, admin: process.env.ADMIN_PHONE || "", majed: "", getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS });
-  initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage, licText: () => LIC?.groupText() || "" });
+  initAssist({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, teamOf, doctorNames: boardDoctorNames, download: downloadMediaMessage, licText: () => LIC?.groupText() || "",
+    licIngest: msgs => LIC ? LIC.ingest(msgs, x => downloadMediaMessage(x, "buffer", {}, { logger: log, reuploadRequest: sock.updateMediaMessage })) : null, licSummary: o => LIC?.summary(o) || "" });
   LIC = initLicenses({ log, getSock: () => sock, gemini: GEMINI_KEY, models: CHAT_MODELS, groupJid: assistJid, dm: dmAdmin, doctors: () => boardDoctorList(), db }); setAssist(LIC.ext);   // (2.17.0) التراخيص
 
   // تنظيف الصور + نسخة احتياطية: مرة باليوم (ولو البوت أعاد التشغيل ما نعيدها قبل وقتها)

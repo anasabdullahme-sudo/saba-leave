@@ -8,6 +8,7 @@
 //  البانوراما من بيانات rainbow ويرجّعها (/pano/result) → نكتب رقم الملف عليها ونسمّيها برقمه، وملف واحد فيه ECG + بانوراما + الشيت.
 //  جهاز الأشعة ما رد خلال 12 دقيقة؟ الـ ECG يروح على طول، والبانوراما تلحق لحالها (الطلب محفوظ: bot/pano_job + الشيت في التخزين)
 import fs from "node:fs";
+import { can } from "./perms.js";
 import nodePath from "node:path";
 import { downloadMediaMessage } from "baileys";
 import { Jimp, loadFont, measureText } from "jimp";
@@ -87,6 +88,7 @@ const unwrap = m => { let g = m.message || {}; for (let i = 0; i < 3; i++) g = g
 
 export async function onGroup(m) {
   const id = m.key?.id; if (!id || seen.has(id) || m.key.fromMe) return; seen.add(id); if (seen.size > 3000) seen.clear();
+  if (!can("GROUP_ECG", "collect")) return;
   const g = unwrap(m), at = Number(m.messageTimestamp || 0) * 1000 || Date.now();
   const by = m.pushName || String(m.key.participant || "").split("@")[0], who = m.key.participant || m.key.participantAlt || by;
   const img = g.imageMessage || (g.documentMessage && /^image\//.test(g.documentMessage.mimetype || "") ? g.documentMessage : null);
@@ -172,6 +174,7 @@ function numFor(it, items) {
   return null;
 }
 async function alertTeam(it) {
+  if (!can("GROUP_ECG", "alerts")) return;                                         // (2.20.0) خانة قروب ECG
   const [f] = await bucket().file(it.path).download();
   it.code = short(); it.alertIds = [];
   for (const who of ["anas"]) {                                                    // (2.19.1) ماجد انشال — لأنس بس

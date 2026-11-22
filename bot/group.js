@@ -3,6 +3,8 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { initBrain, handle as brainHandle, noteOut, bootFixes, setAssist } from "./brain.js";
 import { initShifts } from "./shifts.js";
+import { initPrep, prepApplied, prepList } from "./prep.js";
+import { can } from "./perms.js";
 
 const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
@@ -33,6 +35,7 @@ export function initGroup(opts) {
   initBrain({ db, log, getSock, gemini, models, FieldValue, docs, getBoard: () => board, getToday: () => today, groupLog: () => gLog, shortName, norm, hm, hhmm, nowR, isoPlus, uid, findDep,
     apply, updateSchedules, endVacations, removeDoctor, restorePrev, applyOption, addDoctor, askAdmin, aiParse, dmAdmin, setReports: on => { reportsOn = on; db.doc("bot/prefs").set({ reports: on }, { merge: true }).catch(() => {}); } });
   // (2.19.0) المؤقت يرجع لحاله، سؤال الرجوع من الإجازة، وجدول الجمعة كل خميس
+  setAssist(initPrep({ docs, dm: dmAdmin, log }).ext);          // (2.20.0) دفتر التحضير (من قروب الشكاوي)
   setAssist(initShifts({ db, log, FieldValue, docs, getBoard: () => board, nowR, isoPlus, hm, hhmm, shortName, norm, uid, dmAdmin, updateSchedules, ready: () => !!board && !!getSock()?.user && admins.length > 0 }).ext);
   // تصحيحات 7/11: بعد ما يتصل واتساب ويوصل الجدول (عشان التقرير يوصل لأنس)
   let tries = 0; const go = setInterval(() => { if (++tries > 120) return clearInterval(go); if (!board || !getSock()?.user || !admins.length) return; clearInterval(go); bootFixes().catch(e => log.warn({ err: String(e?.message || e) }, "تصحيحات 7/11")); }, 5000);
@@ -145,7 +148,7 @@ async function aiParse(text, quoted) {
   const list = docs().map(d => { const o = allNames(d).slice(1); return `${d.id} | ${shortName(d.name)}${o.length ? " (" + o.join(" / ") + ")" : ""} | ${d.dep}`; }).join("\n");
   const body = {
     systemInstruction: { parts: [{ text: PROMPT.replace("{TODAY}", `${t.iso} (${["الأحد","الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"][t.wd]})`).replace("{NOW}", hm(t.m)).replace("{LIST}", list) }] },
-    contents: [{ role: "user", parts: [{ text: (quoted ? `رسالة مقتبسة (اللي ردّ عليها): «${quoted}»\n` : "") + `الرسالة: «${text}»` }] }],
+    contents: [{ role: "user", parts: [{ text: (quoted ? `رسالة مقتبسة (اللي ردّ عليها): «${quoted}»\n` : "") + `الرسالة: «${text}»` + (prepList() ? `\n\n(للمعلومة — تغييرات محضّرة انقالت قبل في قروب الشكاوي؛ لو الرسالة عن نفس الطبيب وناقصها وقت أو تاريخ، كمّل منها. لا تطلع منها أحداث لحالها):\n${prepList()}` : "") }] }],
     generationConfig: {
       temperature: 0, maxOutputTokens: 800, responseMimeType: "application/json",
       responseSchema: { type: "OBJECT", properties: { events: { type: "ARRAY", items: { type: "OBJECT", properties: {
@@ -669,6 +672,8 @@ async function apply(evs, ctx) {
 ${durAsks.map(x => `• د. ${shortName(x.d.name)}: ${hm(x.from)} – ${hm(x.until)}`).join("\n")}
 لو فيه شي ثابت أو لمدة قل لي.`);
   for (const x of newDocs) await askAdmin(x, ctx);
+  // (2.20.0) انطبق في الجدول من القروب → المحضّر لنفس الأطباء من قروب الشكاوي يتعلّم «انطبق»
+  if (!ctx.planned && applied.length) { try { const ids = [...new Set(evs.map(e => (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept)).filter(Boolean).map(d => d.id))]; if (ids.length) prepApplied(ids, t.iso); } catch { /* */ } }
   return applied;
 }
 
@@ -1283,6 +1288,7 @@ export async function handleGroupMessage(m) {
   const jid = m.key?.remoteJid || "";
   if (m.key?.id) { if (done.has(m.key.id)) return; done.add(m.key.id); if (done.size > 2000) done.clear(); }
   if (!m.__fwd && !(await isOurGroup(jid))) return;
+  if (!m.__fwd && !can("GROUP_INFO", "schedule")) return;                       // (2.20.0) خانة قروب الإنفورميشن
   const msg = m.message || {};
   if (msg.protocolMessage || msg.editedMessage || msg.reactionMessage) return;
   const text = (msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "").trim();
