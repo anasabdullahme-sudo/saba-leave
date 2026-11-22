@@ -287,7 +287,7 @@ td .sub.tmp{color:#b45309}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { backend, arNum, DEMO, relayDoctorAlerts, autoUpdate } from "./shared.js?v=20261122a";
+import { backend, arNum, DEMO, relayDoctorAlerts, autoUpdate } from "./shared.js?v=20261122b";
 autoUpdate(() => [...document.querySelectorAll(".modal:not(#mLogin)")].some(m => !m.hidden));
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

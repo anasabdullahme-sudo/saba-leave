@@ -101,7 +101,7 @@ export const DOCTORS = [
   { id: "wafaa-mohamed",    branch: "watanak", ar: "وفاء محمد",    en: "Wafaa Mohamed",       alt: ["Wafa Mohammed", "Wafaa Muhammad"] },
   { id: "elham-shaheen",    branch: "watanak", ar: "إلهام شاهين",  en: "Elham Shaheen", seha: "الهام جمال الدين ابراهيم شاهين",       alt: ["Ilham Shahin", "Elham Shahin"] },
   { id: "amina-halawany",   branch: "watanak", ar: "أمينة الحلواني", en: "Amina Elhalawany", seha: "امينه صدقي الحلواني", alt: ["امينه الحلواني", "امينه صدقي الحلواني", "Amina Sedky Elhalawany", "Amina Halawani"] },
-  { id: "hayam-helmy",      branch: "watanak", ar: "هيام حلمي", en: "Hayam Helmy", seha: "هيام محمد حلمي", alt: ["هيام محمد حلمي", "Hayam Mohamed Helmy", "Hayam Hilmy"] },
+  { id: "hayam-helmy",      branch: "watanak", ar: "هيام حلمي", en: "Hayam Helmy", seha: "هيام محمد حلمي", alt: ["هيام محمد حلمي", "Hayam Mohamed Helmy", "Hayam Hilmy", "هيام محمد عبد البصير", "هيام محمد عبدالبصير", "Hayam Mohammed Abdulbasir", "Hayam Mohamed Abdelbasir", "Hayam Abdulbasir"] },   // (22/11) ختمها «عبد البصير»
   // سابا البوادي (أي طبيب غير مذكور يروح للبوادي تلقائياً — هنا بس عشان يتعرّف على الاسم العربي)
   { id: "amin-mahmoud",     branch: "bawadi", ar: "أمين محمد علي محمود", en: "Amin Mohammed Ali Mahmoud", seha: "امين محمدعلي محمود", alt: ["أمين كيماوي", "امين كيماوي", "Amin Kemawi", "Amin Kimawi", "Amin Kemawy", "Amin Mohamed Ali Mahmoud"] },
   { id: "ahmed-abulfadl",   branch: "bawadi", ar: "أحمد أبو الفضل", en: "Ahmed Abu Elfadl", seha: "عادل احمد الوداني", alt: ["أحمد إبراهيم أبو الفضل", "احمد ابو الفضل", "أحمد خالد إبراهيم", "احمد خالد ابراهيم", "Ahmed Abo Elfadl", "Ahmed Abouelfadl", "Ahmed Abo El Fadl", "Ahmed Khaled Ibrahim"] },
@@ -213,8 +213,9 @@ export function matchDoctor(input) {
   for (const d of DOCTORS) {
     for (const v of [d.ar, d.en, ...(d.alt || [])].filter(Boolean)) {
       const dt = normName(v).split(" ").filter(Boolean); if (!dt.length) continue;
-      const first = toks.some(t => tokEq(t, dt[0]));
-      const rest = dt.slice(1).filter(x => toks.some(t => tokEq(t, x))).length;
+      const eq = (t, x) => GENERIC.has(t) || GENERIC.has(x) ? t === x : tokEq(t, x);   // (22/11) محمد ≠ أحمد (الأسماء العامة لازم تتطابق بالضبط)
+      const first = toks.some(t => eq(t, dt[0]));
+      const rest = dt.slice(1).filter(x => toks.some(t => eq(t, x))).length;
       let score = (first ? 2 : 0) + rest * 1.5;
       if (first && rest) score += 2;
       if (score > bestScore) { bestScore = score; best = d; }
@@ -234,9 +235,10 @@ export function doctorFits(doc, ...names) {
   const ns = names.map(n => String(n || "")).filter(n => normName(n));
   if (!doc || !ns.length) return true;                       // ما فيه اسم مكتوب نقارن فيه
   if (ns.some(n => matchDoctor(n).doctor?.id === doc.id)) return true;
-  const toks = ns.flatMap(n => normName(n).split(" ")).filter(t => t.length > 1);
+  // (22/11) الأسماء العامة (محمد/أحمد/عبد…) ما تنحسب — «محمد» كانت تطابق «أحمد» (فرق حرف) فختم هيام راح لأحمد معتوق
+  const toks = ns.flatMap(n => normName(n).split(" ")).filter(t => t.length > 1 && !GENERIC.has(t));
   return [doc.ar, doc.en, ...(doc.alt || [])].some(v => {
-    const f = normName(v).split(" ")[0];
+    const f = normName(v).split(" ")[0]; if (!f || GENERIC.has(f)) return false;
     return toks.some(t => t === f || (t.length > 3 && f.length > 3 && lev(t, f) <= 1));
   });
 }
@@ -257,6 +259,11 @@ export function chooseDoctor(printed, stamp, ids = {}) {
   const pDoc = matchDoctor(printed).doctor || fit(doctorById(ids.printed), printed);
   if (!docToks(stamp).length) return { doc: pDoc, byStamp: false };              // ما فيه ختم → المكتوب
   const sDoc = matchDoctor(stamp).doctor || fit(doctorById(ids.stamp), stamp);
+  // (22/11) الختم فيه الاسم الأول للطبيب المطبوع (هيام، إيهاب…) = نفس الطبيب، حتى لو اسم العائلة في الختم غير (هيام محمد عبد البصير = هيام حلمي)
+  if (pDoc && (!sDoc || sDoc.id !== pDoc.id)) {
+    const firsts = [pDoc.ar, pDoc.en, ...(pDoc.alt || [])].map(v => docToks(v)[0]).filter(f => f && !GENERIC.has(f));
+    if (docToks(stamp).some(t => !GENERIC.has(t) && firsts.some(f => tokEq(t, f)))) return { doc: pDoc, byStamp: false };
+  }
   const same = sDoc && pDoc ? sDoc.id === pDoc.id : sameDoctorName(printed, stamp) || (!!sDoc && sameDoctorName(allNames(sDoc), printed)) || (!!pDoc && sameDoctorName(allNames(pDoc), stamp));
   if (same || !normName(printed)) return { doc: sDoc || pDoc, byStamp: false };
   return { doc: sDoc, byStamp: true };                                           // الختم يختلف → طبيب الختم

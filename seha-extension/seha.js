@@ -213,15 +213,17 @@
   // ---------- التعبئة ----------
   const filledEls = new WeakSet();
   let lastReport = {};
-  // (1.10.3) «تم الرفع» يطلع بس بعد ما الأداة تعبّي خانتين على الأقل لنفس الطلب (عشان ما ينضغط وهو ما انرفع)
+  // (1.10.4) «تم الرفع» يطلع بس بعد ما تتعبى خانة تاريخ البداية في نموذج الإجازة (مرضية/مرافق: بداية الإجازة، حضور: الدخول/الزيارة)
+  //  الهوية والميلاد في صفحة البحث ما تحسب. التعبئة داخل الإطار (iframe) تبلّغ اللوحة لحالها (sabaAutoRep_)
   let filledIds = {};
-  const fillN = () => Object.values(lastReport).filter(v => v === "ok" || v === "check").length;
-  const canDone = () => !!req && (fillN() >= 2 || !!filledIds[req.id]);
+  const START_KEYS = r => r?.type === "attendance" ? ["entryDate", "visitDate"] : ["leaveStart"];
+  const startFilled = () => !!req && START_KEYS(req).some(k => lastReport[k] === "ok" || lastReport[k] === "check");
+  const canDone = () => !!req && (startFilled() || !!filledIds[req.id]);
   function markFilled() {
-    if (!req || fillN() < 2 || filledIds[req.id]) return false;
+    if (!req || !startFilled() || filledIds[req.id]) return false;
     filledIds[req.id] = Date.now();
     for (const [k, t] of Object.entries(filledIds)) if (Date.now() - t > 3 * 864e5) delete filledIds[k];
-    try { chrome.storage.local.set({ sabaFilled: filledIds }); } catch { /* */ }
+    try { chrome.storage.local.set({ sabaFilled2: filledIds }); } catch { /* */ }
     return true;
   }
   const wroteVals = new WeakMap();                                                   // الخانة ← القيمة اللي كتبناها (عشان نعرف لو الموظف غيّرها)
@@ -305,7 +307,13 @@
     if (d) report.doctorAr = d;
     if (req.type === "attendance") fillTimes(req, explicit);                        // (1.9.8) وقت الدخول/الخروج (نافذة الساعة)
     lastReport = { ...lastReport, ...report };
+    if (!TOP) reportUp();
     return report;
+  }
+  let upSent = "";
+  function reportUp() {                                                              // (1.10.4) الإطار → اللوحة: وش اللي تعبّى
+    if (!req) return; const v = JSON.stringify(lastReport); if (v === upSent || v === "{}") return; upSent = v;
+    try { chrome.storage.local.set({ ["sabaAutoRep_" + FID]: { id: req.id, r: lastReport, at: Date.now() } }); } catch { /* */ }
   }
 
   // ---------- (1.9.8) وقت الدخول/الخروج في مشهد الحضور ----------
@@ -908,7 +916,7 @@
       <div id="pasteWrap" hidden><div class="lbl">الصق الطلب هنا (Ctrl+V)</div><textarea id="paste"></textarea></div>`;
     const foot = $("#foot"); foot.hidden = false;
     markFilled();
-    foot.innerHTML = `${canDone() ? `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة الموظفين</button>` : `<div class="tiny" id="noDone" style="text-align:center;padding:6px 4px;color:#8A4B00;background:#FFF4E5;border-radius:8px">عبّي الطلب أول (زر «تعبئة») — بعدها يطلع زر «تم الرفع»</div>`}${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
+    foot.innerHTML = `${canDone() ? `<button class="btn ok2" id="done" style="flex:none">تم الرفع — حدّث لوحة الموظفين</button>` : `<div class="tiny" id="noDone" style="text-align:center;padding:6px 4px;color:#8A4B00;background:#FFF4E5;border-radius:8px">زر «تم الرفع» يطلع أول ما تتعبى خانة ${req?.type === "attendance" ? "تاريخ الدخول" : "بداية الإجازة"} في نموذج صحة</div>`}${fixOpen ? "" : `<button class="btn fx" id="fxOpen" style="flex:none;height:34px;line-height:34px;font-size:13px">✎ طلب تعديل من المريض (واتساب)</button>`}`;
     $("#data").ontoggle = e => { showFields = e.target.open; chrome.storage.local.set({ sabaShowFields: showFields }); };
     bindDup();
     const ao = $("#alertOk"); if (ao) ao.onclick = () => { sehaAlert = null; chrome.storage.local.remove("sabaAlert"); render(); };
@@ -1098,8 +1106,8 @@
 
   // ---------- تشغيل ----------
   chrome.storage.local.get("sabaReqImg", d => { reqImg = d.sabaReqImg || null; if (reqImg && req?.id === reqImg.id) render(); });
-  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup", "sabaDoneLog", "sabaFilled"], d => {
-    doneLog = d.sabaDoneLog || {}; filledIds = d.sabaFilled || {};
+  chrome.storage.local.get(["sabaReq", "sabaAuto", "sabaQueue", "sabaHidden", "sabaPos", "sabaShowFields", "sabaAlert", "sabaDup", "sabaDoneLog", "sabaFilled2"], d => {
+    doneLog = d.sabaDoneLog || {}; filledIds = d.sabaFilled2 || {}; chrome.storage.local.remove("sabaFilled");
     dupInfo = d.sabaDup && Date.now() - d.sabaDup.at < 30 * 60000 ? d.sabaDup : null;
     loadUnacked();
     req = d.sabaReq || null; auto = d.sabaAuto !== false; showFields = !!d.sabaShowFields; sehaAlert = d.sabaAlert || null;
@@ -1113,6 +1121,7 @@
   });
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== "local") return;
+    if (TOP && req) for (const [k, c] of Object.entries(ch)) if (k.startsWith("sabaAutoRep_") && c.newValue?.id === req.id) { lastReport = { ...lastReport, ...c.newValue.r }; updateDots(); }
     if (!TOP && ch.sabaFillCmd?.newValue && req) { const r = fill(req, { explicit: true }); chrome.storage.local.set({ ["sabaRep_" + FID]: { at: ch.sabaFillCmd.newValue.at, r } }); }
     if (!TOP && ch.sabaDiagCmd?.newValue) chrome.storage.local.set({ ["sabaDiag_" + FID]: { at: ch.sabaDiagCmd.newValue.at, txt: diagText() } });
     if (ch.sabaAuto) auto = ch.sabaAuto.newValue !== false;
@@ -1158,7 +1167,8 @@
       return;
     }
     if (ch.sabaReq) {
-      req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false;
+      req = ch.sabaReq.newValue || null; lastReport = {}; newestPsl = ""; fixOpen = false; upSent = "";
+      if (TOP) chrome.storage.local.get(null, all => { const ks = Object.keys(all).filter(k => k.startsWith("sabaAutoRep_") && all[k]?.id !== req?.id); if (ks.length) chrome.storage.local.remove(ks); });
       if (req) { setMin(false); render(); if (auto) setTimeout(() => { fill(req); render(); openAddForm(); }, 300); toastLocal("وصل طلب جديد من لوحة الموظفين"); }
       else { setMin(false); render(); }                                 // (1.9.7) بعد «تم الرفع»: الأداة تظل مفتوحة على «▶ الطلب التالي» (زي 1.8.8) — ما تتصغّر
     }
