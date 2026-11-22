@@ -52,6 +52,7 @@ export function initEcg(ctx) {
   C.db.doc("bot/ecg_conf").get().then(d => { conf = { jid: "", purge: [], ...(d.data() || {}) }; ecgJid = conf.jid || ""; }).catch(() => {});
   loadMonth(monthOf(Date.now())).catch(() => {});
   C.db.doc("bot/pano_job").get().then(d => { if (d.exists && d.data()?.id) pjob = d.data(); }).catch(() => {});
+  loadReq().catch(() => {});
   setInterval(() => flushOutbox().catch(() => {}), 60e3);                       // الصادر: نعيد المحاولة كل دقيقة
   setTimeout(() => flushOutbox().catch(() => {}), 20e3);
   C.db.doc("bot/pano_agent").get().then(d => { const a = d.data()?.at || 0; if (a > agent.at) agent = { ...agent, at: a }; agentSaved = a; }).catch(() => {});
@@ -291,6 +292,57 @@ async function dmImage(m, g, say) {
   return true;
 }
 
+/* ---------- (2.19.3) بانوراما بالرقم: «بانوراما 7632751» → التواريخ → أنس يختار → الصورة ---------- */
+let preq = null, choices = {};
+const REQF = "pano/req.json";
+async function loadReq() { try { const o = JSON.parse((await bucket().file(REQF).download())[0].toString()); preq = o.preq || null; choices = o.choices || {}; } catch { /* أول مرة */ } }
+function saveReq() { bucket().file(REQF).save(Buffer.from(JSON.stringify({ preq, choices }))).catch(() => {}); }
+const fmtAt = a => { const x = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(a || ""); return x ? `${x[3]}/${x[2]}/${x[1]}${x[4] ? " " + x[4] + ":" + x[5] : ""}` : (a || "بدون تاريخ"); };
+const agoTxt = ms => { const mn = Math.round((Date.now() - ms) / 60e3); return !ms ? "ولا مرة" : mn < 90 ? `${mn} دقيقة` : mn < 2880 ? `${Math.round(mn / 60)} ساعة` : `${Math.round(mn / 1440)} يوم`; };
+async function requestPano(nums, say) {
+  if (preq?.sentAt) preq.wait = [...new Set([...(preq.wait || []), ...nums])];      // الجهاز شغّال على طلب → بعده
+  else if (preq) preq.nums = [...new Set([...preq.nums, ...nums])];
+  else preq = { id: "q" + Date.now().toString(36) + short(), at: Date.now(), sentAt: 0, nums };
+  saveReq();
+  await say([`⏳ طلبت بانوراما ${nums.join("، ")} من جهاز الأشعة — توصلك خلال 10 دقايق تقريباً.`,
+    agentOn() ? "" : `⚠️ جهاز الأشعة ${agent.at ? `ما سأل البوت من ${agoTxt(agent.at)}` : "ما سأل البوت من آخر تشغيل"} — يمكن مطفي. الطلب محفوظ ويوصلك أول ما يشتغل.`,
+    pjob ? "ℹ️ فيه شيت ينتظر بانوراما — طلبك يتسوّى بعده." : ""].filter(Boolean).join("\n"));
+}
+async function reqDone(result) {
+  const nums = preq?.nums || [], wait = preq?.wait || [];
+  preq = wait.length ? { id: "q" + Date.now().toString(36) + short(), at: Date.now(), sentAt: 0, nums: wait } : null;
+  for (const [k, v] of Object.entries(choices)) if (Date.now() - v.at > 3 * 864e5) { for (const f of v.files) await bucket().file(f.path).delete().catch(() => {}); delete choices[k]; }
+  saveReq();
+  for (const num of nums) {
+    const all = (result.get(num + "|") || []).slice().sort((a, b) => b.at.localeCompare(a.at));
+    if (!all.length) { await sendTo("anas", { text: `🦷 ما لقيت بانوراما لرقم ${num} في جهاز الأشعة.` }).catch(() => {}); continue; }
+    if (all.length === 1) { await sendPano(num, all[0].buf, all[0].at); continue; }
+    const code = "K" + short().slice(0, 3), files = [];
+    for (let i = 0; i < all.length; i++) { const path = `pano/req/${code}-${i}.jpg`; await bucket().file(path).save(all[i].buf); files.push({ at: all[i].at, path }); }
+    choices[code] = { num, at: Date.now(), files }; saveReq();
+    const N = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+    await sendTo("anas", { text: [`🦷 بانوراما ${num}: فيه ${all.length} صور — أي تاريخ؟  #${code}`, ...files.map((f, i) => `${N[i] || i + 1 + "."} ${fmtAt(f.at)}`), "رد برقم الخيار (أو «الكل»)."].join("\n") }).catch(() => {});
+  }
+}
+async function sendPano(num, buf, at) {
+  await sendTo("anas", { image: await stamp(buf, num), mimetype: "image/jpeg", caption: `🦷 بانوراما ${num} — ${fmtAt(at)}` });
+}
+// رد أنس على «أي تاريخ؟»: رقم الخيار (أو كذا رقم) أو «الكل»
+async function panoChoice(text, quotedTxt) {
+  const qc = /#(K[A-Z0-9]{3})/.exec(quotedTxt || "")?.[1];
+  let code = qc && choices[qc] ? qc : "";
+  if (!code && !quotedTxt) { const last = Object.entries(choices).sort((a, b) => b[1].at - a[1].at)[0]; if (last && Date.now() - last[1].at < 20 * 60e3) code = last[0]; }
+  if (!code) return false;
+  const ch = choices[code], t = latin(text).trim();
+  let pick = [];
+  if (/^(الكل|كلها|كلهم|all)$/i.test(t)) pick = ch.files.map((_, i) => i);
+  else if (/^\d{1,2}([\s،,و]+\d{1,2})*$/.test(t)) pick = t.split(/[\s،,و]+/).map(x => +x - 1).filter(i => i >= 0 && i < ch.files.length);
+  else return false;
+  if (!pick.length) { await sendTo("anas", { text: `اختار رقم من 1 لين ${ch.files.length}.` }).catch(() => {}); return true; }
+  for (const i of pick) { const f = ch.files[i]; const [buf] = await bucket().file(f.path).download(); await sendPano(ch.num, buf, f.at); }
+  return true;
+}
+
 /* ---------- الخاص: أنس ---------- */
 // يرجع true لو الرسالة لـ ECG (رد على تنبيه، شيت xlsx، تصدير دردشة zip)
 export async function onTeamDM(m, who, text = "") {
@@ -299,6 +351,12 @@ export async function onTeamDM(m, who, text = "") {
   const name = String(doc?.fileName || ""), mime = String(doc?.mimetype || "");
   const say = t => t ? C.getSock().sendMessage(jid, { text: t }, { quoted: m }).catch(() => {}) : null;
   if (await dmImage(m, g, say).catch(e => { C.log.warn({ err: String(e?.message || e) }, "ECG: صورة خاص"); return false; })) return true;
+  // (2.19.3) «بانوراما 7632751» / «ارسل لي صورة البانوراما 7632751»
+  if (!doc && text && /بانورا|panoram|\bopg\b/i.test(text) && !/حال[هة]/.test(text)) { const nums = fileNums(text); if (nums.length) { await requestPano(nums, say); return true; } }
+  if (!doc && text && Object.keys(choices).length) {
+    const qtxt = String(g.extendedTextMessage?.contextInfo?.quotedMessage?.conversation || g.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text || "");
+    if (await panoChoice(text, qtxt).catch(e => { C.log.warn({ err: String(e?.message || e) }, "بانوراما: اختيار"); return false; })) return true;
+  }
   if (!doc && /حال[هة]\s*(ال)?بانورا|pano\s*status/i.test(text)) {                 // (2.15.3) «حالة البانوراما»
     const ago = ms => { const mn = Math.round((Date.now() - ms) / 60e3); return !ms ? "ولا مرة" : mn < 1 ? "قبل أقل من دقيقة" : mn < 90 ? `قبل ${mn} دقيقة` : `قبل ${Math.round(mn / 60)} ساعة`; };
     const ob = await outboxCount();
@@ -593,14 +651,22 @@ export async function panoHttp(req, res) {
   if (Date.now() - agentSaved > 3600e3) { agentSaved = Date.now(); C.db.doc("bot/pano_agent").set({ at: agent.at, ver: agent.ver }).catch(() => {}); }
   if (u.pathname === "/pano/ping") return send(200, JSON.stringify({ ok: true, job: !!pjob }), "application/json");
   if (u.pathname === "/pano/poll" && req.method === "GET") {
-    if (!pjob || (pjob.sentAt && Date.now() - pjob.sentAt < 8 * 60e3)) return send(204);   // ما فيه طلب / الجهاز شغّال عليه
-    pjob.sentAt = Date.now();
-    const items = [...new Map(pjob.rows.map(r => [r.num + "|" + r.date, { key: r.num + "|" + r.date, num: r.num, date: r.date }])).values()];
-    return send(200, JSON.stringify({ id: pjob.id, items }), "application/json");
+    if (pjob && !(pjob.sentAt && Date.now() - pjob.sentAt < 8 * 60e3)) {             // طلب شيت (أولوية)
+      pjob.sentAt = Date.now();
+      const items = [...new Map(pjob.rows.map(r => [r.num + "|" + r.date, { key: r.num + "|" + r.date, num: r.num, date: r.date }])).values()];
+      return send(200, JSON.stringify({ id: pjob.id, items }), "application/json");
+    }
+    // (2.19.3) طلب بالرقم من أنس: بدون تاريخ → الجهاز يرجّع آخر 10 بانوراما للرقم
+    if (preq?.nums?.length && !(preq.sentAt && Date.now() - preq.sentAt < 8 * 60e3)) {
+      preq.sentAt = Date.now(); saveReq();
+      return send(200, JSON.stringify({ id: preq.id, items: preq.nums.map(n => ({ key: n + "|", num: n, date: "" })) }), "application/json");
+    }
+    return send(204);                                                                // ما فيه طلب / الجهاز شغّال عليه
   }
   if (u.pathname === "/pano/result" && req.method === "POST") {
     const id = u.searchParams.get("id") || "";
-    if (!pjob || pjob.id !== id) return send(410, "gone");
+    const isReq = !!preq && preq.id === id;
+    if (!isReq && (!pjob || pjob.id !== id)) return send(410, "gone");
     const zip = await JSZip.loadAsync(await readBody(req, 500 * 1024 * 1024));
     const meta = JSON.parse(await zip.file("result.json").async("string"));
     const result = new Map();
@@ -612,6 +678,7 @@ export async function panoHttp(req, res) {
     send(200, "ok");
     lastRes = { at: Date.now(), n: [...result.values()].reduce((a, v) => a + v.length, 0) };
     C.log.info({ id, keys: result.size, imgs: lastRes.n }, "بانوراما: وصلت الصور من جهاز الأشعة");
+    if (isReq) { reqDone(result).catch(async e => { C.log.error({ err: String(e?.stack || e) }, "بانوراما: طلب بالرقم"); await sendBoth({ text: "❌ وصلت صور البانوراما بس ما قدرت أرسلها: " + String(e?.message || e).slice(0, 120) }); }); return; }
     if (waiter?.id === id) waiter.resolve(result);
     else finishLate(result).catch(async e => { C.log.error({ err: String(e?.stack || e) }, "بانوراما: متأخر"); await sendBoth({ text: "❌ وصلت صور البانوراما بس ما قدرت أجهّز الملف: " + String(e?.message || e).slice(0, 120) }); });
     return;
