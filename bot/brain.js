@@ -4,7 +4,7 @@
 // الكود هو اللي ينفّذ الأفعال، ويقرا التغيير من القاعدة، وبعدها بس يقول «انحفظ».
 // القروب ما يتغيّر: ✅ بس.
 
-import { altsOf, shiftsFor as shFor, weekOf, weekSch, startOf, weekTxt, weekMap } from "./week.js";
+import { altsOf, shiftsFor as shFor, planOf, weekSch, startOf, weekTxt, weekMap } from "./week.js";
 let A = null;                                   // أدوات group.js (تنمرّر من initBrain)
 const chat = [];                                // آخر كلامنا {role: user|model, text, at}
 let saveT = null, proposal = null;              // اقتراح ينتظر موافقته
@@ -318,13 +318,16 @@ export async function handle(m, text, { forwarded = false } = {}) {
 }
 // (2.21.0) جدول أسبوع لطبيب واحد بأوقات مختلفة → فعل واحد (mode: week) بدل أفعال تمسح بعض
 function weekActs(actions, text) {
-  const w = weekOf(text); if (!w) return actions;
-  const K = a => (a.type === "schedule" && !ISO(a.end_date) && !a.until_return_of) || (a.type === "status" && ["starts_at", "present", "leaves_at", "absent_today"].includes(a.kind));
+  const t = A.nowR(), P = planOf(text, t.iso, t.wd, Math.floor((t.m ?? 720) / 60)); if (!P) return actions;   // (2.21.1) + دوام مؤقت لفترة
+  const K = a => a.type === "schedule" || (a.type === "status" && ["starts_at", "present", "leaves_at", "absent_today"].includes(a.kind));
   const ids = [...new Set(actions.filter(K).map(a => a.doctor_id).filter(Boolean))];
   const d = ids.length === 1 ? docOf(ids[0]) : ids.length ? null : A.fuzzyPick?.(text);
   if (!d) return actions;
-  const t = A.nowR(), start = startOf(text, t.iso, t.wd) || actions.map(a => a.start_date).find(x => ISO(x)) || "";
-  return [...actions.filter(a => !(K(a) && a.doctor_id === d.id)), { type: "schedule", doctor_id: d.id, mode: "week", groups: w.groups, ...(start ? { start_date: start } : {}) }];
+  const HH = m => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const add = [];
+  if (P.tmp) add.push({ type: "schedule", doctor_id: d.id, mode: "all_days", shifts: P.tmp.shifts.map(x => ({ start_time: HH(x.s), end_time: HH(x.e) })), start_date: P.tmp.from, end_date: P.tmp.until });
+  if (P.week) add.push({ type: "schedule", doctor_id: d.id, mode: "week", groups: P.week.groups, ...(P.week.start ? { start_date: P.week.start } : !P.tmp && actions.map(a => a.start_date).find(x => ISO(x)) ? { start_date: actions.map(a => a.start_date).find(x => ISO(x)) } : {}) });
+  return [...actions.filter(a => !(K(a) && a.doctor_id === d.id)), ...add];
 }
 const lastModel = () => [...chat].reverse().find(x => x.role === "model")?.text || "";
 
@@ -1211,6 +1214,7 @@ function selfCases() {
     // (2.21.0) دوام مختلف لكل أيام (ثلاث دوامات)
     { q: "دوام د. وجدان باجبع ثابت:\nالسبت والأحد والأربعاء: من ٤ م إلى ١١ م\nالاثنين والثلاثاء: من ٩ ص إلى ٦ م\nالخميس: من ١ م إلى ١٠ م", all: [{ doc: "وجدان", type: "schedule", week: [[[0, 3, 6], "16:00", "23:00"], [[1, 2], "09:00", "18:00"], [[4], "13:00", "22:00"]] }] },
     { q: "دوام دكتورة وجدان دائم\nالسبت واحد واربعاء من ٤-١١ (٧ ساعات)\nوالاثنين والثلاثاء ٩-٦ ( ٩ ساعات)\nوالخميس من ١-١٠ ( ٩ ساعات )", all: [{ doc: "وجدان", type: "schedule", week: [[[0, 3, 6], "16:00", "23:00"], [[1, 2], "09:00", "18:00"], [[4], "13:00", "22:00"]] }] },
+    { q: "الدكتورة وجدان الاسبوع هذا فقط سوف يتم تغير دوامها من ١ الى ٨ بمعنى من غداً الى نهاية الاسبوع من ١ م ل ٨ م\nوالاسبوع القادم يبدا التغير وبيكون ثابت\nالسبت واحد واربعاء من ٤-١١ (٧ ساعات)\nوالاثنين والثلاثاء ٩-٦ ( ٩ ساعات)\nوالخميس من ١-١٠ ( ٩ ساعات )", all: [{ doc: "وجدان", type: "schedule", week: [[[0, 3, 6], "16:00", "23:00"], [[1, 2], "09:00", "18:00"], [[4], "13:00", "22:00"]] }] },
     { q: "شكرا", none: true },
     { q: "كيف الحال", none: true },
   ].filter(c => !c.until || t.iso < c.until);

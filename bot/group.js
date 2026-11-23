@@ -5,7 +5,7 @@ import { initBrain, handle as brainHandle, noteOut, bootFixes, setAssist } from 
 import { initShifts } from "./shifts.js";
 import { initPrep, prepApplied, prepList } from "./prep.js";
 import { can } from "./perms.js";
-import { altsOf, shiftsFor as shFor, setAlts, putDays, weekOf, weekSch, startOf, weekTxt, weekMap } from "./week.js";
+import { altsOf, shiftsFor as shFor, setAlts, putDays, planOf, weekSch, startOf, weekTxt, weekMap, shTxt } from "./week.js";
 
 const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
@@ -484,6 +484,14 @@ async function apply(evs, ctx) {
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
       // (2.9.13) «دوام اليوم» بدون ولا وقت → ما نطبقه (كان يمسح «موجود» ويحط حالة فاضية)
       if (d && e.kind === "starts_at" && e.at_min == null && !String(e.at_time || "").trim() && !String(e.until_time || "").trim()) { (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — «دوام اليوم» بدون وقت: ما طبّقته`); continue; }
+      if (e.__tmp && d) {                                                          // (2.21.1) دوام مؤقت لفترة (من… لين…) ويرجع لحاله بعدها
+        const x = e.__tmp, sch = { days: [], shifts: x.shifts, tmp: { from: x.from, until: x.until, back: "" } };
+        const dd = iso => `${DAYN[new Date(iso + "T12:00:00Z").getUTCDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+        if (x.from > t.iso) { plans.push({ id: uid(), date: x.from, doctorId: d.id, kind: "set_schedule", sch, by: ctx.by }); applied.push("planned"); }
+        else { upd.push({ d, sch }); applied.push("schedule_change"); }
+        (ctx.rep ||= []).push(`${x.from > t.iso ? "🗓" : "✏️"} د. ${shortName(d.name)} — دوام مؤقت ${shTxt(x.shifts)} من ${dd(x.from)} لين ${dd(x.until)}، وبعدها يرجع لدوامه\n   الموقع: ${x.from > t.iso ? "يتعدّل يومها ويرجع لحاله" : "انعدّل ويرجع لحاله"}`);
+        continue;
+      }
       if (e.__week && d) {                                                         // (2.21.0) أسبوع كامل بأوقات مختلفة — واضح، ما يحتاج خيارات
         const sch = { ...e.__week }, st = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : "";
         if (st && st > t.iso) {
@@ -689,14 +697,16 @@ ${durAsks.map(x => `• د. ${shortName(x.d.name)}: ${hm(x.from)} – ${hm(x.unt
 /* ---------- (2.21.0) جدول أسبوع لطبيب واحد بأوقات مختلفة → حدث واحد فيه الأسبوع كامل (بدل أحداث تمسح بعض) ---------- */
 const WEEK_K = new Set(["schedule_change", "starts_at", "present", "leaves_at", "new_doctor", "absent_today", "late", "appointments_only"]);
 function weekFix(evs, text, quoted) {
-  const w = weekOf(text); if (!w) return evs;
+  const t = nowR(), P = planOf(text, t.iso, t.wd, Math.floor(t.m / 60)); if (!P) return evs;   // (2.21.1) + دوام مؤقت لفترة (من… لين…)
   const who = e => (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
   const ids = [...new Set((evs || []).filter(e => WEEK_K.has(e.kind)).map(who).filter(Boolean).map(d => d.id))];
   const d = ids.length === 1 ? docs().find(x => x.id === ids[0]) : ids.length ? null : (fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null));
   if (!d) return evs;
-  const t = nowR(), start = startOf(text, t.iso, t.wd) || (evs || []).map(e => e.start_date).find(x => /^\d{4}-\d{2}-\d{2}$/.test(x || "")) || "";
   const mine = e => who(e)?.id === d.id && (WEEK_K.has(e.kind) || (e.kind === "vacation" && e.start_date && e.start_date === e.end_date));   // «الأحد: إجازة» = مو يوم دوام، مو إجازة
-  return Object.assign([...(evs || []).filter(e => !mine(e)), { doctor_id: d.id, name: shortName(d.name), kind: "schedule_change", __week: weekSch(w.groups), start_date: start }], { unclear: false, question: "" });
+  const out = (evs || []).filter(e => !mine(e)), nm = shortName(d.name);
+  if (P.tmp) out.push({ doctor_id: d.id, name: nm, kind: "schedule_change", __tmp: P.tmp });
+  if (P.week) out.push({ doctor_id: d.id, name: nm, kind: "schedule_change", __week: weekSch(P.week.groups), start_date: P.week.start || (!P.tmp && (evs || []).map(e => e.start_date).find(x => /^\d{4}-\d{2}-\d{2}$/.test(x || ""))) || "" });
+  return Object.assign(out, { unclear: false, question: "" });
 }
 
 /* ---------- تغيير دوام → خيارات للمسؤول، يختار رقم، نطبّق الخيار الجاهز ونتأكد إنه انحفظ ---------- */
@@ -1358,6 +1368,12 @@ async function verifyApplied(evs, ctx) {
     const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept); if (!d) continue;
     const nm = "د. " + shortName(d.name), fut = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? (e.date > t.iso ? e.date : null) : futureDay(e, ctx.text, t);
     if (["vacation"].includes(e.kind)) { b ||= (await db.doc("board/bawadi").get()).data(); if (!(b?.vacations || []).some(v => v.doctorId === d.id)) bad.push(nm + " (الإجازة)"); continue; }
+    if (e.__tmp) {                                                               // (2.21.1) المؤقت انحفظ؟
+      const x = e.__tmp;
+      if (x.from > t.iso) { if (!items.some(i => i.doctorId === d.id && i.date === x.from && i.kind === "set_schedule" && i.sch?.tmp?.until === x.until)) bad.push(nm + " (الدوام المؤقت)"); }
+      else { b ||= (await db.doc("board/bawadi").get()).data(); const y = (b?.departments || []).flatMap(p => p.doctors || []).find(z => z.id === d.id); if (y?.tmp?.until !== x.until) bad.push(nm + " (الدوام المؤقت)"); }
+      continue;
+    }
     if (e.__week) {                                                              // (2.21.0) الأسبوع كامل انحفظ؟ (يوم يوم)
       const st = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : "";
       if (st && st > t.iso) { if (!items.some(i => i.doctorId === d.id && i.date === st && i.kind === "set_schedule" && i.sch?.week)) bad.push(nm + " (الجدول الجديد)"); }
