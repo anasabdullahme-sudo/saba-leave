@@ -7,6 +7,7 @@
 // التخزين على قرص Railway (مو Firebase).
 import fs from "node:fs";
 import nodePath from "node:path";
+import { altsOf, setAlts, shiftsFor as shFor } from "./week.js";
 
 const STORE = process.env.STORE_DIR || (fs.existsSync("/data") ? "/data/store" : "./store");
 const FILE = nodePath.join(STORE, "shifts.json");
@@ -31,7 +32,7 @@ const sn = d => C.shortName(d?.name || "");
 const nn = s => String(s || "").replace(/[ً-ْ]/g, "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).toLowerCase().trim();
 const vacsOf = d => (C.getBoard()?.vacations || []).filter(v => v.doctorId === d.id || (d.code && String(v.code) === String(d.code)));
 const onVac = (d, iso) => vacsOf(d).some(v => v.start <= iso && (!v.end || v.end >= iso));
-const baseOf = d => d.tmp?.base || { shifts: d.shifts || [], workdays: d.workdays || [], ...(d.alt ? { alt: d.alt } : {}) };
+const baseOf = d => d.tmp?.base || { shifts: d.shifts || [], workdays: d.workdays || [], ...(altsOf(d).length ? { alt: altsOf(d)[0], alts: altsOf(d) } : {}) };   // (2.21.0) alts = كل مجموعات الأيام
 
 export function initShifts(ctx) {
   C = ctx; load();
@@ -61,7 +62,7 @@ async function revert(d) {
     const t = next.departments.flatMap(p => p.doctors || []).find(x => x.id === d.id); if (!t?.tmp) return;
     const b = t.tmp.base || {}; done = { name: sn(t), from: t.shifts, to: b.shifts || [], why: t.tmp.until ? `خلص المؤقت (${dm(t.tmp.until)})` : `رجع د. ${sn(C.docs().find(y => y.id === t.tmp.back)) || "—"} من إجازته` };
     t.shifts = b.shifts || []; if ((b.workdays || []).length) t.workdays = b.workdays;
-    if (b.alt) t.alt = b.alt; else delete t.alt;
+    setAlts(t, b.alts?.length ? b.alts : b.alt ? [b.alt] : []);
     delete t.tmp;
     next.log = [{ at: Date.now(), by: "البوت", what: `د. ${done.name} رجع لدوامه الثابت (${done.why})` }, ...(cur.log || [])].slice(0, 60);
     next.updatedAt = Date.now(); next.updatedBy = "البوت";
@@ -141,8 +142,8 @@ async function restorePlans(ids, r, day) {
     const d = C.docs().find(x => x.id === id); if (!d) continue;
     const want = id === r.doc ? { ...(r.snap?.[id] || baseOf(d)), shifts: r.normal } : r.snap?.[id]; if (!want) continue;
     const cur = d.tmp && (d.tmp.back === r.doc || (d.tmp.until && d.tmp.until < day)) ? d.tmp.base : d;
-    if (J(cur.shifts) === J(want.shifts) && JSON.stringify(cur.alt || null) === JSON.stringify(want.alt || null)) continue;
-    items.push({ id: C.uid(), date: day, doctorId: id, kind: "set_schedule", sch: { days: want.workdays || [], shifts: want.shifts || [], alt: want.alt || null }, by: "البوت (رجوع من إجازة)" });
+    if (J(cur.shifts) === J(want.shifts) && JSON.stringify(altsOf(cur)) === JSON.stringify(altsOf(want))) continue;
+    items.push({ id: C.uid(), date: day, doctorId: id, kind: "set_schedule", sch: { days: want.workdays || [], shifts: want.shifts || [], alt: altsOf(want)[0] || null, alts: altsOf(want) }, by: "البوت (رجوع من إجازة)" });
     lines.push(`• د. ${sn(d)}: ${shT(want.shifts)} من بكرة`);
   }
   if (items.length) {
@@ -199,7 +200,7 @@ async function fridayText(fri) {
   const add = (d, s, e) => { const k = d.dep; if (!groups.has(k)) groups.set(k, []); if (!groups.get(k).some(y => y.d.id === d.id)) groups.get(k).push({ d, s, e }); };
   const mn = v => { const x = /^(\d{1,2}):(\d{2})/.exec(v || ""); return x ? +x[1] * 60 + +x[2] : null; };
   for (const p of plans) { const d = docs.find(x => x.id === p.doctorId); if (!d || onVac(d, fri)) continue; const s = p.at_min ?? mn(p.at_time), e = p.until_min != null ? p.until_min % 1440 : mn(p.until_time); if (s != null) add(d, s, e); }
-  for (const d of docs) if ((d.workdays || []).includes(5) && !onVac(d, fri)) for (const x of (d.alt?.days?.includes(5) ? d.alt.shifts : d.shifts) || []) add(d, x.s, x.e);
+  for (const d of docs) if ((d.workdays || []).includes(5) && !onVac(d, fri)) for (const x of shFor(d, 5)) add(d, x.s, x.e);
   const line = x => `د. ${sn(x.d)} من ${AR(C.hm(x.s))}${x.e != null ? " - " + AR(C.hm(x.e)) : ""}`;
   const out = ["سابا 1", "دوام يوم الجمعة", ""], missing = [];
   const keys = [...groups.keys()];

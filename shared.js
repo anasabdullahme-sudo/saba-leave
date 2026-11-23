@@ -654,6 +654,7 @@ async function liveBackend(role) {
   let AIref = null, aiInst = null, aiCfg = null;
   // بدون «تفكير»: قراءة ورقة ما تحتاج تفكير، والتفكير يطوّل الرد. لو موديل ما يقبله نرجع للعادي تلقائياً
   const noThink = new Set();
+  let lastSeen = null;                       // (23/11) آخر خانات انقرت (لو القراءة ما كملت)
   async function getModel(name = AI_MODEL, think = false) {
     const key = name + (think ? "|t" : "");
     if (models[key]) return models[key];
@@ -740,22 +741,28 @@ async function liveBackend(role) {
       await Promise.all(MODELS.map(n => one(n, "lean")));                   // الجولة 2: خانات أقل + أول بأول
       if (aiStd) await one(AI_MODEL, "lean-std");                           // الجولة 3: نفس الخفيف بتوكن App Check عادي
     },
-    async extract(blob, type, onProgress) {
+    partial: () => lastSeen,
+    async extract(blob, type, onProgress, onNote) {
       // قراءة خفيفة (خانات أقل بالترتيب المهم أول) وتوصل أول بأول. موديلين lite مع بعض من أول ثانية وناخذ أسرعهم؛ الباقي احتياط لو فشلوا
+      // (23/11) قوقل أحياناً يعلّق الطلب دقيقة بدون رد (ضغط عالي): بعد 8 ثواني بدون أي حرف نرسل طلب جديد + الاحتياط، وبعد 20 ثانية مرة ثالثة.
+      // كلهم فشلوا بسرعة؟ نعيد مرة وحدة بعد ثانيتين ونص. وما انقرت كاملة؟ اللي انقرا (lastSeen) يتعبّى والباقي المريض يكمله
+      lastSeen = null;
       const t0 = performance.now();
       const small = blob.type === "application/pdf" ? blob : await compressImage(blob, 1280, 0.8);
       const b64 = await blobToBase64(small);
       const t1 = performance.now(), sec = t => ((t - t1) / 1000).toFixed(1);
       const parts = [aiPrompt(type, true), { inlineData: { data: b64, mimeType: small.type || "image/jpeg" } }];
       const FIRST = [AI_MODEL, "gemini-3.1-flash-lite"], BACKUP = AI_FALLBACK_MODELS.filter(m => !FIRST.includes(m));
-      const times = {};
+      const times = {}; let chunk = false;
       const stream = async (name, think) => {
         const m = await getLeanModel(name, think);
         const r = await m.generateContentStream(parts);
         let txt = "";
         for await (const c of r.stream) {
-          txt += c.text?.() || "";
-          if (onProgress) { const seen = {}; for (const x of txt.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) seen[x[1]] = x[2]; onProgress(seen, name); }
+          txt += c.text?.() || ""; chunk = true;
+          const seen = {}; for (const x of txt.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) { try { seen[x[1]] = JSON.parse('"' + x[2] + '"'); } catch { seen[x[1]] = x[2]; } }
+          if (Object.keys(seen).length > Object.keys(lastSeen || {}).length) lastSeen = seen;
+          if (onProgress) onProgress(seen, name);
         }
         return JSON.parse(txt);
       };
@@ -766,11 +773,20 @@ async function liveBackend(role) {
       const label = (win) => `تصغير ${((t1 - t0) / 1000).toFixed(1)}ث · قراءة ${times[win]}ث · ${win}${noThink.has(win) ? " (بتفكير)" : ""}` +
         Object.entries(times).filter(([k]) => k !== win).map(([k, v]) => ` · ${k.replace("gemini-", "")} ${v}${v === "✗" ? "" : "ث"}`).join("");
       return await new Promise((resolve, reject) => {
-        let done = false, left = 0, lastErr;
+        let done = false, left = 0, lastErr, retried = false;
+        const waves = [[8000, () => !chunk, [AI_MODEL, ...BACKUP]], [20000, () => true, FIRST]];   // [متى، بشرط، الموديلات]
+        const timers = waves.map(w => setTimeout(() => { w.fired = true; if (!done && w[1]()) start(w[2]); }, w[0]));
+        const stop = () => { done = true; timers.forEach(clearTimeout); };
+        const allFailed = () => {
+          const next = waves.find(w => !w.fired);
+          if (next) { next.fired = true; clearTimeout(timers[waves.indexOf(next)]); return start(next[2]); }   // الموجة الجاية على طول
+          if (!retried && performance.now() - t1 < 20000) { retried = true; onNote?.("لحظة… نحاول مرة ثانية"); return setTimeout(() => { if (!done) start(FIRST); }, 2500); }
+          stop(); reject(Object.assign(lastErr || new Error("ai_failed"), { partial: lastSeen }));
+        };
         const start = list => list.forEach(name => {
           left++;
-          run(name).then(v => { if (done) return; done = true; if (v && typeof v === "object") { v.patient_name ||= v.patient_name_ar || v.patient_name_en || ""; v._scan = label(name); v._scanFn = () => label(name); } resolve(v); })
-            .catch(e => { lastErr = e; console.warn("AI", name, e); if (--left === 0 && !done) { if (BACKUP.length && list === FIRST) start(BACKUP); else { done = true; reject(lastErr || new Error("ai_failed")); } } });
+          run(name).then(v => { if (done) return; stop(); if (v && typeof v === "object") { v.patient_name ||= v.patient_name_ar || v.patient_name_en || ""; v._scan = label(name); v._scanFn = () => label(name); } resolve(v); })
+            .catch(e => { lastErr = e; console.warn("AI", name, e); if (--left === 0 && !done) allFailed(); });
         });
         start(FIRST);
       });

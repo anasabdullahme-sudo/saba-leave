@@ -348,7 +348,7 @@ window.__sabaBootFail = function (ttl, msg) { clearTimeout(window.__sabaBoot); v
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261122b";
+import { TYPES, typeName, DEMO, backend, matchDoctor, doctorById, compressImage, fmtDateInput, isoToDmy, validDmy, validPhone, normPhone, validId, latinDigits, makeRef, addDaysDmy, attachDatePicker, dmyKey, fixLabel, dupKey, trackKey, doctorFits, leaveTitleOk, resolveAiDates, chooseDoctor, DEFAULT_BRANCH } from "./shared.js?v=20261123a";
 
 const $ = s => document.querySelector(s);
 const ICONS = {
@@ -597,7 +597,7 @@ async function onPhoto(file) {
   const onProgress = seen => { const got = Object.keys(STEP).filter(k => seen[k]); state._gotId = !!seen.id_number; if (got.length) $("#scanStep").textContent = "قرينا: " + got.map(k => STEP[k].slice(2)).join("، ") + "…"; };
   const endScan = () => { clearInterval(tick); clearTimeout(upLater); if (state.blob === myBlob) state._gotId = false; startUpload(); };
   try {
-    const r = await Promise.race([api.extract(blob, state.type, onProgress), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
+    const r = await Promise.race([api.extract(blob, state.type, onProgress, t => { $("#scanStep").textContent = t; }), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), api.extractTimeout || 30000))]);
     endScan();
     if (state.blob !== myBlob) return;
     state.ai = r || {};
@@ -639,6 +639,17 @@ async function onPhoto(file) {
     console.warn("AI", e);
     endScan();
     if (state.blob !== myBlob) return;
+    // (23/11) القراءة انقطعت في النص؟ نعبّي اللي انقرا والباقي المريض يكمله
+    const part = e?.partial || api.partial?.();
+    if (part && Object.values(part).filter(v => String(v || "").trim()).length >= 2) {
+      try {
+        state.ai = { ...part, patient_name: part.patient_name_ar || part.patient_name_en || "" };
+        state.scanInfo = `${((performance.now() - tScan) / 1000).toFixed(1)}ث (قراءة ناقصة: ${String(e?.message || e).slice(0, 40)})`.slice(0, 120);
+        resolveAiDates(state.ai, state.type); fillFromAI(state.ai);
+        setStatus("قرينا جزء من الصورة — كمّل الخانات الفاضية وراجع الباقي", "warn");
+        scanDone("part"); return;
+      } catch (e2) { console.warn("partial", e2); }
+    }
     setStatus("ما قدرنا نقرأ الصورة تلقائياً — عبّ البيانات يدوياً", "warn");
     scanDone("fail");
     const why = String(e?.code || "") + " " + String(e?.message || e || "").slice(0, 220);

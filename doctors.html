@@ -231,9 +231,8 @@ td .sub.tmp{color:#b45309}
   <div class="f"><label>الشفت الأول</label><div class="shift"><input type="time" id="s1a"><span>إلى</span><input type="time" id="s1b"><span></span></div></div>
   <div class="f"><label>الشفت الثاني (اختياري)</label><div class="shift"><input type="time" id="s2a"><span>إلى</span><input type="time" id="s2b"><button class="x" id="s2x" type="button">مسح</button></div></div>
   <details id="altBox"><summary style="cursor:pointer;font-weight:600;font-size:13.5px;color:var(--blue)">دوام مختلف لأيام معيّنة</summary>
-    <div class="f" style="margin-top:8px"><label>الأيام</label><div class="days" id="aDays"></div></div>
-    <div class="f"><label>دوامها في هالأيام</label><div class="shift"><input type="time" id="a1a"><span>إلى</span><input type="time" id="a1b"><span></span></div></div>
-    <div class="f"><label>شفت ثاني بهالأيام (اختياري)</label><div class="shift"><input type="time" id="a2a"><span>إلى</span><input type="time" id="a2b"><button class="x" id="aX" type="button">مسح الكل</button></div></div>
+    <div id="altList"></div>
+    <button class="btn btn-g" id="altAdd" type="button" style="margin-top:8px">+ أيام بدوام ثاني</button>
   </details>
   <div class="err" id="dErr"></div>
   <div class="btns"><button class="btn btn-p" id="dSave">حفظ</button><button class="btn btn-g" data-close>إلغاء</button><button class="btn btn-d" id="dDel">حذف الطبيب</button></div>
@@ -287,7 +286,7 @@ td .sub.tmp{color:#b45309}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { backend, arNum, DEMO, relayDoctorAlerts, autoUpdate } from "./shared.js?v=20261122b";
+import { backend, arNum, DEMO, relayDoctorAlerts, autoUpdate } from "./shared.js?v=20261123a";
 autoUpdate(() => [...document.querySelectorAll(".modal:not(#mLogin)")].some(m => !m.hidden));
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -313,8 +312,10 @@ const toTime = m => m == null ? "" : `${String(Math.floor(m / 60) % 24).padStart
 const fromTime = v => { const x = /^(\d{1,2}):(\d{2})/.exec(v || ""); return x ? +x[1] * 60 + +x[2] : null; };
 const shTxt = l => l.map(s => `${hm(s.s)} – ${hm(s.e)}`).join("  و  ");
 // دوام مختلف لأيام معيّنة (مثلاً الأحد والأربعاء 9ص–1م)
-const shiftsFor = (d, wd) => d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []);
-const shiftTxt = d => ((d.shifts || []).length ? shTxt(d.shifts) : "الدوام ما تحدد") + (d.alt?.days?.length ? ` · ${WEEK.filter(i => d.alt.days.includes(i)).map(i => WD[i]).join(" و")}: ${shTxt(d.alt.shifts || []) || "—"}` : "");
+// (21/11→23/11) أكثر من مجموعة أيام: alts = [{days, shifts}] (alt = أول مجموعة للنسخ القديمة)
+const altsOf = d => (d?.alts?.length ? d.alts : d?.alt?.days?.length ? [d.alt] : []).filter(g => g?.days?.length);
+const shiftsFor = (d, wd) => { const g = altsOf(d).find(g => g.days.includes(wd)); return g ? g.shifts || [] : d.shifts || []; };
+const shiftTxt = d => ((d.shifts || []).length ? shTxt(d.shifts) : "الدوام ما تحدد") + altsOf(d).map(g => ` · ${WEEK.filter(i => g.days.includes(i)).map(i => WD[i]).join(" و")}: ${shTxt(g.shifts || []) || "—"}`).join("");
 // (2.19.0) الجدول مربوط: دوام اليوم من القروب يطلع في عمود الدوام، والدوام المؤقت مكتوب لين متى
 const dmS = iso => iso ? iso.slice(8, 10) + "/" + iso.slice(5, 7) : "";
 const docName = id => { for (const p of S.board?.departments || []) for (const x of p.doctors || []) if (x.id === id) return String(x.name).split(" –")[0]; return ""; };
@@ -538,24 +539,34 @@ function openDoc(docId, depId) {
   $("#dDays").innerHTML = WEEK.map(i => `<label><input type="checkbox" value="${i}" ${wd.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("");
   const sh = d?.shifts || [];
   $("#s1a").value = toTime(sh[0]?.s); $("#s1b").value = toTime(sh[0]?.e); $("#s2a").value = toTime(sh[1]?.s); $("#s2b").value = toTime(sh[1]?.e);
-  const al = d?.alt || { days: [], shifts: [] };
-  $("#aDays").innerHTML = WEEK.map(i => `<label><input type="checkbox" value="${i}" ${al.days.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("");
-  $("#a1a").value = toTime(al.shifts[0]?.s); $("#a1b").value = toTime(al.shifts[0]?.e); $("#a2a").value = toTime(al.shifts[1]?.s); $("#a2b").value = toTime(al.shifts[1]?.e);
-  $("#altBox").open = !!al.days.length;
+  const als = d ? altsOf(d) : [];
+  $("#altList").innerHTML = als.map(altRow).join("");
+  $("#altBox").open = !!als.length;
   $("#dDel").hidden = !d; $("#dErr").textContent = "";
   open("#mDoc");
 }
 $("#dDep").onchange = () => { const nw = $("#dDep").value === "__new"; $("#dNewDepWrap").hidden = !nw; if (!nw) { const p = S.board.departments.find(x => x.id === $("#dDep").value); if (p) $("#dFloor").value = p.floor; } };
 $("#s2x").onclick = () => { $("#s2a").value = ""; $("#s2b").value = ""; };
-$("#aX").onclick = () => { ["#a1a", "#a1b", "#a2a", "#a2b"].forEach(s => $(s).value = ""); $$("#aDays input").forEach(i => i.checked = false); };
+function altRow(g) {
+  g = g || { days: [], shifts: [] };
+  return `<div class="altg" style="border:1px solid #dfe6ee;border-radius:10px;padding:8px 10px;margin-top:8px">
+    <div class="f"><label>الأيام</label><div class="days">${WEEK.map(i => `<label><input type="checkbox" value="${i}" ${g.days.includes(i) ? "checked" : ""}>${WD[i]}</label>`).join("")}</div></div>
+    <div class="f"><label>دوامها في هالأيام</label><div class="shift"><input type="time" class="g1a" value="${toTime(g.shifts[0]?.s)}"><span>إلى</span><input type="time" class="g1b" value="${toTime(g.shifts[0]?.e)}"><span></span></div></div>
+    <div class="f"><label>شفت ثاني بهالأيام (اختياري)</label><div class="shift"><input type="time" class="g2a" value="${toTime(g.shifts[1]?.s)}"><span>إلى</span><input type="time" class="g2b" value="${toTime(g.shifts[1]?.e)}"><button class="x gdel" type="button">حذف المجموعة</button></div></div>
+  </div>`;
+}
+$("#altAdd").onclick = () => { $("#altList").insertAdjacentHTML("beforeend", altRow()); };
+$("#altList").onclick = e => { const b = e.target.closest(".gdel"); if (b) b.closest(".altg").remove(); };
 $("#dSave").onclick = async () => {
   const name = $("#dName").value.trim(); if (!name) return $("#dErr").textContent = "اكتب اسم الطبيب";
   const shifts = [[$("#s1a").value, $("#s1b").value], [$("#s2a").value, $("#s2b").value]].map(([a, c]) => ({ s: fromTime(a), e: fromTime(c) })).filter(x => x.s != null && x.e != null);
   if (($("#s1a").value && !$("#s1b").value) || ($("#s2a").value && !$("#s2b").value)) return $("#dErr").textContent = "حدد نهاية الشفت";
   const workdays = $$("#dDays input:checked").map(i => +i.value);
-  const altDays = $$("#aDays input:checked").map(i => +i.value);
-  const altShifts = [[$("#a1a").value, $("#a1b").value], [$("#a2a").value, $("#a2b").value]].map(([a, c]) => ({ s: fromTime(a), e: fromTime(c) })).filter(x => x.s != null && x.e != null);
-  if (altDays.length && !altShifts.length) return $("#dErr").textContent = "حدد دوام الأيام المختلفة أو شيل اختيار الأيام";
+  const alts = $$("#altList .altg").map(el => ({ days: [...el.querySelectorAll(".days input:checked")].map(i => +i.value),
+    shifts: [[".g1a", ".g1b"], [".g2a", ".g2b"]].map(([a, c]) => ({ s: fromTime(el.querySelector(a).value), e: fromTime(el.querySelector(c).value) })).filter(x => x.s != null && x.e != null) })).filter(g => g.days.length || g.shifts.length);
+  if (alts.some(g => g.days.length && !g.shifts.length)) return $("#dErr").textContent = "حدد دوام الأيام المختلفة أو شيل اختيار الأيام";
+  if (alts.some(g => !g.days.length)) return $("#dErr").textContent = "اختر أيام المجموعة أو احذفها";
+  { const seen = new Set(); for (const g of alts) for (const w of g.days) { if (seen.has(w)) return $("#dErr").textContent = `يوم ${WD[w]} مكرر في أكثر من مجموعة`; seen.add(w); } }
   let depId = $("#dDep").value, newDep = null;
   if (depId === "__new") { const n = $("#dNewDep").value.trim(); if (!n) return $("#dErr").textContent = "اكتب اسم القسم الجديد"; newDep = { id: uid(), name: n, floor: $("#dFloor").value, notes: "", doctors: [] }; depId = newDep.id; }
   const fl = $("#dFloor").value;
@@ -566,8 +577,9 @@ $("#dSave").onclick = async () => {
     let old = null; b.departments.forEach(p => { const i = p.doctors.findIndex(x => x.id === id); if (i >= 0) old = p.doctors.splice(i, 1)[0]; });
     const p = b.departments.find(x => x.id === depId);
     const nd = { ...(old || {}), id, ...rec, floor: fl !== p.floor ? fl : "" };
-    if (altDays.length) nd.alt = { days: altDays, shifts: altShifts }; else delete nd.alt;
-    if (old?.tmp && JSON.stringify((old.shifts || []).map(x => [x.s, x.e])) !== JSON.stringify(shifts.map(x => [x.s, x.e]))) delete nd.tmp;   // عدّلت الدوام بيدك → ما عاد مؤقت
+    if (alts.length) { nd.alts = alts; nd.alt = alts[0]; } else { delete nd.alts; delete nd.alt; }
+    const sig = (sh, al) => JSON.stringify([(sh || []).map(x => [x.s, x.e]), (al || []).map(g => [g.days, (g.shifts || []).map(x => [x.s, x.e])])]);
+    if (old?.tmp && sig(old.shifts, old ? altsOf(old) : []) !== sig(shifts, alts)) delete nd.tmp;   // عدّلت الدوام بيدك → ما عاد مؤقت
     p.doctors.push(nd);
     return b;
   }, `${editDoc.id ? "عدّل" : "أضاف"} د. ${name}`);

@@ -5,6 +5,7 @@ import { initBrain, handle as brainHandle, noteOut, bootFixes, setAssist } from 
 import { initShifts } from "./shifts.js";
 import { initPrep, prepApplied, prepList } from "./prep.js";
 import { can } from "./perms.js";
+import { altsOf, shiftsFor as shFor, setAlts, putDays, weekOf, weekSch, startOf, weekTxt, weekMap } from "./week.js";
 
 const GROUP_NAME = process.env.GROUP_NAME || "For information saba 1";
 const TZ = "Asia/Riyadh";
@@ -33,7 +34,7 @@ export function initGroup(opts) {
   listenSignals();
   db.doc("bot/group_log").get().then(d => { gLog.unshift(...(d.data()?.items || []).filter(g => Date.now() - g.at < 48 * 3600e3)); }).catch(() => {});
   initBrain({ db, log, getSock, gemini, models, FieldValue, docs, getBoard: () => board, getToday: () => today, groupLog: () => gLog, shortName, norm, hm, hhmm, nowR, isoPlus, uid, findDep,
-    apply, updateSchedules, endVacations, removeDoctor, restorePrev, applyOption, addDoctor, askAdmin, aiParse, dmAdmin, setReports: on => { reportsOn = on; db.doc("bot/prefs").set({ reports: on }, { merge: true }).catch(() => {}); } });
+    apply, updateSchedules, endVacations, removeDoctor, restorePrev, applyOption, addDoctor, askAdmin, aiParse, dmAdmin, fuzzyPick, setReports: on => { reportsOn = on; db.doc("bot/prefs").set({ reports: on }, { merge: true }).catch(() => {}); } });
   // (2.19.0) المؤقت يرجع لحاله، سؤال الرجوع من الإجازة، وجدول الجمعة كل خميس
   setAssist(initPrep({ docs, dm: dmAdmin, log }).ext);          // (2.20.0) دفتر التحضير (من قروب الشكاوي)
   setAssist(initShifts({ db, log, FieldValue, docs, getBoard: () => board, nowR, isoPlus, hm, hhmm, shortName, norm, uid, dmAdmin, updateSchedules, ready: () => !!board && !!getSock()?.user && admins.length > 0 }).ext);
@@ -402,7 +403,7 @@ function rAt(ms) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(new Date(ms)).map(x => [x.type, x.value]));
   return { iso: `${p.year}-${p.month}-${p.day}`, m: +p.hour * 60 + +p.minute, wd: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday] };
 }
-const shiftsOn = (d, wd) => !(d.workdays || []).includes(wd) ? [] : (d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []));
+const shiftsOn = (d, wd) => !(d.workdays || []).includes(wd) ? [] : shFor(d, wd);
 function expFor(d, atMs) {
   const t = rAt(atMs), mid = riyadhMid(t.iso), endDay = mid + DAY;
   if (!d) return endDay;
@@ -483,6 +484,14 @@ async function apply(evs, ctx) {
       if ((e.kind === "new_doctor" || e.kind === "schedule_change") && d && e.name && !sameName(e.name, d)) d = strictFind(e.name);  // ما نعدّل دوام طبيب ثاني بالغلط
       // (2.9.13) «دوام اليوم» بدون ولا وقت → ما نطبقه (كان يمسح «موجود» ويحط حالة فاضية)
       if (d && e.kind === "starts_at" && e.at_min == null && !String(e.at_time || "").trim() && !String(e.until_time || "").trim()) { (ctx.rep ||= []).push(`🤔 د. ${shortName(d.name)} — «دوام اليوم» بدون وقت: ما طبّقته`); continue; }
+      if (e.__week && d) {                                                         // (2.21.0) أسبوع كامل بأوقات مختلفة — واضح، ما يحتاج خيارات
+        const sch = { ...e.__week }, st = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : "";
+        if (st && st > t.iso) {
+          plans.push({ id: uid(), date: st, doctorId: d.id, kind: "set_schedule", sch, by: ctx.by }); applied.push("planned");
+          (ctx.rep ||= []).push(`🗓 د. ${shortName(d.name)} — دوام ثابت من ${DAYN[new Date(st + "T12:00:00Z").getUTCDay()]} ${st.slice(8, 10)}/${st.slice(5, 7)}:\n   ${weekTxt(sch)}\n   الموقع: يتعدّل يومها (لين ذاك اليوم يبقى الدوام الحالي)`);
+        } else { upd.push({ d, sch }); applied.push("schedule_change"); (ctx.rep ||= []).push(`✏️ د. ${shortName(d.name)} — دوام ثابت:\n   ${weekTxt(sch)}\n   الموقع: انعدّل في الجدول`); }
+        continue;
+      }
       // تغيير دوام (ثابت، أو ليوم ثاني) → ما نطبّق لحالنا: نرسل للمسؤول خيارات ويختار
       if (d && !ctx.confirmed && !ctx.fix && !ctx.planned && admins.length && needsConfirm(e, ctx.text, t)) {
         e.__asked = true; if (!asks.some(a => a.d.id === d.id)) asks.push({ d, e: { ...e } });
@@ -677,6 +686,19 @@ ${durAsks.map(x => `• د. ${shortName(x.d.name)}: ${hm(x.from)} – ${hm(x.unt
   return applied;
 }
 
+/* ---------- (2.21.0) جدول أسبوع لطبيب واحد بأوقات مختلفة → حدث واحد فيه الأسبوع كامل (بدل أحداث تمسح بعض) ---------- */
+const WEEK_K = new Set(["schedule_change", "starts_at", "present", "leaves_at", "new_doctor", "absent_today", "late", "appointments_only"]);
+function weekFix(evs, text, quoted) {
+  const w = weekOf(text); if (!w) return evs;
+  const who = e => (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
+  const ids = [...new Set((evs || []).filter(e => WEEK_K.has(e.kind)).map(who).filter(Boolean).map(d => d.id))];
+  const d = ids.length === 1 ? docs().find(x => x.id === ids[0]) : ids.length ? null : (fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null));
+  if (!d) return evs;
+  const t = nowR(), start = startOf(text, t.iso, t.wd) || (evs || []).map(e => e.start_date).find(x => /^\d{4}-\d{2}-\d{2}$/.test(x || "")) || "";
+  const mine = e => who(e)?.id === d.id && (WEEK_K.has(e.kind) || (e.kind === "vacation" && e.start_date && e.start_date === e.end_date));   // «الأحد: إجازة» = مو يوم دوام، مو إجازة
+  return Object.assign([...(evs || []).filter(e => !mine(e)), { doctor_id: d.id, name: shortName(d.name), kind: "schedule_change", __week: weekSch(w.groups), start_date: start }], { unclear: false, question: "" });
+}
+
 /* ---------- تغيير دوام → خيارات للمسؤول، يختار رقم، نطبّق الخيار الجاهز ونتأكد إنه انحفظ ---------- */
 const TODAYW = /(^|\s)(اليوم|الليله)(\s|$)/;
 const futureDay = (e, text, t) => (/^\d{4}-\d{2}-\d{2}$/.test(e.date || "") && e.date > t.iso ? e.date : null) || (() => { const d = textDay(text); return d && d > t.iso ? d : null; })();
@@ -769,14 +791,14 @@ async function applyOption(it, o) {
   if (a.type === "today") { const st = (await db.doc("board/bawadi_today").get()).data()?.st?.[d.id]; return { ok: !!st && st.from === toMin(a.at) }; }
   const b = (await db.doc("board/bawadi").get()).data(), x = (b?.departments || []).flatMap(p => p.doctors || []).find(y => y.id === d.id);
   if (!x) return { ok: false, why: "ما لقيت الدكتور" };
-  if (a.type === "alt") return { ok: !!x.alt && a.days.every(i => x.alt.days.includes(i)) && J(x.alt.shifts) === J(a.shifts), why: x.alt && J(x.alt.shifts) !== J(a.shifts) ? `عنده ${x.alt.days.map(i => DAYN[i]).join(" و")} بدوام ثاني (${T(x.alt.shifts)})` : "" };
+  if (a.type === "alt") return { ok: a.days.every(i => J(shFor(x, i)) === J(a.shifts)) };
   if (a.type === "set") return { ok: J(x.shifts) === J(a.shifts) };
   return { ok: J(x.shifts) === J(a.shifts) && JSON.stringify((x.workdays || []).slice().sort()) === JSON.stringify(a.days.slice().sort()) };
 }
 
 /* ---------- تعديل دوام طبيب موجود (من القروب) ---------- */
 const tmpTxt = tp => !tp ? "" : tp.until ? `مؤقت لين ${tp.until.slice(8, 10)}/${tp.until.slice(5, 7)}` : tp.back ? `مؤقت لين يرجع د. ${shortName(docs().find(x => x.id === tp.back)?.name || "—")}` : "مؤقت";
-const schedTxt = sch => [sch.days?.length ? sch.days.map(i => DAYN[i]).join("، ") : "", sch.shifts ? sch.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") : "", tmpTxt(sch.tmp)].filter(Boolean).join(" · ");
+const schedTxt = sch => sch.week || sch.alts?.length ? [weekTxt(sch), tmpTxt(sch.tmp)].filter(Boolean).join(" · ") : [sch.days?.length ? sch.days.map(i => DAYN[i]).join("، ") : "", sch.shifts ? sch.shifts.map(x => hm(x.s) + " – " + hm(x.e)).join(" و ") : "", tmpTxt(sch.tmp)].filter(Boolean).join(" · ");
 async function updateSchedules(list, ctx) {
   const done = [];
   await db.runTransaction(async tx => {
@@ -785,21 +807,15 @@ async function updateSchedules(list, ctx) {
     for (const { d, sch } of list) {
       const t = next.departments.flatMap(p => p.doctors || []).find(x => x.id === d.id); if (!t) continue;
       if (sch.altOnly) {                                                          // دوام مختلف ليوم/أيام معيّنة، باقي الأيام زي ما هي
-        const J = x => JSON.stringify((x || []).map(y => [y.s, y.e]));
-        if (J(t.shifts) === J(sch.shifts)) {                                      // نفس دوامه العادي → اليوم يرجع عادي
-          if (t.alt) { t.alt.days = t.alt.days.filter(x => !sch.days.includes(x)); if (!t.alt.days.length) delete t.alt; }
-        } else if (t.alt && J(t.alt.shifts) !== J(sch.shifts)) {
-          if (t.alt.days.every(x => sch.days.includes(x))) t.alt = { days: [...sch.days].sort((x, y) => x - y), shifts: sch.shifts };
-          else { done.push({ name: shortName(t.name), sch, fail: `عنده ${t.alt.days.map(i => DAYN[i]).join(" و")} بدوام ثاني — عدّله من صفحة الأطباء` }); continue; }
-        } else t.alt = { days: [...new Set([...(t.alt?.days || []), ...sch.days])].sort((x, y) => x - y), shifts: sch.shifts };
+        putDays(t, sch.days, sch.shifts);                                         // (2.21.0) أكثر من مجموعة أيام (نفس الدوام العادي → اليوم يرجع عادي)
         done.push({ name: shortName(t.name), sch }); continue;
       }
       // (2.19.0) دوام مؤقت: نحفظ الدوام الثابت (أول مرة بس) ويرجع له لحاله لما تخلص المدة. أي تغيير ثابت بعدها يشيل «مؤقت»
-      if (sch.tmp) { const base = t.tmp?.base || { shifts: t.shifts || [], workdays: t.workdays || [], ...(t.alt ? { alt: t.alt } : {}) }; t.tmp = { base, from: sch.tmp.from || nowR().iso, until: sch.tmp.until || "", back: sch.tmp.back || "", by: ctx.by || "", at: Date.now() }; }
+      if (sch.tmp) { const base = t.tmp?.base || { shifts: t.shifts || [], workdays: t.workdays || [], ...(altsOf(t).length ? { alt: altsOf(t)[0], alts: altsOf(t) } : {}) }; t.tmp = { base, from: sch.tmp.from || nowR().iso, until: sch.tmp.until || "", back: sch.tmp.back || "", by: ctx.by || "", at: Date.now() }; }
       else if (sch.shifts || sch.days?.length) delete t.tmp;
       if (sch.days?.length) t.workdays = sch.days;
-      if (sch.shifts) { t.shifts = sch.shifts; delete t.alt; }
-      if ("alt" in sch) { if (sch.alt) t.alt = sch.alt; else delete t.alt; }      // (2.19.0) رجوع لدوام ما قبل الإجازة (مع الأيام المختلفة)
+      if (sch.shifts) { t.shifts = sch.shifts; setAlts(t, []); }
+      if ("alts" in sch || "alt" in sch) setAlts(t, sch.alts?.length ? sch.alts : sch.alt ? [sch.alt] : []);   // (2.19.0) رجوع لدوام ما قبل الإجازة · (2.21.0) جدول أسبوع كامل
       for (const f of ["room", "ext", "fee"]) if (sch[f]) t[f] = sch[f];
       done.push({ name: shortName(t.name), sch });
     }
@@ -1299,6 +1315,7 @@ export async function handleGroupMessage(m) {
   const by = m.pushName || "القروب";
   let evs = await aiParse(text, quoted);
   if (evs == null) evs = ruleParse(text, quoted);
+  evs = weekFix(evs, text, quoted);
   // البوت مو متأكد → يسأل المسؤول على الخاص قبل ما يطبّق شي (🤔 على الرسالة لين يرد)
   // بعد 12 بالليل «بكرة/غداً» ممكن يقصد اليوم اللي بدأ أو اللي بعده → نسأل بدل ما نخمّن
   { const tn = nowR(), nn = norm(text);
@@ -1341,6 +1358,13 @@ async function verifyApplied(evs, ctx) {
     const d = (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept); if (!d) continue;
     const nm = "د. " + shortName(d.name), fut = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? (e.date > t.iso ? e.date : null) : futureDay(e, ctx.text, t);
     if (["vacation"].includes(e.kind)) { b ||= (await db.doc("board/bawadi").get()).data(); if (!(b?.vacations || []).some(v => v.doctorId === d.id)) bad.push(nm + " (الإجازة)"); continue; }
+    if (e.__week) {                                                              // (2.21.0) الأسبوع كامل انحفظ؟ (يوم يوم)
+      const st = /^\d{4}-\d{2}-\d{2}$/.test(e.start_date || "") ? e.start_date : "";
+      if (st && st > t.iso) { if (!items.some(i => i.doctorId === d.id && i.date === st && i.kind === "set_schedule" && i.sch?.week)) bad.push(nm + " (الجدول الجديد)"); }
+      else { b ||= (await db.doc("board/bawadi").get()).data(); const x = (b?.departments || []).flatMap(p => p.doctors || []).find(y => y.id === d.id);
+        if (!x || JSON.stringify(weekMap(x)) !== JSON.stringify(weekMap({ workdays: e.__week.days, shifts: e.__week.shifts, alts: e.__week.alts }))) bad.push(nm + " (الجدول)"); }
+      continue;
+    }
     if (["returns", "info_change", "leaves_branch", "new_doctor", "moved", "schedule_change", "none"].includes(e.kind)) continue;   // لها تأكيدها الخاص
     if (fut && PLAN_KINDS.includes(e.kind)) { if (!items.some(i => i.doctorId === d.id && i.date === fut)) bad.push(nm + " (حالة " + DAYN[new Date(fut + "T12:00:00Z").getUTCDay()] + ")"); continue; }
     if (e.kind === "resume") { if (st[d.id]?.kind === "stop") bad.push(nm + " (رجع يستقبل)"); continue; }

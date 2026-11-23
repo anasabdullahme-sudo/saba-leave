@@ -4,6 +4,7 @@
 // الكود هو اللي ينفّذ الأفعال، ويقرا التغيير من القاعدة، وبعدها بس يقول «انحفظ».
 // القروب ما يتغيّر: ✅ بس.
 
+import { altsOf, shiftsFor as shFor, weekOf, weekSch, startOf, weekTxt, weekMap } from "./week.js";
 let A = null;                                   // أدوات group.js (تنمرّر من initBrain)
 const chat = [];                                // آخر كلامنا {role: user|model, text, at}
 let saveT = null, proposal = null;              // اقتراح ينتظر موافقته
@@ -44,7 +45,7 @@ const ST_AR = { stop: "وقف استقبال", stop_at: "بيوقف", free: "ف�
 function doctorsBlock() {
   return A.docs().map(d => [d.id, A.shortName(d.name), (d.aliases || []).join("/") || "-", d.dep,
     "أيام: " + ((d.workdays || []).map(i => WD[i]).join("،") || "—"), "دوام: " + shiftTxt(d.shifts),
-    d.alt?.days?.length ? `دوام ثاني ${d.alt.days.map(i => WD[i]).join("،")}: ${shiftTxt(d.alt.shifts)}` : "",
+    ...altsOf(d).map(g => `دوام ثاني ${g.days.map(i => WD[i]).join("،")}: ${shiftTxt(g.shifts)}`),
     d.away && Object.keys(d.away).length ? "في فروع ثانية كل أسبوع: " + Object.entries(d.away).map(([w, b]) => `${WD[+w]} ${b}`).join("، ") : "",
     d.room ? "غرفة " + d.room : "", d.fee ? "كشفية " + d.fee : ""].filter(Boolean).join(" | ")).join("\n");
 }
@@ -61,7 +62,7 @@ function changesBlock(iso, plans) {
     for (const p of plans || []) if (p.date === day) L.push(`خطة: ${p.text || p.summary || JSON.stringify(p).slice(0, 160)}`);
     for (const x of b.awayDays || []) if (x.date === day) L.push(`في فرع ثاني: د. ${A.shortName(docOf(x.doctorId)?.name || x.doctorId)} (${x.branch})`);
     const working = A.docs().filter(d => (d.workdays || []).includes(wd) && !(b.vacations || []).some(v => v.doctorId === d.id && v.start <= day && (!v.end || v.end >= day)));
-    if (wd === 5 || L.length) L.push(`يداومون (حسب الجدول): ${working.map(d => `${A.shortName(d.name)} ${shiftTxt(d.alt?.days?.includes(wd) ? d.alt.shifts : d.shifts)}`).join("، ") || "—"}`);
+    if (wd === 5 || L.length) L.push(`يداومون (حسب الجدول): ${working.map(d => `${A.shortName(d.name)} ${shiftTxt(shFor(d, wd))}`).join("، ") || "—"}`);
     if (L.length) out.push(`${dayName(day)} ${day}:\n  ${L.join("\n  ")}`);
   }
   return out.join("\n") || "—";
@@ -257,7 +258,7 @@ export async function handle(m, text, { forwarded = false } = {}) {
   try { if (jid) sock?.sendPresenceUpdate("paused", jid); } catch {}
   if (!out) return false;                                        // الذكاء ما رد → group.js يكمل بالطريقة القديمة
   noteIn(user);
-  const prep = (o, txt) => prepActs(o, txt, quoted);
+  const prep = (o, txt) => weekActs(prepActs(o, txt, quoted), txt);
   let actions = prep(out, text);
   // فعل ناقص (حقول ما تعبّت) → نرجع للذكاء مرة وحدة يكمّله بدل ما نقول «ما طبّقت»
   const miss = actions.map(a => [a, check(a)]).filter(([, w]) => w);
@@ -290,7 +291,7 @@ export async function handle(m, text, { forwarded = false } = {}) {
     const ctxT = nn([quoted, text, ...chat.filter(x => x.role === "user" && Date.now() - x.at < 20 * 60e3).slice(-3).map(x => x.text)].join("\n"));
     const dur = shortMsg(text) ? durOf(text, null) : null;                    // (2.19.6) رسالة طويلة فيها تواريخ كثيرة (تعميم) → ما ناخذ منها «مدة»
     actions = actions.map(a => {
-      if (a.type !== "schedule" || a.mode === "only_days" || ISO(a.end_date) || a.until_return_of || check(a)) return a;
+      if (a.type !== "schedule" || a.mode === "only_days" || a.mode === "week" || ISO(a.end_date) || a.until_return_of || check(a)) return a;
       if (dur) return { ...a, ...(dur.start && !ISO(a.start_date) ? { start_date: dur.start } : {}), ...(dur.until ? { end_date: dur.until } : {}), ...(dur.back ? { until_return_of: dur.back } : {}) };
       const d = docOf(a.doctor_id);
       if (PERMW.test(ctxT) || (d && !d.tmp && sameSh(shiftsOf(a), d.shifts))) return a;
@@ -314,6 +315,16 @@ export async function handle(m, text, { forwarded = false } = {}) {
   await A.dmAdmin([warn, reply, lines.join("\n"), ask].filter(Boolean).join("\n\n"));
   await AS.after(actions);
   return true;
+}
+// (2.21.0) جدول أسبوع لطبيب واحد بأوقات مختلفة → فعل واحد (mode: week) بدل أفعال تمسح بعض
+function weekActs(actions, text) {
+  const w = weekOf(text); if (!w) return actions;
+  const K = a => (a.type === "schedule" && !ISO(a.end_date) && !a.until_return_of) || (a.type === "status" && ["starts_at", "present", "leaves_at", "absent_today"].includes(a.kind));
+  const ids = [...new Set(actions.filter(K).map(a => a.doctor_id).filter(Boolean))];
+  const d = ids.length === 1 ? docOf(ids[0]) : ids.length ? null : A.fuzzyPick?.(text);
+  if (!d) return actions;
+  const t = A.nowR(), start = startOf(text, t.iso, t.wd) || actions.map(a => a.start_date).find(x => ISO(x)) || "";
+  return [...actions.filter(a => !(K(a) && a.doctor_id === d.id)), { type: "schedule", doctor_id: d.id, mode: "week", groups: w.groups, ...(start ? { start_date: start } : {}) }];
 }
 const lastModel = () => [...chat].reverse().find(x => x.role === "model")?.text || "";
 
@@ -653,6 +664,7 @@ function uniq(list) { const seen = new Set(); return list.filter(a => { const k 
 const docOf = id => A.docs().find(x => x.id === id);
 function check(a) {
   if (a.__bad) return a.__bad;
+  if (a.type === "schedule" && a.mode === "week") return !docOf(a.doctor_id) ? `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول` : (a.groups || []).length >= 2 && a.groups.every(g => (g.days || []).length && (g.shifts || []).length) ? null : "الجدول ناقص (أيام أو أوقات)";
   { const w = AS?.checkAct(a); if (w != null) return w; }
   const d = a.doctor_id ? docOf(a.doctor_id) : null, t = A.nowR();
   if (["status", "cancel_plan", "schedule", "info", "vacation", "end_vacation", "remove_doctor", "alias", "remove_alias", "move_doctor", "branch_day"].includes(a.type) && !d) return `ما لقيت الطبيب (${a.doctor_id || "—"}) في الجدول`;
@@ -687,7 +699,8 @@ function describe(a) {
   switch (a.type) {
     case "status": return `• ${n} — ${when}: ` + ({ starts_at: `دوام من ${f != null ? H(f) : "؟"}${u != null ? " لين " + uTxt : ""}`, present: `موجود${u != null ? " لين " + uTxt : ""}`, leaves_at: `يطلع ${uTxt || (at != null ? H(at) : "")}`, late: `متأخر${at != null ? " يوصل " + H(at) : a.delay_minutes ? " " + a.delay_minutes + " دقيقة" : ""}`, stop: `وقف استقبال${at != null ? " الساعة " + H(at) : ""}`, free: "فاضي — دخّلوا له", appointments_only: `مواعيد فقط${at != null ? " من " + H(at) : ""}`, busy: "زحمة", absent_today: "غير متواجد", clear: "شلت حالته — يرجع لجدوله" }[a.kind] || a.kind);
     case "cancel_plan": return `• ${n} — ألغيت المحفوظ ليوم ${dayName(a.date || date)} ${dmy(a.date || date)}`;
-    case "schedule": { const sh = shiftsOf(a), tl = tmpLabel(a); return `• ${n} — ${tl ? "دوام مؤقت" : "دوام ثابت"}: ${a.mode === "only_days" ? "كل " + (a.days || []).map(i => WD[i]).join(" و") + " " : a.mode === "set_days" ? "أيامه " + (a.days || []).map(i => WD[i]).join("، ") + " " : "كل أيامه "}${sh ? sh.map(x => H(x.s) + " – " + H(x.e)).join(" و ") : ""}${ISO(a.start_date) ? " (من " + dayName(a.start_date) + " " + dmy(a.start_date) + ")" : ""}${tl ? " — " + tl.replace(/^مؤقت /, "") + "، وبعدها يرجع لدوامه الثابت" : ""}`; }
+    case "schedule": { if (a.mode === "week") return `• ${n} — دوام ثابت${ISO(a.start_date) ? " من " + dayName(a.start_date) + " " + dmy(a.start_date) : ""}:\n   ${weekTxt(weekSch(a.groups))}`;
+      const sh = shiftsOf(a), tl = tmpLabel(a); return `• ${n} — ${tl ? "دوام مؤقت" : "دوام ثابت"}: ${a.mode === "only_days" ? "كل " + (a.days || []).map(i => WD[i]).join(" و") + " " : a.mode === "set_days" ? "أيامه " + (a.days || []).map(i => WD[i]).join("، ") + " " : "كل أيامه "}${sh ? sh.map(x => H(x.s) + " – " + H(x.e)).join(" و ") : ""}${ISO(a.start_date) ? " (من " + dayName(a.start_date) + " " + dmy(a.start_date) + ")" : ""}${tl ? " — " + tl.replace(/^مؤقت /, "") + "، وبعدها يرجع لدوامه الثابت" : ""}`; }
     case "info": return `• ${n} — ${[a.fee ? "كشفية " + a.fee : "", a.room ? "غرفة " + a.room : "", a.ext ? "تحويلة " + a.ext : ""].filter(Boolean).join(" · ")}`;
     case "vacation": return `• ${n} — إجازة ${dmy(a.start_date)} → ${dmy(a.end_date)}`;
     case "end_vacation": return `• ${n} — يباشر ${dayName(a.return_date)} ${dmy(a.return_date)}`;
@@ -797,6 +810,18 @@ async function run(a, t, pclar, pdocs) {
     await sleep(800); const items = await readPlan();
     return { ok: !items.some(i => i.doctorId === id && i.date === date && i.kind !== "remove_doctor") };
   }
+  if (a.type === "schedule" && a.mode === "week") {                           // (2.21.0) أسبوع كامل بأوقات مختلفة
+    const sch = weekSch(a.groups), J2 = x => JSON.stringify(x);
+    const want = J2(weekMap({ workdays: sch.days, shifts: sch.shifts, alts: sch.alts }));
+    if (ISO(a.start_date) && a.start_date > t.iso) {
+      await A.db.doc("board/bawadi_plan").set({ items: A.FieldValue.arrayUnion({ id: A.uid(), date: a.start_date, doctorId: id, kind: "set_schedule", sch, by: BY }), at: Date.now() }, { merge: true });
+      await sleep(800); return { ok: (await readPlan()).some(i => i.doctorId === id && i.date === a.start_date && i.kind === "set_schedule" && i.sch?.week), note: "ينطبق يومها" };
+    }
+    if (!d.tmp && J2(weekMap(d)) === want) return { ok: true, note: "نفس دوامه المسجّل — ما تغيّر شي" };
+    await A.updateSchedules([{ d, sch }], { by: BY });
+    await sleep(1000); const { x } = await readBoardDoc(); if (!x) return { ok: false, why: "ما لقيته" };
+    return { ok: J2(weekMap(x)) === want, why: "المحفوظ ما يطابق الجدول" };
+  }
   if (a.type === "schedule") {
     const shifts = shiftsOf(a);
     const days = (a.days || []).filter(x => x >= 0 && x <= 6 && x !== 5);
@@ -812,7 +837,7 @@ async function run(a, t, pclar, pdocs) {
     await A.updateSchedules([{ d, sch }], { by: BY });
     await sleep(1000); const { x } = await readBoardDoc(); if (!x) return { ok: false, why: "ما لقيته" };
     const J = v => JSON.stringify((v || []).map(y => [y.s, y.e]));
-    if (sch.altOnly) return { ok: !!x.alt && days.every(i => x.alt.days.includes(i)) && J(x.alt.shifts) === J(shifts) || (J(x.shifts) === J(shifts) && !(x.alt?.days || []).some(i => days.includes(i))) };
+    if (sch.altOnly) return { ok: days.every(i => J(shFor(x, i)) === J(shifts)) };
     if (!shifts && !days.length) return { ok: false, why: "ما فيه شي يتغيّر" };
     const tmpOk = !sch.tmp || (!!x.tmp && (x.tmp.until || "") === sch.tmp.until && (x.tmp.back || "") === (sch.tmp.back || ""));
     return { ok: tmpOk && (!shifts || J(x.shifts) === J(shifts)) && (!days.length || JSON.stringify([...x.workdays].sort()) === JSON.stringify([...days].sort())), why: `المحفوظ ${(x.shifts || []).map(y => A.hm(y.s) + "–" + A.hm(y.e)).join("، ")}${sch.tmp && !x.tmp ? " (بدون «مؤقت»)" : ""}` };
@@ -1183,6 +1208,9 @@ function selfCases() {
     { q: `بداية من يوم ${WDA[(t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7]}\nد ساره من 5 pm الى 1 am`, all: [{ doc: "سارة الجارحي", type: "schedule", from: "17:00", until: "01:00", startIn: wd((t.wd + 2) % 7 === 5 ? 6 : (t.wd + 2) % 7) }] },
     { q: "جهز لي رساله التغييرات ليوم الجمعه وتغييرات الاسبوع القادم", draft: true },
     { q: "جهز لي رساله بدوام الجمعه", draft: true },
+    // (2.21.0) دوام مختلف لكل أيام (ثلاث دوامات)
+    { q: "دوام د. وجدان باجبع ثابت:\nالسبت والأحد والأربعاء: من ٤ م إلى ١١ م\nالاثنين والثلاثاء: من ٩ ص إلى ٦ م\nالخميس: من ١ م إلى ١٠ م", all: [{ doc: "وجدان", type: "schedule", week: [[[0, 3, 6], "16:00", "23:00"], [[1, 2], "09:00", "18:00"], [[4], "13:00", "22:00"]] }] },
+    { q: "دوام دكتورة وجدان دائم\nالسبت واحد واربعاء من ٤-١١ (٧ ساعات)\nوالاثنين والثلاثاء ٩-٦ ( ٩ ساعات)\nوالخميس من ١-١٠ ( ٩ ساعات )", all: [{ doc: "وجدان", type: "schedule", week: [[[0, 3, 6], "16:00", "23:00"], [[1, 2], "09:00", "18:00"], [[4], "13:00", "22:00"]] }] },
     { q: "شكرا", none: true },
     { q: "كيف الحال", none: true },
   ].filter(c => !c.until || t.iso < c.until);
@@ -1202,6 +1230,7 @@ function hitSpec(a, sp) {
   if (sp.endIn && a.end_date !== sp.endIn) return false;
   if (sp.noBack && a.until_return_of) return false;
   if (sp.startIn && a.start_date !== sp.startIn) return false;
+  if (sp.week) { if (a.mode !== "week") return false; const got = JSON.stringify((a.groups || []).map(g => [[...g.days].sort((x, y) => x - y), g.shifts.map(x => [x.s, x.e])]).sort()), want = JSON.stringify(sp.week.map(([d, f, u]) => [[...d].sort((x, y) => x - y), [[toMin(f), toMin(u)]]]).sort()); if (got !== want) return false; }
   return true;
 }
 export async function selfTest(version) {
@@ -1212,11 +1241,11 @@ export async function selfTest(version) {
   for (const c of selfCases()) {
     const user = (c.quoted ? `[يرد على: «${c.quoted.slice(0, 2500)}»]\n` : "") + c.q;
     let out = await callAI(system, [{ role: "user", parts: [{ text: user }] }]).catch(() => null);
-    let acts = out ? prepActs(out, c.q, c.quoted || "") : [];
+    let acts = out ? weekActs(prepActs(out, c.q, c.quoted || ""), c.q) : [];
     if (out && acts.some(a => check(a))) {                                    // نفس المحاولة الثانية اللي يسويها مع أنس
       const fix = await callAI(system, [{ role: "user", parts: [{ text: user }] }, { role: "model", parts: [{ text: JSON.stringify({ understood: out.understood, reply: out.reply, actions: out.actions }) }] },
         { role: "user", parts: [{ text: "[النظام] الأفعال هذي ناقصة:\n" + acts.map(a => [a, check(a)]).filter(([, w]) => w).map(([a, w]) => `- ${a.type}: ${w}`).join("\n") + "\nأعد قراءة الكلام والرسالة المقتبسة، اكتب understood من جديد، ورجّع actions كاملة." }] }], { models: [...A.models].reverse(), temp: 0 }).catch(() => null);
-      if (fix) { const fa = prepActs(fix, c.q, c.quoted || ""); if (fa.filter(a => check(a)).length < acts.filter(a => check(a)).length || !fa.some(a => check(a))) { out = fix; acts = fa; } }
+      if (fix) { const fa = weekActs(prepActs(fix, c.q, c.quoted || ""), c.q); if (fa.filter(a => check(a)).length < acts.filter(a => check(a)).length || !fa.some(a => check(a))) { out = fix; acts = fa; } }
     }
     const good = acts.filter(a => !check(a));
     const ok = !out ? false : c.draft ? !acts.length && String(out.reply || "").length > 120 && /\d{1,2}[\/-]\d{1,2}|الجمعة|الجمعه/.test(out.reply || "") : c.none ? !acts.length : (c.all || []).every(sp => good.some(a => hitSpec(a, sp))) && (!c.any || c.any.some(sp => good.some(a => hitSpec(a, sp))));

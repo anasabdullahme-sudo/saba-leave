@@ -67,7 +67,7 @@
     return { m: +p.hour * 60 + +p.minute, wd: { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[p.weekday], iso: `${p.year}-${p.month}-${p.day}` };
   }
   const hm = m => { const h = Math.floor(m / 60) % 24, mi = m % 60; return `${h % 12 || 12}${mi ? ":" + String(mi).padStart(2, "0") : ""}${h < 12 ? "ص" : "م"}`; };
-  const shiftsFor = (d, wd) => d.alt?.days?.includes(wd) ? (d.alt.shifts || []) : (d.shifts || []);
+  const shiftsFor = (d, wd) => { const g = (d.alts?.length ? d.alts : d.alt?.days?.length ? [d.alt] : []).find(g => g?.days?.includes(wd)); return g ? g.shifts || [] : d.shifts || []; };
   function active(d, t) {
     if ((d.workdays || []).includes(t.wd)) for (const s of shiftsFor(d, t.wd)) if (s.e > s.s ? (t.m >= s.s && t.m < s.e) : t.m >= s.s) return s;
     const y = (t.wd + 6) % 7; if ((d.workdays || []).includes(y)) for (const s of shiftsFor(d, y)) if (s.e <= s.s && t.m < s.e) return s;
