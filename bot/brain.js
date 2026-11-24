@@ -1256,8 +1256,24 @@ export async function selfTest(version) {
     res.push({ q: c.q.slice(0, 160), ok, understood: String(out?.understood || "").slice(0, 300), got: good.map(describe).join(" | ").slice(0, 400), bad: acts.filter(a => check(a)).map(a => check(a)).join(" | ").slice(0, 300), model: out?.__model || "" });
     await sleep(6000);                                                        // بهدوء — حدود Gemini المجانية
   }
-  const n = res.filter(r => r.ok).length;
-  await ref.set({ version, at: Date.now(), pass: n, total: res.length, results: res });
-  await A.dmAdmin(`🧪 جرّبت فهمي بعد التحديث على ${res.length} رسالة صعبة (بدون ما أحفظ شي): فهمت ${n} صح.${n < res.length ? "\nاللي ما فهمتها انحفظت لـ Claude يصلّحها:\n" + res.filter(r => !r.ok).slice(0, 6).map(r => "• " + r.q.split("\n").pop().slice(0, 70)).join("\n") : ""}`);
+  const n = res.filter(r => r.ok).length, down = res.filter(r => !r.ok && !r.model && !r.understood).length;   // (2.21.2) ما وصل رد من قوقل ≠ ما فهم
+  await ref.set({ version, at: Date.now(), pass: n, total: res.length, down, results: res });
+  const miss = res.filter(r => !r.ok && (r.model || r.understood));
+  await A.dmAdmin(`🧪 جرّبت فهمي بعد التحديث على ${res.length} رسالة صعبة (بدون ما أحفظ شي): فهمت ${n} صح.${down ? `\n(${down} ما وصلني فيها رد من قوقل — ضغط عنده، مو خطأ فهم)` : ""}${miss.length ? "\nاللي ما فهمتها انحفظت لـ Claude يصلّحها:\n" + miss.slice(0, 6).map(r => "• " + r.q.split("\n").pop().slice(0, 70)).join("\n") : ""}`);
+}
+// (2.21.2) اختبار محلي بعد كل تشغيل — بدون قوقل: قراءة الأوقات والجداول من الكلام. يرسل لأنس بس لو فيه خطأ
+export async function localTest(version) {
+  const t = A.nowR(), plus = k => A.isoPlus(t.iso, k), sat = plus(((6 - t.wd + 7) % 7) || 7);
+  const W = "دوام د. وجدان ثابت:\nالسبت والأحد والأربعاء: من ٤ م إلى ١١ م\nالاثنين والثلاثاء: من ٩ ص إلى ٦ م\nالخميس: من ١ م إلى ١٠ م";
+  const cases = [
+    [W, p => p?.week && weekTxt(weekSch(p.week.groups)) === "السبت والأحد والأربعاء: 4م – 11م · الإثنين والثلاثاء: 9ص – 6م · الخميس: 1م – 10م"],
+    ["د وجدان من بكرة لين نهاية الاسبوع من ١ م ل ٨ م\nومن الاسبوع الجاي ثابت\nالسبت والاحد والاربعاء ٤-١١\nالاثنين والثلاثاء ٩-٦\nالخميس ١-١٠", p => p?.tmp && p.tmp.shifts[0].s === 780 && p.tmp.shifts[0].e === 1200 && p?.week?.start === sat],
+    ["د سارة هالاسبوع بس السبت ٩-٥ والاحد ٥-١", p => p === null],
+    ["د. أشرف السبت ٩-٥\nد. مجدي الأحد ٥-١ ثابت", p => p === null],
+    ["د مجدي اجازه من ٢٤/١١ لين ٢٦/١١", p => p === null],
+  ];
+  const bad = cases.filter(([q, ok]) => { try { return !ok(planOf(q, t.iso, t.wd, 12)); } catch { return true; } });
+  if (bad.length) await A.dmAdmin(`⚠️ اختبار القراءة المحلي بعد التحديث (${version}): ${bad.length} من ${cases.length} ما طلعت صح — Claude لازم يشوفها:\n` + bad.map(([q]) => "• " + q.split("\n")[0].slice(0, 60)).join("\n"));
+  A.log?.info?.({ version, local: `${cases.length - bad.length}/${cases.length}` }, "اختبار محلي");
 }
 export const _t = { durOf, shiftsOf, fillShifts, prepActs, pickOpt, withDur, check, describe, askDurText, timesIn, fillBack };

@@ -17,13 +17,13 @@ for (const k of ["log", "info", "warn"]) { const o = console[k].bind(console); c
 import { initGroup, handleGroupMessage, handleAdminMessage, handleMajedMessage, dmAdmin, doctorNames as boardDoctorNames, doctorList as boardDoctorList } from "./group.js";
 import { initAssist, isAssistGroup, onAssistGroup, assistJid } from "./assist.js";
 import { initLicenses } from "./licenses.js";
-import { selfTest, setAssist } from "./brain.js";
+import { selfTest, localTest, setAssist } from "./brain.js";
 import { initRelay, relayOn, isAdminPhone, looksOther, looksLeave, openFor, relayToAdmin, handleAdminRelay } from "./relay.js";
 import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.21.1";
+const VERSION = "2.21.2";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -73,7 +73,11 @@ async function connect() {
       log.info("باركود الربط جاهز — افتح لوحة الموظفين واضغط «واتساب»");
     }
     if (connection === "open") {
-      if (!globalThis.__sabaSelfTest) { globalThis.__sabaSelfTest = 1; setTimeout(() => selfTest(VERSION).catch(e => log.warn({ err: String(e?.message || e) }, "اختبار الفهم")), 5 * 60e3); }   // (2.16.1)
+      if (!globalThis.__sabaSelfTest) {                                                       // (2.16.1) · (2.21.2) أسئلة قوقل الساعة ٣ الفجر بس (ما تاكل حصة المرضى وقت الدوام)، والمحلي بعد التشغيل
+        globalThis.__sabaSelfTest = 1;
+        setTimeout(() => localTest(VERSION).catch(e => log.warn({ err: String(e?.message || e) }, "اختبار محلي")), 60e3);
+        setInterval(() => { const h = new Date(Date.now() + 3 * 3600e3).getUTCHours(); if (h === 3) selfTest(VERSION).catch(e => log.warn({ err: String(e?.message || e) }, "اختبار الفهم")); }, 15 * 60e3);
+      }
       connected = true; me = sock.user?.id || "";
       await setStatus({ state: "connected", qr: null, me });
       // رقم البوت للعامة (زر «استفسر واتساب» في صفحة المراجع)
@@ -454,6 +458,7 @@ async function findByRef(ref) {
    ========================================================================== */
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 const CHAT_MODELS = (process.env.GEMINI_MODELS || "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",").map(x => x.trim()).filter(Boolean);
+if (!CHAT_MODELS.includes("gemma-4-26b-a4b-it")) CHAT_MODELS.push("gemma-4-26b-a4b-it");   // (2.21.2) آخر احتياط: حصته ١٤٬٤٠٠ باليوم (لما قوقل يرفض الباقي)
 const chats = new Map();                 // مفتاح المحادثة → آخر الرسائل
 const chatKey = (jid, phone) => phone && /^05\d{8}$/.test(phone) ? "p:" + phone : jid;
 function remember(key, role, text) {

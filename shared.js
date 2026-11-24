@@ -20,7 +20,8 @@ export const IMAGE_STORE = "firestore";      // "firestore" يشتغل على ا
 export const AI_ENABLED = true;              // القراءة بالذكاء من الصورة
 export const AI_MODEL = "gemini-3.5-flash-lite";   // الأسرع (Ultra fast)
 // احتياط: لو الأول تأخر أكثر من AI_HEDGE_MS أو كان مزحوم، يبدأ الثاني بالتوازي وناخذ أول نتيجة
-export const AI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.6-flash"];   // كلها موجودة في قائمة Firebase (3.8 ما كان موجود)
+export const AI_GEMMA = "gemma-4-26b-a4b-it";            // (24/11) احتياط: ١٤٬٤٠٠ طلب باليوم مجاناً (بس ~٥ صور بالدقيقة)، أبطأ شوي (~٩ث)
+export const AI_FALLBACK_MODELS = ["gemini-3.1-flash-lite", AI_GEMMA];   // flash (3.5/3.6) انشالت: حصتها ٢٠ باليوم وتخلص
 export const AI_HEDGE_MS = 6000;  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/";   // الصفحة الرئيسية (مو صفحة الدخول — فتحها وأنت داخل كان يطلّع الموظف)
@@ -744,7 +745,8 @@ async function liveBackend(role) {
     partial: () => lastSeen,
     async extract(blob, type, onProgress, onNote) {
       // قراءة خفيفة (خانات أقل بالترتيب المهم أول) وتوصل أول بأول. موديلين lite مع بعض من أول ثانية وناخذ أسرعهم؛ الباقي احتياط لو فشلوا
-      // (23/11) قوقل أحياناً يعلّق الطلب دقيقة بدون رد (ضغط عالي): بعد 8 ثواني بدون أي حرف نرسل طلب جديد + الاحتياط، وبعد 20 ثانية مرة ثالثة.
+      // (23/11) قوقل أحياناً يعلّق الطلب دقيقة بدون رد (ضغط عالي) · (24/11) بعد 8 ثواني بدون قراءة كاملة (حتى لو بدأ يرسل وعلّق) نرسل طلب جديد + Gemma، وبعد 20 ثانية مرة ثالثة.
+      // قوقل قطع بعد ما وصلت الخانات المهمة (الهوية، الاسم، التاريخ، المدة)؟ نعتبرها قراءة كاملة — مو «ناقصة».
       // كلهم فشلوا بسرعة؟ نعيد مرة وحدة بعد ثانيتين ونص. وما انقرت كاملة؟ اللي انقرا (lastSeen) يتعبّى والباقي المريض يكمله
       lastSeen = null;
       const t0 = performance.now();
@@ -752,40 +754,47 @@ async function liveBackend(role) {
       const b64 = await blobToBase64(small);
       const t1 = performance.now(), sec = t => ((t - t1) / 1000).toFixed(1);
       const parts = [aiPrompt(type, true), { inlineData: { data: b64, mimeType: small.type || "image/jpeg" } }];
-      const FIRST = [AI_MODEL, "gemini-3.1-flash-lite"], BACKUP = AI_FALLBACK_MODELS.filter(m => !FIRST.includes(m));
+      const FIRST = [AI_MODEL, "gemini-3.1-flash-lite"];
       const times = {}; let chunk = false;
+      const enough = o => o && String(o.id_number || "").replace(/\D/g, "").length >= 8 && (o.patient_name_ar || o.patient_name_en) && (o.start_printed_en || o.start_printed_ar || o.leave_start || o.visit_date) && (type === "attendance" || o.leave_days || o.leave_end);
       const stream = async (name, think) => {
         const m = await getLeanModel(name, think);
         const r = await m.generateContentStream(parts);
-        let txt = "";
-        for await (const c of r.stream) {
-          txt += c.text?.() || ""; chunk = true;
-          const seen = {}; for (const x of txt.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) { try { seen[x[1]] = JSON.parse('"' + x[2] + '"'); } catch { seen[x[1]] = x[2]; } }
-          if (Object.keys(seen).length > Object.keys(lastSeen || {}).length) lastSeen = seen;
-          if (onProgress) onProgress(seen, name);
+        let txt = "", seen = {};
+        try {
+          for await (const c of r.stream) {
+            txt += c.text?.() || ""; chunk = true;
+            seen = {}; for (const x of txt.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) { try { seen[x[1]] = JSON.parse('"' + x[2] + '"'); } catch { seen[x[1]] = x[2]; } }
+            if (Object.keys(seen).length > Object.keys(lastSeen || {}).length) lastSeen = seen;
+            if (onProgress) onProgress(seen, name);
+          }
+          return JSON.parse(txt);
+        } catch (e) {
+          if (enough(seen)) return { ...seen, _cut: true };            // انقطع بعد ما وصل المهم → قراءة كاملة
+          throw e;
         }
-        return JSON.parse(txt);
       };
       const run = name => (noThink.has(name) ? stream(name, true) : stream(name, false).catch(e => {
         if (!/thinking|invalid.?argument|\b400\b/i.test(String(e?.message || e))) throw e;
         noThink.add(name); return stream(name, true);
       })).then(v => { times[name] = sec(performance.now()); return v; }, e => { times[name] = "✗"; throw e; });
-      const label = (win) => `تصغير ${((t1 - t0) / 1000).toFixed(1)}ث · قراءة ${times[win]}ث · ${win}${noThink.has(win) ? " (بتفكير)" : ""}` +
+      let cut = false;
+      const label = (win) => `تصغير ${((t1 - t0) / 1000).toFixed(1)}ث · قراءة ${times[win]}ث · ${win}${noThink.has(win) ? " (بتفكير)" : ""}${cut ? " (انقطع بالنهاية)" : ""}` +
         Object.entries(times).filter(([k]) => k !== win).map(([k, v]) => ` · ${k.replace("gemini-", "")} ${v}${v === "✗" ? "" : "ث"}`).join("");
       return await new Promise((resolve, reject) => {
         let done = false, left = 0, lastErr, retried = false;
-        const waves = [[8000, () => !chunk, [AI_MODEL, ...BACKUP]], [20000, () => true, FIRST]];   // [متى، بشرط، الموديلات]
+        const waves = [[8000, () => true, [AI_MODEL, AI_GEMMA]], [20000, () => true, FIRST]];   // [متى، بشرط، الموديلات]
         const timers = waves.map(w => setTimeout(() => { w.fired = true; if (!done && w[1]()) start(w[2]); }, w[0]));
         const stop = () => { done = true; timers.forEach(clearTimeout); };
         const allFailed = () => {
           const next = waves.find(w => !w.fired);
           if (next) { next.fired = true; clearTimeout(timers[waves.indexOf(next)]); return start(next[2]); }   // الموجة الجاية على طول
-          if (!retried && performance.now() - t1 < 20000) { retried = true; onNote?.("لحظة… نحاول مرة ثانية"); return setTimeout(() => { if (!done) start(FIRST); }, 2500); }
+          if (!retried && performance.now() - t1 < 25000) { retried = true; onNote?.("لحظة… نحاول مرة ثانية"); return setTimeout(() => { if (!done) start([AI_MODEL, AI_GEMMA]); }, 2500); }
           stop(); reject(Object.assign(lastErr || new Error("ai_failed"), { partial: lastSeen }));
         };
         const start = list => list.forEach(name => {
           left++;
-          run(name).then(v => { if (done) return; stop(); if (v && typeof v === "object") { v.patient_name ||= v.patient_name_ar || v.patient_name_en || ""; v._scan = label(name); v._scanFn = () => label(name); } resolve(v); })
+          run(name).then(v => { if (done) return; stop(); if (v?._cut) { cut = true; delete v._cut; } if (v && typeof v === "object") { v.patient_name ||= v.patient_name_ar || v.patient_name_en || ""; v._scan = label(name); v._scanFn = () => label(name); } resolve(v); })
             .catch(e => { lastErr = e; console.warn("AI", name, e); if (--left === 0 && !done) allFailed(); });
         });
         start(FIRST);
