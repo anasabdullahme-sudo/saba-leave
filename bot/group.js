@@ -430,7 +430,8 @@ function stampExp(cur) {
 // وقت بدون ص/م ليوم ثاني: نختار (الساعة / +12 / بعد نص الليل) الأقرب لدوام الطبيب ذاك اليوم — التعادل للأمتأخر
 function fitMin(m, d, wd) {
   if (m == null) return m;
-  const sh = d ? shiftsOn(d, wd).map(x => [x.s, x.e > x.s ? x.e : x.e + 1440]) : [];
+  const on = d ? shiftsOn(d, wd) : [];   // (26/11) يوم مو من أيامه (مثل الجمعة): نقيس على دوامه العادي — «أشرف ١ص-٩ص» يوم الجمعة كانت تنقرا ١ الظهر
+  const sh = (on.length ? on : (d?.shifts || [])).map(x => [x.s, x.e > x.s ? x.e : x.e + 1440]);
   if (m >= 720 || !sh.length) return m < 480 ? m + 720 : m;                    // 13:00+ واضح، وبدون دوام معروف: 1–7 = مساءً
   const c = [m, m + 720, m + 1440].filter(x => x < 1440 + 360), dist = x => Math.min(...sh.map(([a, b]) => x < a ? a - x : x > b ? x - b : 0));
   return c.reduce((a, b) => dist(b) <= dist(a) ? b : a);
