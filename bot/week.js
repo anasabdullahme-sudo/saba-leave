@@ -61,6 +61,7 @@ const SKIP = /(اجاز|يغطي|تغطي|بدال|مكان|عيادته|عيا�
 
 // التواريخ تتحوّل لـ «ت٢٤ت١١ت» قبل قراءة الأوقات (عشان «٢٤/١١ لين ٢٦/١١» ما تنقرا وقت)
 const hideDates = n => n.replace(/(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*\d{2,4})?/g, " ت$1ت$2ت ");
+const isoAdd = (iso, k) => { const x = new Date(iso + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
 function mkDate(today, wd) {
   const plus = k => { const x = new Date(today + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
   return {
@@ -120,11 +121,13 @@ export function planOf(text, today, wd, hour = 12) {
       if (SKIP.test(p)) return null;                                      // تغطية/إجازة → الطريقة العادية
       if (daysIn(bare).length) return null;                               // «هالأسبوع السبت ٩-٥ والأحد…» = أيام معيّنة مؤقتة → الطريقة العادية
       const f2 = fr && whenOf(fr[1], D), u2 = (un && whenOf(un[1], D)) || (TEMPW.test(p) ? D.thu() : null);
+      // (26/11) «لين نهاية الأسبوع» والبداية بعد الخميس (مثلاً تنكتب الخميس: من بكرة) = خميس الأسبوع الجاي
+      const thuFix = (from, until) => until && until < from && (!un || /^(نهايه|اخر)\s+(ال)?اسبوع/.test(un[1])) ? isoAdd(until, 7) : until;
       if (tmp) {                                                          // «هالأسبوع ١-٨ … بمعنى من بكرة لين نهاية الأسبوع ١م-٨م» = نفس الفترة مشروحة مرتين
         if (!sameShifts(tmp.shifts, r.slice(0, 2))) return null;
-        if (f2) tmp.from = f2; if (un && u2) tmp.until = u2; if (tmp.until < tmp.from) return null; continue;
+        if (f2) tmp.from = f2; if (un && u2) tmp.until = u2; tmp.until = thuFix(tmp.from, tmp.until); if (tmp.until < tmp.from) return null; continue;
       }
-      const from = f2 || D.plus(hour >= 18 ? 1 : 0), until = u2;
+      const from = f2 || D.plus(hour >= 18 ? 1 : 0), until = thuFix(from, u2);
       if (!until || until < from) return null;
       tmp = { from, until, shifts: r.slice(0, 2) }; continue;
     }
@@ -151,7 +154,7 @@ export function planOf(text, today, wd, hour = 12) {
     if (!tmp && !PERM.test(n0) && TEMPW.test(n0)) return null;            // «هالأسبوع بس…» بدون فترة واضحة → الطريقة العادية
     const wt = weekTxt.join("\n").replace(new RegExp("(^|\\s)من\\s+(يوم\\s+)?(ال)?" + DAYRX + "\\s+(لين|الين|الى|الي|حتى|لحد|ل)\\s+(يوم\\s+)?(ال)?" + DAYRX, "g"), " ");   // «من السبت لين الأربعاء» = أيام، مو بداية
     let start = startOf(wt.replace(/ت(\d{1,2})ت(\d{1,2})ت/g, "$1/$2"), today, wd);
-    if (tmp && (!start || start <= tmp.until)) start = D.plus(Math.round((Date.parse(tmp.until) - Date.parse(today)) / 864e5) + 1);   // الثابت يبدأ بعد المؤقت
+    if (tmp && (!start || start <= tmp.until)) { start = isoAdd(tmp.until, 1); if (new Date(start + "T12:00:00Z").getUTCDay() === 5) start = isoAdd(start, 1); }   // الثابت يبدأ بعد المؤقت (المؤقت يخلص الخميس → السبت، مو الجمعة)
     week = { groups: G, start: start || "" };
   }
   if (!tmp && !week) return null;
