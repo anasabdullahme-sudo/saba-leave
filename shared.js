@@ -22,6 +22,9 @@ export const AI_MODEL = "gemini-3.5-flash-lite";   // الأسرع (Ultra fast)
 // احتياط: لو الأول تأخر أكثر من AI_HEDGE_MS أو كان مزحوم، يبدأ الثاني بالتوازي وناخذ أول نتيجة
 export const AI_GEMMA = "gemma-4-26b-a4b-it";            // (24/11) احتياط: ١٤٬٤٠٠ طلب باليوم مجاناً (بس ~٥ صور بالدقيقة)، أبطأ شوي (~٩ث)
 export const AI_FALLBACK_MODELS = ["gemini-3.1-flash-lite", AI_GEMMA];   // flash (3.5/3.6) انشالت: حصتها ٢٠ باليوم وتخلص
+// (26/11) حصة reCAPTCHA المجانية (١٠ آلاف بالشهر) خلصت → App Check وقّف القراءة عند الكل. أوقفنا الإلزام في الكونسول
+// والقراءة الحين تمشي بدون App Check. نرجّعه true بعد ما تتفعل الفوترة (قوقل بيرجع يلزمه تلقائياً ٢١ يناير ٢٠٢٧)
+export const AI_APPCHECK = false;
 export const AI_HEDGE_MS = 6000;  // نسخة مستقرة حتى مايو 2027 على الأقل
 export const FB_VERSION = "13.0.0";
 export const SEHA_URL = "https://www.seha.sa/";   // الصفحة الرئيسية (مو صفحة الدخول — فتحها وأنت داخل كان يطلّع الموظف)
@@ -635,7 +638,7 @@ async function liveBackend(role) {
   const useStorage = IMAGE_STORE === "storage";
   const [A, AU, FS, AC, ST] = await Promise.all([u("app"), u("auth"), u("firestore"), u("app-check"), useStorage ? u("storage") : null].map(x => x && import(x)));
   const app = A.initializeApp(firebaseConfig);
-  if (RECAPTCHA_SITE_KEY) AC.initializeAppCheck(app, {
+  if (RECAPTCHA_SITE_KEY && AI_APPCHECK) AC.initializeAppCheck(app, {
     provider: RECAPTCHA_PROVIDER === "enterprise" ? new AC.ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY) : new AC.ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
     isTokenAutoRefreshEnabled: true });
   const auth = AU.getAuth(app);
@@ -669,7 +672,7 @@ async function liveBackend(role) {
      "doctor_name","doctor_id","stamp_doctor_name","stamp_doctor_id","companion_name","companion_id","companion_dob","relationship","doc_title","date_altered","date_alter_note","start_printed_en","start_printed_ar","age_printed"].forEach(k => props[k] = S.string());
     props.document_kind = S.enumString({ enum: ["sick_leave", "companion_leave", "attendance", "other"] });
     props.quality = S.enumString({ enum: ["good", "blurry", "cropped", "not_document"] });
-    const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: true });
+    const ai = AI.getAI(app, { backend: new AI.GoogleAIBackend(), useLimitedUseAppCheckTokens: false });   // (26/11) نفس التوكن ساعة كاملة بدل توكن لكل طلب
     const cfg = { responseMimeType: "application/json", responseSchema: S.object({ properties: props }), temperature: 0 };
     AIref = AI; aiInst = ai; aiCfg = cfg;
     return (models[key] = AI.getGenerativeModel(ai, { model: name, generationConfig: gc() }));
