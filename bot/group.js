@@ -596,6 +596,11 @@ async function apply(evs, ctx) {
       const fit = m => fitMin(m, d, t.wd);
       const at = Date.now(); let atMin = ctx.planned ? fit(toMin(e.at_time)) : pm(toMin(e.at_time)), untilMin = ctx.planned ? fit(toMin(e.until_time)) : nextDay(pm(toMin(e.until_time)));
       if (ctx.exact && (e.at_min != null || e.until_min != null)) { atMin = e.at_min ?? null; untilMin = e.until_min ?? null; }   // (2.9.13) جواب المسؤول «من كم لكم دوامه» — الأوقات محسوبة جاهزة
+      // (26/11) «اكرامي ٥-١» الساعة ١٠ الصبح: «١» كانت تنقرا ١ الظهر (قبل البداية) → خلص دوامه ١ الظهر. النهاية قبل البداية = تعدّي نص الليل
+      if (!ctx.exact && e.kind === "starts_at" && atMin != null && untilMin != null && untilMin <= atMin) {
+        const u0 = (toMin(e.until_time) ?? untilMin) % 720, c = [u0, u0 + 720, u0 + 1440].find(x => x > atMin && x - atMin <= 16 * 60);
+        if (c != null) untilMin = c;
+      }
       // «موجود / يطلع / مداوم لين 7» (اليوم أو بكرة، قبل دوامه أو وهو فيه): البداية دايماً من الجدول، بس النهاية تتغيّر
       if (d && (["present", "leaves_at"].includes(e.kind) || (e.kind === "starts_at" && atMin == null))) {
         const raw = e.kind === "leaves_at" ? (toMin(e.at_time) ?? toMin(e.until_time)) : toMin(e.until_time), sh0 = shiftsOn(d, t.wd)[0];
