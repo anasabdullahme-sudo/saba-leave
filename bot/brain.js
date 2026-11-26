@@ -50,6 +50,32 @@ function doctorsBlock() {
     d.room ? "غرفة " + d.room : "", d.fee ? "كشفية " + d.fee : ""].filter(Boolean).join(" | ")).join("\n");
 }
 // (2.17.2) التغييرات يوم يوم (اليوم + 9 أيام) — عشان «جهّز لي رسالة تغييرات الجمعة / الأسبوع الجاي» يطلع من بيانات حقيقية
+// (26/11) دوام الطبيب في يوم جاي — يحسب الخطط المحفوظة ورجوع الدوام المؤقت (قبل كان ياخذ دوام اليوم لكل الأيام)
+function dayView(d, day, plans) {
+  const wd = new Date(day + "T12:00:00Z").getUTCDay();
+  let src = { workdays: d.workdays || [], shifts: d.shifts || [], alts: altsOf(d) }, tmpTo = null;
+  if (d.tmp) {
+    if (d.tmp.until && day > d.tmp.until) { const b = d.tmp.base || {}; src = { workdays: b.workdays || src.workdays, shifts: b.shifts || src.shifts, alts: altsOf(b) }; }
+    else tmpTo = d.tmp.until || "رجوع " + (d.tmp.back || "");
+  }
+  for (const p of (plans || []).filter(i => i.doctorId === d.id && i.kind === "set_schedule" && i.sch && i.date <= day).sort((a, b) => a.date.localeCompare(b.date))) {
+    const x = p.sch, days = x.days?.length ? x.days : src.workdays;
+    if (x.tmp) { if (!x.tmp.until || day <= x.tmp.until) { src = { workdays: days, shifts: x.shifts || src.shifts, alts: x.days?.length ? altsOf(x) : [] }; tmpTo = x.tmp.until || "رجوع"; } }
+    else if (x.altOnly) src = { ...src, alts: [...src.alts.map(g => ({ ...g, days: g.days.filter(w => !(x.days || []).includes(w)) })).filter(g => g.days.length), { days: x.days || [], shifts: x.shifts || [] }] };
+    else { src = { workdays: days, shifts: x.shifts || src.shifts, alts: altsOf(x) }; tmpTo = null; }
+  }
+  return { works: src.workdays.includes(wd), shifts: shFor({ shifts: src.shifts, alts: src.alts }, wd), tmpTo };
+}
+function planTxt(p) {
+  const d = docOf(p.doctorId), n = "د. " + A.shortName(d?.name || p.doctorId), x = p.sch;
+  if (p.kind === "set_schedule" && x) {
+    if (x.tmp) return `يبدأ دوام مؤقت: ${n} ${shiftTxt(x.shifts)}${x.days?.length ? " (" + x.days.map(i => WD[i]).join("، ") + ")" : ""} لين ${x.tmp.until || "يرجع " + (x.tmp.back || "")}، وبعدها يرجع لدوامه`;
+    if (x.altOnly) return `يتغير دوام ${n} أيام ${(x.days || []).map(i => WD[i]).join("، ")}: ${shiftTxt(x.shifts)} (ثابت)`;
+    return `يبدأ دوام ثابت جديد: ${n} — ${weekTxt({ days: x.days?.length ? x.days : d?.workdays || [], shifts: x.shifts || [], alts: x.alts || [] })}`;
+  }
+  if (p.kind === "remove_doctor") return `يتشال من الجدول: ${n}`;
+  return `${n}: ${p.kind}${p.at_min != null ? " من " + hh(p.at_min) : ""}${p.until_min != null ? " لين " + hh(p.until_min) : ""}`;
+}
 function changesBlock(iso, plans) {
   const b = A.getBoard() || {}, out = [];
   for (let i = 0; i <= 9; i++) {
@@ -59,10 +85,11 @@ function changesBlock(iso, plans) {
       if (v.end && A.isoPlus(v.end, 1) === day) L.push(`يرجع من الإجازة: د. ${A.shortName(v.name)}`);
       if (v.start < day && (!v.end || v.end >= day) && i === 0) L.push(`في إجازة: د. ${A.shortName(v.name)}`);
     }
-    for (const p of plans || []) if (p.date === day) L.push(`خطة: ${p.text || p.summary || JSON.stringify(p).slice(0, 160)}`);
+    for (const p of plans || []) if (p.date === day) L.push(planTxt(p));
+    for (const d of A.docs()) if (d.tmp?.until && A.isoPlus(d.tmp.until, 1) === day) L.push(`يخلص الدوام المؤقت ويرجع لدوامه: د. ${A.shortName(d.name)}`);
     for (const x of b.awayDays || []) if (x.date === day) L.push(`في فرع ثاني: د. ${A.shortName(docOf(x.doctorId)?.name || x.doctorId)} (${x.branch})`);
-    const working = A.docs().filter(d => (d.workdays || []).includes(wd) && !(b.vacations || []).some(v => v.doctorId === d.id && v.start <= day && (!v.end || v.end >= day)));
-    if (wd === 5 || L.length) L.push(`يداومون (حسب الجدول): ${working.map(d => `${A.shortName(d.name)} ${shiftTxt(shFor(d, wd))}`).join("، ") || "—"}`);
+    const working = A.docs().map(d => ({ d, v: dayView(d, day, plans) })).filter(({ d, v }) => v.works && !(b.vacations || []).some(x => x.doctorId === d.id && x.start <= day && (!x.end || x.end >= day)));
+    if (wd === 5 || L.length) L.push(`يداومون (حسب الجدول): ${working.map(({ d, v }) => `${A.shortName(d.name)} ${shiftTxt(v.shifts)}${v.tmpTo ? " (مؤقت لين " + v.tmpTo + ")" : ""}`).join("، ") || "—"}`);
     if (L.length) out.push(`${dayName(day)} ${day}:\n  ${L.join("\n  ")}`);
   }
   return out.join("\n") || "—";
@@ -79,7 +106,7 @@ function todayBlock(iso) {
 }
 function planBlock(items) {
   const nm = id => { const d = A.docs().find(x => x.id === id); return d ? `${A.shortName(d.name)} (${id})` : id; };
-  return items.map(i => `${i.date} ${dayName(i.date)}: ${nm(i.doctorId)} — ${i.kind === "set_schedule" ? "دوام ثابت جديد" : i.kind === "remove_doctor" ? "يتشال من الجدول" : i.kind}${i.at_min != null ? " من " + hh(i.at_min) : i.at_time ? " من " + i.at_time : ""}${i.until_min != null ? " لين " + hh(i.until_min) : i.until_time ? " لين " + i.until_time : ""} (${i.by || ""})`).join("\n") || "—";
+  return items.map(i => i.kind === "set_schedule" ? `${i.date} ${dayName(i.date)}: ${planTxt(i)} [${i.doctorId}] (${i.by || ""})` : `${i.date} ${dayName(i.date)}: ${nm(i.doctorId)} — ${i.kind === "set_schedule" ? "دوام ثابت جديد" : i.kind === "remove_doctor" ? "يتشال من الجدول" : i.kind}${i.at_min != null ? " من " + hh(i.at_min) : i.at_time ? " من " + i.at_time : ""}${i.until_min != null ? " لين " + hh(i.until_min) : i.until_time ? " لين " + i.until_time : ""} (${i.by || ""})`).join("\n") || "—";
 }
 function pendingBlock(docsP, clar) {
   const a = docsP.map(i => `#${i.code} طبيب جديد ينتظر موافقتك: ${i.name} | ${i.dept || "—"} | أيام ${(i.days || []).map(x => WD[x]).join("،") || "—"} | ${shiftTxt(i.shifts)} | من رسالة ${i.by}: «${String(i.text || "").slice(0, 160)}»`);
@@ -1276,4 +1303,4 @@ export async function localTest(version) {
   if (bad.length) await A.dmAdmin(`⚠️ اختبار القراءة المحلي بعد التحديث (${version}): ${bad.length} من ${cases.length} ما طلعت صح — Claude لازم يشوفها:\n` + bad.map(([q]) => "• " + q.split("\n")[0].slice(0, 60)).join("\n"));
   A.log?.info?.({ version, local: `${cases.length - bad.length}/${cases.length}` }, "اختبار محلي");
 }
-export const _t = { durOf, shiftsOf, fillShifts, prepActs, pickOpt, withDur, check, describe, askDurText, timesIn, fillBack };
+export const _t = { changesBlock, dayView, durOf, shiftsOf, fillShifts, prepActs, pickOpt, withDur, check, describe, askDurText, timesIn, fillBack };
