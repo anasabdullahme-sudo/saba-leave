@@ -653,6 +653,8 @@ async function onPhoto(file) {
     setStatus("ما قدرنا نقرأ الصورة تلقائياً — عبّ البيانات يدوياً", "warn");
     scanDone("fail");
     const why = String(e?.code || "") + " " + String(e?.message || e || "").slice(0, 220);
+    // (26/11) سبب الفشل ينحفظ مع الطلب — البوت يراقبه وينبّه لو القراءة وقفت
+    state.scanInfo = ("✗ " + ((performance.now() - tScan) / 1000).toFixed(1) + "ث " + why.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim()).slice(0, 120);
     let d = $("#aiErr"); if (!d) { d = document.createElement("div"); d.id = "aiErr"; d.style.cssText = "direction:ltr;text-align:left;font-size:11px;color:#8a9bb0;padding:4px 18px 0;word-break:break-all"; $("#status").after(d); }
     d.textContent = why.trim();
   } finally {

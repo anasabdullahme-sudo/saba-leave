@@ -23,7 +23,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.21.2";
+const VERSION = "2.21.3";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1221,6 +1221,22 @@ async function main() {
   // نبض عام (صفحة الأطباء تقراه كل 5 دقائق — لو وقف تطلع «تحديثات القروب متوقفة»)
   const pub = () => connected && db.doc("public/bot").set({ seen: Date.now() }, { merge: true }).catch(() => {});   // بس لو واتساب متصل (غيره ما توصل رسائل القروب)
   pub(); setInterval(pub, 5 * 60000);
+  // (26/11) صحة قراءة الصور: آخر الطلبات اللي فيها صورة — نجحت القراءة ولا لا. تنكتب في public/health (بدون بيانات مرضى)
+  // وClaude يراقبها كل ساعة ويصلح لحاله. ٦ قراءات كل ٢٠ دقيقة
+  const health = async () => {
+    try {
+      const s = await db.collection("requests").orderBy("createdAt", "desc").limit(6).get();
+      const last = s.docs.map(d => d.data()).filter(x => x.imagePath).map(x => {
+        const si = String(x.scanInfo || "");
+        const st = /gemini|gemma/.test(si) && !/✗/.test(si) ? (/ناقص|انقطع/.test(si) ? "part" : "ok") : "fail";
+        return { at: x.createdAt?.toMillis?.() || 0, br: x.branch || "", st, info: si.replace(/https?:\/\/\S+/g, "").slice(0, 120) };
+      });
+      let fails = 0; for (const r of last) { if (r.st === "fail") fails++; else break; }
+      const okAt = last.find(r => r.st !== "fail")?.at || null;
+      await db.doc("public/health").set({ at: Date.now(), version: VERSION, fails, okAt, last }, { merge: false });
+    } catch (e) { log.warn({ err: String(e?.message || e) }, "health"); }
+  };
+  setTimeout(health, 90000); setInterval(health, 20 * 60000);
 
   startTrackSync();
   watchDoctors();
