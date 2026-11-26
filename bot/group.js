@@ -696,13 +696,37 @@ ${durAsks.map(x => `• د. ${shortName(x.d.name)}: ${hm(x.from)} – ${hm(x.unt
 
 /* ---------- (2.21.0) جدول أسبوع لطبيب واحد بأوقات مختلفة → حدث واحد فيه الأسبوع كامل (بدل أحداث تمسح بعض) ---------- */
 const WEEK_K = new Set(["schedule_change", "starts_at", "present", "leaves_at", "new_doctor", "absent_today", "late", "appointments_only"]);
+// (26/11) رسالة فيها كذا طبيب (رجوع إجازات + دوام جديد لواحد): نقسمها مقاطع — كل مقطع يبدأ بسطر فيه «د.» — ونقرا دوام الأسبوع لكل مقطع لحاله
+function docSegments(text) {
+  const out = []; let cur = null;
+  for (const ln of String(text || "").split(/\n/)) {
+    if (/(^|[\s•\-*])(د\s*\.|دكتور|دكتوره|الدكتور|الدكتوره|د\s)/.test(ln)) { if (cur) out.push(cur); cur = [ln]; }
+    else if (cur) { if (ln.trim()) cur.push(ln); else { out.push(cur); cur = null; } }
+  }
+  if (cur) out.push(cur);
+  return out.map(x => x.join("\n"));
+}
 function weekFix(evs, text, quoted) {
-  const t = nowR(), P = planOf(text, t.iso, t.wd, Math.floor(t.m / 60)); if (!P) return evs;   // (2.21.1) + دوام مؤقت لفترة (من… لين…)
+  const t = nowR(), P0 = planOf(text, t.iso, t.wd, Math.floor(t.m / 60));   // (2.21.1) + دوام مؤقت لفترة (من… لين…)
+  if (P0) return weekFix1(evs, text, quoted, P0, null);
+  let out = evs;
+  const segs = docSegments(text);
+  if (segs.length < 2) return evs;
+  for (const sg of segs) {
+    const P = planOf(sg, t.iso, t.wd, Math.floor(t.m / 60)); if (!P) continue;
+    const d = fuzzyPick(sg); if (!d) continue;
+    if (P.week && !P.week.start) P.week.start = startOf(text.replace(/(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*\d{2,4})?/g, "$1/$2"), t.iso, t.wd) || "";   // «بداية من الأسبوع القادم / السبت 28/11» فوق الرسالة
+    out = weekFix1(out, sg, null, P, d);
+  }
+  return out;
+}
+function weekFix1(evs, text, quoted, P, d0) {
   const who = e => (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept);
   const ids = [...new Set((evs || []).filter(e => WEEK_K.has(e.kind)).map(who).filter(Boolean).map(d => d.id))];
-  const d = ids.length === 1 ? docs().find(x => x.id === ids[0]) : ids.length ? null : (fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null));
+  const d = d0 || (ids.length === 1 ? docs().find(x => x.id === ids[0]) : ids.length ? null : (fuzzyPick(text) || (quoted ? fuzzyPick(quoted) : null)));
   if (!d) return evs;
-  const mine = e => who(e)?.id === d.id && (WEEK_K.has(e.kind) || (e.kind === "vacation" && e.start_date && e.start_date === e.end_date));   // «الأحد: إجازة» = مو يوم دوام، مو إجازة
+  const DAYK = new Set([...WEEK_K, "starts_at", "leaves_at", "present", "hours"]);   // مقطع دوام أسبوع لطبيب → أي حالة يوم انفهمت له من نفس الأسطر تنشال
+  const mine = e => who(e)?.id === d.id && ((d0 ? DAYK : WEEK_K).has(e.kind) || (e.kind === "vacation" && e.start_date && e.start_date === e.end_date));   // «الأحد: إجازة» = مو يوم دوام، مو إجازة
   const out = (evs || []).filter(e => !mine(e)), nm = shortName(d.name);
   if (P.tmp) out.push({ doctor_id: d.id, name: nm, kind: "schedule_change", __tmp: P.tmp });
   if (P.week) out.push({ doctor_id: d.id, name: nm, kind: "schedule_change", __week: weekSch(P.week.groups), start_date: P.week.start || (!P.tmp && (evs || []).map(e => e.start_date).find(x => /^\d{4}-\d{2}-\d{2}$/.test(x || ""))) || "" });

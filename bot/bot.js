@@ -23,7 +23,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.21.5";
+const VERSION = "2.21.6";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1024,12 +1024,14 @@ async function applyPatches() {
       const ves = (p.vacEnds || []).filter(u => !done.has(u.id));
       const pls = (p.plans || []).filter(u => !done.has(u.id));
       const drops = (p.vacDrops || []).filter(u => !done.has(u.id));            // حذف إجازة مكررة بعينها (برقمها)
-      if (!todo.length && !newDocs.length && !ups.length && !ves.length && !pls.length && !drops.length) return [];
+      const pdrops = (p.planDrops || []).filter(u => !done.has(u.id));          // (26/11) حذف خطة غلط بعينها (برقمها)
+      if (!todo.length && !newDocs.length && !ups.length && !ves.length && !pls.length && !drops.length && !pdrops.length) return [];
       const next = structuredClone(cur);
-      if (pls.length) {                                                         // أحداث مجدولة (مثل شيل طبيب يوم معيّن)
+      if (pls.length || pdrops.length) {                                        // أحداث مجدولة (مثل شيل طبيب يوم معيّن)
         const pref = db.doc("board/bawadi_plan"), pc = (await tx.get(pref)).data() || {};
-        tx.set(pref, { ...pc, items: [...(pc.items || []), ...pls.map(({ id, ...x }) => ({ id, ...x }))], at: Date.now() });
-        for (const u of pls) todo.push({ id: u.id, name: "", isDoc: true, upd: true, quiet: true });
+        const gone = new Set(pdrops.map(u => u.planId));
+        tx.set(pref, { ...pc, items: [...(pc.items || []).filter(i => !gone.has(i.id)), ...pls.map(({ id, ...x }) => ({ id, ...x }))], at: Date.now() });
+        for (const u of [...pls, ...pdrops]) todo.push({ id: u.id, name: "", isDoc: true, upd: true, quiet: true });
       }
       for (const u of drops) {
         const n0 = (next.vacations || []).length;
