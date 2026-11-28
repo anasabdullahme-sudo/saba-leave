@@ -14,7 +14,7 @@ function save() {
   clearTimeout(saveT);
   saveT = setTimeout(() => { try { fs.mkdirSync(STORE, { recursive: true }); fs.writeFileSync(FILE + ".tmp", JSON.stringify(S)); fs.renameSync(FILE + ".tmp", FILE); } catch { /* */ } }, 400);
 }
-const nrm = s => String(s || "").replace(/[إأآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[ً-ْـ]/g, "").replace(/^(د|دكتور|دكتوره|dr)\.?\s*/i, "").trim().toLowerCase();
+const nrm = s => String(s || "").replace(/[إأآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[ً-ْـ]/g, "").replace(/^(الدكتوره|الدكتور|دكتوره|دكتور|د|dr)(\.\s*|\s+)/i, "").trim().toLowerCase();
 const WD = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 const dayTxt = iso => /^\d{4}-\d{2}-\d{2}$/.test(iso || "") ? `${WD[new Date(iso + "T12:00:00Z").getUTCDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "";
 const riyadh = () => { const d = new Date(Date.now() + 3 * 3600e3); return { iso: d.toISOString().slice(0, 10), m: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
@@ -28,7 +28,8 @@ export function initPrep(ctx) {
 function docFor(name) {
   const n = nrm(name).split(/\s+/).filter(w => w.length > 1); if (!n.length) return null;
   const docs = C?.docs?.() || [];
-  const sc = d => { const t = nrm(d.name).split(/[\s–-]+/).filter(Boolean); const al = (d.aliases || []).map(nrm); return (t[0] === n[0] || al.some(a => a.startsWith(n[0])) ? 2 : 0) + n.slice(1).filter(w => t.includes(w)).length; };
+  const sk = w => String(w || "").replace(/[ايو]/g, "");   // (28/11) «نرمين» = «نيرمين»: نقارن بدون حروف المد
+  const sc = d => { const t = nrm(d.name).split(/[\s–-]+/).filter(Boolean); const al = (d.aliases || []).map(nrm); return (t[0] === n[0] || (n[0].length >= 4 && sk(t[0]) === sk(n[0])) || al.some(a => a.startsWith(n[0])) ? 2 : 0) + n.slice(1).filter(w => t.includes(w)).length; };
   const best = docs.map(d => [d, sc(d)]).filter(([, s]) => s >= 2).sort((a, b) => b[1] - a[1]);
   return best.length && (best.length === 1 || best[0][1] > best[1][1]) ? best[0][0] : null;
 }
@@ -48,11 +49,11 @@ export function addPrep(list) {
 }
 // قروب الإنفورميشن طبّق شي لهالأطباء → المحضّر لهم (اليوم أو قبل أو بدون تاريخ، أو تاريخه نفس اللي انطبق) يتعلّم «انطبق»
 export function prepApplied(ids, date) {
-  const t = riyadh().iso; let n = 0;
-  for (const i of S.items) if (i.status === "prep" && i.did && ids.includes(i.did) && (!i.date || i.date <= t || i.date === date)) { i.status = "applied"; i.appliedAt = Date.now(); i.how = "انكتب في قروب الإنفورميشن"; n++; }
+  const t = riyadh().iso, ds = new Set([].concat(date || []).filter(Boolean)); let n = 0;   // (28/11) تواريخ كل اللي انطبق (بداية/نهاية إجازة، يوم الرجوع، يوم الخطة)
+  for (const i of S.items) if (i.status === "prep" && i.did && ids.includes(i.did) && (!i.date || i.date <= t || ds.has(i.date))) { i.status = "applied"; i.appliedAt = Date.now(); i.how = "انكتب في قروب الإنفورميشن"; n++; }
   if (n) save(); return n;
 }
-const open = () => S.items.filter(i => i.status === "prep");
+const open = () => { const t = riyadh().iso; return S.items.filter(i => i.status === "prep" && (!i.date || i.date >= t)); };   // (28/11) اللي فات يومه ما يطلع في القائمة
 const line = i => `#${i.code} ${i.doctor ? "د. " + String(i.doctor).split(" –")[0] : "—"}: ${i.text}${i.date ? ` (${dayTxt(i.date)} ${i.date})` : ""}${i.by ? ` — قاله ${i.by}` : ""}`;
 // لقروب الإنفورميشن (group.js): يكمّل الناقص («د فلان باشر» بدون وقت)
 export function prepFor(ids) { return open().filter(i => ids.includes(i.did)).map(line).join("\n"); }
@@ -85,3 +86,31 @@ async function act(a) {
   return { ok: true };
 }
 export const _t = { S: () => S, addPrep, prepApplied, tick, docFor };
+
+/* ---------- (28/11) قراءة مباشرة بدون ذكاء ----------
+   «الخميس و السبت القادم / د نرمين ٦ الى ١١ / و د هيام ٩ ونص الى ٥ ونص» — الذكاء فوّتها مرة. هنا: كل سطر فيه طبيب + وقت (من … إلى …)
+   × كل يوم انذكر في الرسالة (أسماء الأيام = أقرب يوم جاي، أو تاريخ 3/12، أو بكرة/اليوم) → تغيير محضّر ليوم واحد. */
+const AR = s => String(s || "").replace(/[٠-٩]/g, c => "٠١٢٣٤٥٦٧٨٩".indexOf(c)).replace(/[۰-۹]/g, c => "۰۱۲۳۴۵۶۷۸۹".indexOf(c));
+const DAYW = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["اربعاء", 3], ["خميس", 4], ["جمعه", 5], ["سبت", 6]];
+const isoAdd = (iso, k) => { const x = new Date(iso + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
+export function prepScan(text, by) {
+  const raw = AR(text), n = nrm(raw), t = riyadh(), wd = new Date(t.iso + "T12:00:00Z").getUTCDay();
+  const dates = new Set();
+  for (const [w, k] of DAYW) if (new RegExp(`(^|[\\s،,و])(ال)?${w}(\\s|$|[،,.])`).test(n)) dates.add(isoAdd(t.iso, ((k - wd + 7) % 7) || 7));
+  for (const m of raw.matchAll(/(?<!\d)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?(?!\d)/g)) { const y = t.iso.slice(0, 4), d = `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; if (+m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) dates.add(d < t.iso ? `${+y + 1}${d.slice(4)}` : d); }
+  const dd = new Set(); for (const m of raw.matchAll(/(?<!\d)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?(?!\d)/g)) { const y = t.iso.slice(0, 4), d = `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; if (+m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) dd.add(d < t.iso ? `${+y + 1}${d.slice(4)}` : d); }
+  if (dd.size) { dates.clear(); for (const d of dd) dates.add(d); }   // فيه تاريخ صريح (10/12) → هو المعتمد، مو اسم اليوم
+  if (/(^|\s)(بكره|بكرا|غدا|غدًا)(\s|$)/.test(n)) dates.add(isoAdd(t.iso, 1));
+  if (!dates.size) return [];
+  const TR = /(\d{1,2})(?:[:.](\d{2})|\s*و\s*نص|\s*ونص)?\s*(ص|م|صباحا|مساء|ظهرا)?\s*(?:الى|الي|إلى|لين|لغايه|-|–|ل)\s*(\d{1,2})(?:[:.](\d{2})|\s*و\s*نص|\s*ونص)?\s*(ص|م|صباحا|مساء|ظهرا)?/;
+  const out = [];
+  for (const ln of raw.split(/\n/)) {
+    const l0 = " " + String(ln).replace(/[إأآ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[ً-ْـ]/g, "").trim();   // بدون شيل «د» من البداية
+    if (!/[\s،,و.](د|دكتور|دكتوره|الدكتور|الدكتوره)(\s*\.|\s)/.test(l0)) continue;
+    if (!TR.test(l0)) continue;
+    const nameTxt = nrm(ln).replace(/^و\s*/, "").replace(/^(الدكتوره|الدكتور|دكتوره|دكتور|د)(\.\s*|\s+)/, "").split(/\s*(من\s+)?\d/)[0];
+    const d = docFor(nameTxt); if (!d) continue;
+    for (const date of dates) out.push({ doctor: d.name, date, text: `دوام هاليوم بس (مؤقت): ${ln.trim().replace(/^و\s*/, "")}`, by, quote: String(text).slice(0, 400) });
+  }
+  return out.length ? addPrep(out) : [];
+}

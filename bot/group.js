@@ -696,7 +696,7 @@ ${durAsks.map(x => `• د. ${shortName(x.d.name)}: ${hm(x.from)} – ${hm(x.unt
 لو فيه شي ثابت أو لمدة قل لي.`);
   for (const x of newDocs) await askAdmin(x, ctx);
   // (2.20.0) انطبق في الجدول من القروب → المحضّر لنفس الأطباء من قروب الشكاوي يتعلّم «انطبق»
-  if (!ctx.planned && applied.length) { try { const ids = [...new Set(evs.map(e => (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept)).filter(Boolean).map(d => d.id))]; if (ids.length) prepApplied(ids, t.iso); } catch { /* */ } }
+  if (!ctx.planned && applied.length) { try { const ids = [...new Set(evs.map(e => (e.doctor_id && docs().find(x => x.id === e.doctor_id)) || matchDoctor(e.name, e.dept)).filter(Boolean).map(d => d.id))]; if (ids.length) prepApplied(ids, [t.iso, ...evs.flatMap(e => [e.date, e.start_date, e.end_date, e.end_date && /^\d{4}-\d{2}-\d{2}$/.test(e.end_date) ? isoPlus(e.end_date, 1) : ""]).filter(Boolean)]); } catch { /* */ } }
   return applied;
 }
 
