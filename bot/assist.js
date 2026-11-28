@@ -66,7 +66,7 @@ export function initAssist(ctx) {
   setInterval(() => tick().catch(e => C.log.warn({ err: String(e?.message || e) }, "المساعد: المؤقت")), 60e3);
   if (S.log.some(x => x.fresh)) schedule(30e3);                        // رسايل وصلت قبل إعادة التشغيل وما تحللت
   // (28/11) بعد التشغيل: نقرا مباشرة آخر يومين من القروب — يلحق اللي فات الذكاء (التكرار يندمج لنفس الطبيب واليوم)
-  setTimeout(() => { try { if (!can("GROUP_COMPLAINTS", "prepare")) return; for (const x of S.log.filter(x => x.kind === "text" && x.team !== "anas" && Date.now() - x.at < 2 * DAY)) prepScan(x.text, x.by); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التحضير: لحاق"); } }, 120e3);
+  setTimeout(() => { try { if (!can("GROUP_COMPLAINTS", "prepare")) return; for (const x of S.log.filter(x => x.kind === "text" && x.team !== "anas" && Date.now() - x.at < 2 * DAY)) prepScan(x.text, x.by, x.at); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التحضير: لحاق"); } }, 120e3);
 }
 const norm = s => String(s || "").replace(/[إأآا]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[ً-ْـ]/g, "");
 export async function isAssistGroup(jid) {
@@ -129,7 +129,7 @@ export async function onAssistGroup(m) {
     return;
   }
   S.log.push({ id, at, by, phone, team: team || "", text: text.slice(0, 2000), kind, quoted, qid, key: { remoteJid: m.key.remoteJid, id, participant: m.key.participant || undefined }, fresh: true });
-  if (kind === "text" && can("GROUP_COMPLAINTS", "prepare")) { try { prepScan(text, by); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التحضير: قراءة مباشرة"); } }   // (28/11) ما نعتمد على الذكاء بس
+  if (kind === "text" && can("GROUP_COMPLAINTS", "prepare")) { try { prepScan(text, by, at); } catch (e) { C.log.warn({ err: String(e?.message || e) }, "التحضير: قراءة مباشرة"); } }   // (28/11) ما نعتمد على الذكاء بس
   S.log.sort((a, b) => a.at - b.at);
   save();
   schedule(kind === "text" ? 90e3 : 45e3);

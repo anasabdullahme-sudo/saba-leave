@@ -21,6 +21,8 @@ const riyadh = () => { const d = new Date(Date.now() + 3 * 3600e3); return { iso
 
 export function initPrep(ctx) {
   C = ctx;                                                     // { docs, dm, log }
+  // (28/11) لحاق 2.22.2 حسب الأيام من وقت التشغيل (طلّع «الجمعة 4/12» من رسايل جمعة 27/11) → نشيل اللي انقرا مباشرة ويرجع ينقرا صح بعد دقيقتين
+  if (!S.fix2811) { S.items = S.items.filter(i => !(i.status === "prep" && String(i.text || "").startsWith("دوام هاليوم بس (مؤقت)"))); S.fix2811 = true; save(); }
   setInterval(() => tick().catch(e => C.log?.warn({ err: String(e?.message || e) }, "التحضير")), 60e3);
   return { ext: { block, checkAct, describeAct, act } };
 }
@@ -93,14 +95,17 @@ export const _t = { S: () => S, addPrep, prepApplied, tick, docFor };
 const AR = s => String(s || "").replace(/[٠-٩]/g, c => "٠١٢٣٤٥٦٧٨٩".indexOf(c)).replace(/[۰-۹]/g, c => "۰۱۲۳۴۵۶۷۸۹".indexOf(c));
 const DAYW = [["احد", 0], ["اثنين", 1], ["ثلاثاء", 2], ["اربعاء", 3], ["خميس", 4], ["جمعه", 5], ["سبت", 6]];
 const isoAdd = (iso, k) => { const x = new Date(iso + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + k); return x.toISOString().slice(0, 10); };
-export function prepScan(text, by) {
-  const raw = AR(text), n = nrm(raw), t = riyadh(), wd = new Date(t.iso + "T12:00:00Z").getUTCDay();
+export function prepScan(text, by, at = Date.now()) {
+  // (28/11) الأيام تنحسب من وقت الرسالة نفسها (رسالة الخميس عن «الجمعة» = 27/11، مو الجمعة الجاية)، واللي فات يومه ما ينحفظ
+  const now = riyadh().iso, t = { iso: new Date(at + 3 * 3600e3).toISOString().slice(0, 10) };
+  const raw = AR(text), n = nrm(raw), wd = new Date(t.iso + "T12:00:00Z").getUTCDay();
   const dates = new Set();
   for (const [w, k] of DAYW) if (new RegExp(`(^|[\\s،,و])(ال)?${w}(\\s|$|[،,.])`).test(n)) dates.add(isoAdd(t.iso, ((k - wd + 7) % 7) || 7));
   for (const m of raw.matchAll(/(?<!\d)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?(?!\d)/g)) { const y = t.iso.slice(0, 4), d = `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; if (+m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) dates.add(d < t.iso ? `${+y + 1}${d.slice(4)}` : d); }
   const dd = new Set(); for (const m of raw.matchAll(/(?<!\d)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?(?!\d)/g)) { const y = t.iso.slice(0, 4), d = `${y}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; if (+m[2] >= 1 && +m[2] <= 12 && +m[1] >= 1 && +m[1] <= 31) dd.add(d < t.iso ? `${+y + 1}${d.slice(4)}` : d); }
   if (dd.size) { dates.clear(); for (const d of dd) dates.add(d); }   // فيه تاريخ صريح (10/12) → هو المعتمد، مو اسم اليوم
   if (/(^|\s)(بكره|بكرا|غدا|غدًا)(\s|$)/.test(n)) dates.add(isoAdd(t.iso, 1));
+  for (const d of [...dates]) if (d < now) dates.delete(d);
   if (!dates.size) return [];
   const TR = /(\d{1,2})(?:[:.](\d{2})|\s*و\s*نص|\s*ونص)?\s*(ص|م|صباحا|مساء|ظهرا)?\s*(?:الى|الي|إلى|لين|لغايه|-|–|ل)\s*(\d{1,2})(?:[:.](\d{2})|\s*و\s*نص|\s*ونص)?\s*(ص|م|صباحا|مساء|ظهرا)?/;
   const out = [];
