@@ -23,7 +23,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.22.0";
+const VERSION = "2.22.1";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1042,6 +1042,7 @@ async function applyPatches() {
         const dd = docs.find(x => x.id === u.doctorId);
         const vs = (next.vacations || []).filter(v => (v.doctorId === u.doctorId || (u.code && String(v.code) === String(u.code)) || (dd && nmKey(v.name) === nmKey(dd.name)) || (u.name && nmKey(v.name) === nmKey(u.name))) && v.start <= u.end && (!v.end || v.end > u.end));
         vs.forEach(v => { v.end = u.end; });
+        if (u.vacId) { const v = (next.vacations || []).find(x => x.id === u.vacId); if (v) { v.end = u.end; if (!vs.includes(v)) vs.push(v); } }   // (28/11) تمديد إجازة بعينها (برقمها)
         todo.push({ id: u.id, name: vs[0]?.name || "", isDoc: true, upd: true, quiet: true });
       }
       for (const x of newDocs) {
