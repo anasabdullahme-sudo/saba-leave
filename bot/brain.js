@@ -311,7 +311,12 @@ export async function handle(m, text, { forwarded = false } = {}) {
   if (out.use_proposal && proposal?.actions?.length && !actions.length) actions = proposal.actions;
   let reply = String(out.reply || "").split("\n").filter(l => !/✅|انحفظ|حفظته|تم الحفظ/.test(l)).join("\n").trim();
   if (actions.length) for (const [a, b] of TENSE) reply = reply.replace(a, b);   // التنفيذ بعد الرد — ما نقول «عدّلت» قبل ما ينحفظ
-  if (actions.some(a => a.type === "remove_doctor") && !out.use_proposal) out.confirm_first = true;   // (2.13.0) الحذف دايم بتأكيد
+  // (28/11) «نعم» رد على سؤال البوت نفسه («أشيله من الجدول؟ … ورد «نعم» أو «لا»») = هذا هو التأكيد — ما نسأله مرة ثانية
+  const yesToAsk = YES && /ورد «نعم»|أشيله|أطبّق؟|أطبق؟/.test(String(quoted || ""));
+  if (actions.some(a => a.type === "remove_doctor") && !out.use_proposal && !yesToAsk) out.confirm_first = true;   // (2.13.0) الحذف دايم بتأكيد
+  if (yesToAsk) out.confirm_first = false;
+  // (28/11) «نفس بيانات د. إيهاب» طلع منها add_doctor مرتين لنفس الطبيب (الأول ناقص بدون دوام) → ندمجها في وحدة
+  { const seen = new Map(); actions = actions.filter(a => { if (a.type !== "add_doctor") return true; const k = nn(a.name || "").replace(/^(د|دكتور|الدكتور)\s*\.?\s*/, "").trim(); const p = seen.get(k); if (!p) { seen.set(k, a); return true; } for (const [f, v] of Object.entries(a)) if (v != null && v !== "" && !(Array.isArray(v) && !v.length) && (p[f] == null || p[f] === "" || (Array.isArray(p[f]) && !p[f].length) || ["shifts", "dept", "fee"].includes(f))) p[f] = v; return false; }); }
   // (2.19.0) تغيير دوام بدون مدة (لا ثابت ولا يوم ولا مدة) → نسأله «لمدة كم؟» بخيارات بدل ما نطبّقه ثابت
   let held = [];
   if (!out.use_proposal) {

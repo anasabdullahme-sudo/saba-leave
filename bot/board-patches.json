@@ -745,6 +745,65 @@
    "doctorId": "b4524yt",
    "ifName": "فاطمة",
    "remove": true
+  },
+  {
+   "id": "p2811rm1",
+   "doctorId": "7sgmxr6",
+   "ifName": "إيهاب",
+   "remove": true,
+   "note": "انتهى عقده — أنس وافق 28/11"
+  },
+  {
+   "id": "p2811mm1",
+   "doctorId": "09hskas",
+   "ifName": "محمد محمود",
+   "set": {
+    "workdays": [
+     6,
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "shifts": [
+     {
+      "s": 540,
+      "e": 720
+     },
+     {
+      "s": 1020,
+      "e": 1320
+     }
+    ],
+    "room": "27",
+    "fee": "90"
+   }
+  },
+  {
+   "id": "p2811sq1",
+   "doctorId": "xtqtsi9",
+   "ifName": "صقر",
+   "set": {
+    "name": "محمد صقر – استشاري",
+    "workdays": [
+     6,
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "shifts": [
+     {
+      "s": 840,
+      "e": 1320
+     }
+    ],
+    "room": "6",
+    "ext": "1021",
+    "fee": "125"
+   }
   }
  ],
  "today": [
