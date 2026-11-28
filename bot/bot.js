@@ -23,7 +23,7 @@ import pino from "pino";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-const VERSION = "2.21.8";
+const VERSION = "2.21.9";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1230,7 +1230,7 @@ async function main() {
       const s = await db.collection("requests").orderBy("createdAt", "desc").limit(6).get();
       const last = s.docs.map(d => d.data()).filter(x => x.imagePath).map(x => {
         const si = String(x.scanInfo || "");
-        const st = /gemini|gemma/.test(si) && !/✗/.test(si) ? (/ناقص|انقطع/.test(si) ? "part" : "ok") : "fail";
+        const st = /gemini|gemma/.test(si) && !/^\s*✗/.test(si) ? (/ناقص|انقطع/.test(si) ? "part" : "ok") : "fail";   // «gemma ✗» وسط السطر = موديل خسر السباق، مو فشل
         return { at: x.createdAt?.toMillis?.() || 0, br: x.branch || "", st, info: si.replace(/https?:\/\/\S+/g, "").slice(0, 120) };
       });
       let fails = 0; for (const r of last) { if (r.st === "fail") fails++; else break; }
